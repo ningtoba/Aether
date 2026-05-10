@@ -1,22 +1,19 @@
 /**
  * @aether/orchestrator — LangGraph orchestration engine wrapper.
  *
- * Provides tools for defining hierarchical multi-agent workflows,
- * executing them via an internal state machine, checkpointing for
- * pause/resume, and constructing workflow graphs fluently.
- *
  * @module @aether/orchestrator
  */
 
 export { OrchestrationEngine } from "./engine.js";
 export { WorkflowBuilder } from "./workflow.js";
-export { InMemoryCheckpointManager } from "./checkpoint.js";
+export { InMemoryCheckpointManager, createCheckpointSaver } from "./checkpoint.js";
+export { GraphEditor } from "./graph-editor.js";
+export { toMermaid, toMermaidSequence, toDOT, toTextTree } from "./visualizer.js";
 
 export type {
   OrchestrationConfig,
   WorkflowDefinition,
   NodeDefinition,
-  NodeDefinition as NodeSpec,
   EdgeDefinition,
   WorkflowState,
   Checkpoint,
@@ -32,3 +29,17 @@ export type {
 } from "./types.js";
 
 export { DEFAULT_ORCHESTRATION_CONFIG } from "./types.js";
+
+export type {
+  GraphEdit,
+  GraphEditResult,
+  AddNodeEdit,
+  RemoveNodeEdit,
+  UpdateNodeEdit,
+  AddEdgeEdit,
+  RemoveEdgeEdit,
+  UpdateEdgeEdit,
+  SetEntryEdit,
+  AddTerminalEdit,
+  RemoveTerminalEdit,
+} from "./graph-editor.js";

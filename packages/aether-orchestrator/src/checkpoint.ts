@@ -1,19 +1,18 @@
 /**
  * Checkpoint management for LangGraph workflows.
  *
- * Wraps LangGraph's built-in checkpointer (MemorySaver) and adds
+ * Wraps LangGraph's built-in checkpointer (MemorySaver) and provides
  * multi-backend support (in-memory, SQLite, configurable).
  *
  * @module @aether/orchestrator
  */
 
-import { MemorySaver, BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
+import { MemorySaver } from "@langchain/langgraph";
+import type { BaseCheckpointSaver } from "@langchain/langgraph";
 import type { Checkpoint, CheckpointManager as CheckpointManagerInterface } from "./types.js";
 
-// Re-export LangGraph checkpoint types so consumers don't need to
-// import from both packages.
-export { MemorySaver, BaseCheckpointSaver } from "@langchain/langgraph-checkpoint";
-export type { CheckpointTuple, CheckpointMetadata } from "@langchain/langgraph-checkpoint";
+export { MemorySaver };
+export type { BaseCheckpointSaver };
 
 /**
  * Creates a LangGraph-compatible saver from Aether's config.
@@ -23,13 +22,13 @@ export type { CheckpointTuple, CheckpointMetadata } from "@langchain/langgraph-c
  */
 export function createCheckpointSaver(
   backend?: "memory" | "sqlite",
-  config?: { dbPath?: string },
+  _config?: { dbPath?: string },
 ): BaseCheckpointSaver {
   switch (backend) {
     case "sqlite":
-      // SQLite saver would be imported from @langchain/langgraph-checkpoint-sqlite
-      // For now, fall through to memory.
-      console.warn("[orchestrator] SQLite checkpoint backend not yet available; falling back to memory");
+      console.warn(
+        "[orchestrator] SQLite checkpoint backend not yet available; falling back to memory",
+      );
       return new MemorySaver();
     case "memory":
     default:
@@ -38,8 +37,7 @@ export function createCheckpointSaver(
 }
 
 /**
- * In-memory implementation of the legacy CheckpointManager interface,
- * wrapping a BaseCheckpointSaver for compatibility with existing code.
+ * In-memory implementation of the legacy CheckpointManager interface.
  */
 export class InMemoryCheckpointManager implements CheckpointManagerInterface {
   private checkpoints = new Map<string, Checkpoint[]>();
@@ -55,7 +53,10 @@ export class InMemoryCheckpointManager implements CheckpointManagerInterface {
     this.checkpoints.set(checkpoint.executionId, existing);
   }
 
-  async get(executionId: string, checkpointId: string): Promise<Checkpoint | undefined> {
+  async get(
+    executionId: string,
+    checkpointId: string,
+  ): Promise<Checkpoint | undefined> {
     const list = this.checkpoints.get(executionId);
     return list?.find((c) => c.id === checkpointId);
   }

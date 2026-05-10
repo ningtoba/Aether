@@ -2,554 +2,143 @@ import type {
   OrchestrationConfig,
   WorkflowDefinition,
   WorkflowState,
-  Checkpoint,
   CheckpointManager,
-  NodeDefinition,
-  NodeExecution,
-  EdgeDefinition,
-  NodeId,
-  NodeStatus,
-  Condition,
-  RetryPolicy,
 } from "./types.js";
-import { DEFAULT_ORCHESTRATION_CONFIG } from "./types.js";
 import { InMemoryCheckpointManager } from "./checkpoint.js";
+import { DEFAULT_ORCHESTRATION_CONFIG } from "./types.js";
 
-/**
- * OrchestrationEngine — the core LangGraph-inspired graph execution engine.
- *
- * Given a WorkflowDefinition, this engine:
- *   - Resolves the entry node and walks edges
- *   - Executes each node (agent, tool, router, map/reduce, subgraph, sleep, signal)
- *   - Evaluates conditional and LLM-routed edges for branching
- *   - Checkpoints after each node (if configured)
- *   - Supports retry with exponential backoff
- *   - Supports parallel fan-out (map) and fan-in (reduce)
- *   - Supports pause/resume via checkpoint restore
- *
- * @example
- * ```ts
- * const engine = new OrchestrationEngine(config);
- * const workflow = new WorkflowBuilder("my-wf", "1.0.0")
- *   .addNode({ id: "start", kind: "agent", agentName: "researcher" })
- *   .addEdge({ id: "e1", from: "start", to: "end", kind: "direct" })
- *   .withEntry("start").withTerminal("end")
- *   .build();
- *
- * const result = await engine.execute(workflow, { input: "..." });
- * ```
- */
 export class OrchestrationEngine {
+  private workflows: Map<string, WorkflowDefinition> = new Map();
+  private activeRuns: Map<string, WorkflowState> = new Map();
+  private checkpointManager: CheckpointManager;
   private config: OrchestrationConfig;
-  private checkpointManager: CheckpointManager | null;
 
-  constructor(config?: Partial<OrchestrationConfig>) {
+  constructor(
+    config?: Partial<OrchestrationConfig>,
+    checkpointManager?: CheckpointManager,
+  ) {
     this.config = { ...DEFAULT_ORCHESTRATION_CONFIG, ...config };
-    this.checkpointManager = this.config.checkpointManager ?? new InMemoryCheckpointManager();
+    this.checkpointManager = checkpointManager ?? new InMemoryCheckpointManager();
   }
 
-  // ─── Public API ─────────────────────────────────────────
+  createGraph(id: string, definition: WorkflowDefinition): void {
+    if (this.workflows.has(id)) throw new Error(`Graph "${id}" already registered`);
+    this.workflows.set(id, definition);
+  }
 
-  /**
-   * Execute a workflow definition with the given initial data.
-   *
-   * @param workflow - The workflow to execute
-   * @param initialData - Initial state data
-   * @param options - Execution options (resume after pause, etc.)
-   * @returns The final WorkflowState after execution completes
-   */
-  async execute(
-    workflow: WorkflowDefinition,
-    initialData?: Record<string, unknown>,
-    options?: { resumeExecutionId?: string; resumeCheckpointId?: string },
+  async runWorkflow(
+    graphId: string,
+    initialState?: Record<string, unknown>,
   ): Promise<WorkflowState> {
-    // If resuming, restore from checkpoint
-    if (options?.resumeExecutionId) {
-      return this.resume(workflow, options.resumeExecutionId, options.resumeCheckpointId);
-    }
+    const def = this.workflows.get(graphId);
+    if (!def) throw new Error(`Graph "${graphId}" not found`);
 
-    // Build initial execution state
-    const state = this.createInitialState(
-      workflow,
-      initialData ?? {},
-    );
+    const executionId = `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
-    // Run the graph
-    return this.runGraph(workflow, state);
-  }
-
-  /**
-   * Get the checkpoint manager for inspection.
-   */
-  getCheckpointManager(): CheckpointManager | null {
-    return this.checkpointManager;
-  }
-
-  // ─── Internal Graph Runner ──────────────────────────────
-
-  private async runGraph(
-    workflow: WorkflowDefinition,
-    state: WorkflowState,
-  ): Promise<WorkflowState> {
-    const visited = new Set<NodeId>();
-    const queue: NodeId[] = [workflow.entryNode];
-
-    while (queue.length > 0 && state.status === "running") {
-      const currentNodeId = queue.shift()!;
-
-      // Skip already-completed nodes (e.g. when branching revisits)
-      if (visited.has(currentNodeId)) continue;
-      visited.add(currentNodeId);
-
-      // Look up the node definition
-      const nodeDef = workflow.nodes.find((n) => n.id === currentNodeId);
-      if (!nodeDef) {
-        state.status = "failed";
-        state.error = `Node "${currentNodeId}" not found in workflow definition`;
-        break;
-      }
-
-      // Build node execution tracker
-      const nodeExec = this.createNodeExecution(nodeDef.id);
-      state.nodeHistory.push(nodeExec);
-      state.currentNode = nodeDef.id;
-
-      // Execute the node (with retry)
-      await this.executeNode(nodeDef, state, nodeExec);
-
-      // Checkpoint after node execution
-      if (this.config.autoCheckpoint) {
-        await this.saveCheckpoint(state);
-      }
-
-      // If node failed and policy isn't "skip" or "fallback", stop
-      if (nodeExec.status === "failed") {
-        if (nodeDef.onError === "skip") {
-          continue; // Just skip this node
-        } else if (nodeDef.onError === "fallback") {
-          nodeExec.output = nodeDef.fallbackOutput;
-          nodeExec.status = "completed";
-        } else {
-          state.status = "failed";
-          state.error = nodeExec.error;
-          break;
-        }
-      }
- if (state.status !== "running") break;
-
-      // Resolve outgoing edges
-      const outgoing = workflow.edges.filter((e) => e.from === currentNodeId);
-      if (outgoing.length === 0) {
-        // No outgoing edges — check if terminal
-        if (!workflow.terminalNodes.includes(currentNodeId)) {
-          state.status = "failed";
-          state.error = `Node "${currentNodeId}" has no outgoing edges and is not a terminal node.`;
-          break;
-        }
-        // Terminal node reached — we're done if all terminals hit
-        if (this.allTerminalsReached(workflow, visited)) {
-          state.status = "completed";
-        }
-        break;
-      }
-
-      // For direct edges, simply add the target to queue
-      for (const edge of outgoing) {
-        switch (edge.kind) {
-          case "direct":
-            queue.push(edge.to);
-            break;
-          case "conditional":
-            if (this.evaluateConditions(edge, state)) {
-              queue.push(edge.to);
-            }
-            break;
-          case "llm-route":
-            // In a full impl this would ask an LLM router which branch to take.
-            // For now, evaluate conditions as fallback.
-            if (edge.conditions && this.evaluateConditions(edge, state)) {
-              queue.push(edge.to);
-            }
-            break;
-        }
-      }
-    }
-
-    // Mark as completed if still running and queue is empty
-    if (state.status === "running") {
-      state.status = "completed";
-    }
-
-    state.lastCheckpointAt = new Date().toISOString();
-    await this.saveCheckpoint(state);
-
-    return state;
-  }
-
-  // ─── Node Execution ─────────────────────────────────────
-
-  private async executeNode(
-    nodeDef: NodeDefinition,
-    state: WorkflowState,
-    nodeExec: NodeExecution,
-  ): Promise<void> {
-    const retryPolicy = nodeDef.retry ?? this.config.defaultRetry;
-    let attempt = 0;
-    const maxAttempts = retryPolicy?.maxAttempts ?? 1;
-
-    while (attempt < maxAttempts) {
-      attempt++;
-      nodeExec.attempt = attempt;
-      nodeExec.status = "running";
-      nodeExec.startedAt = Date.now();
-
-      try {
-        const output = await this.runNodeLogic(nodeDef, state, nodeExec);
-        nodeExec.output = output;
-        nodeExec.status = "completed";
-        nodeExec.completedAt = Date.now();
-
-        // Apply output mapping if specified
-        if (nodeDef.outputMapping && typeof output === "object" && output !== null) {
-          for (const [stateKey, outputKey] of Object.entries(nodeDef.outputMapping)) {
-            state.data[stateKey] = (output as Record<string, unknown>)[outputKey];
-          }
-        } else {
-          // Default: store full output under node id
-          state.data[`${nodeDef.id}.output`] = output;
-        }
-
-        return; // Success
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : String(err);
-        nodeExec.error = errorMsg;
-        nodeExec.status = "failed";
-
-        // Check if we should retry
-        if (attempt < maxAttempts && retryPolicy && this.shouldRetry(errorMsg, retryPolicy)) {
-          const delay = this.calculateBackoff(attempt, retryPolicy);
-          await this.sleep(delay);
-          nodeExec.status = "running";
-          continue;
-        }
-
-        // No more retries — propagate failure
-        state.status = "failed";
-        state.error = errorMsg;
-        return;
-      }
-    }
-  }
-
-  /**
-   * Run the actual logic for a single node based on its kind.
-   *
-   * This is the extensible dispatch point. In production, each kind
-   * would be wired to the appropriate subsystem (agent runner, tool
-   * executor, subgraph engine, etc.).
-   */
-  private async runNodeLogic(
-    nodeDef: NodeDefinition,
-    state: WorkflowState,
-    nodeExec: NodeExecution,
-  ): Promise<unknown> {
-    // Apply input mapping from state data
-    const input = this.resolveInput(nodeDef, state);
-
-    switch (nodeDef.kind) {
-      case "agent": {
-        // Agent execution — would call AetherRunner.run() in production
-        // For now, simulate agent output with relevant context
-        return {
-          status: "ok",
-          agentName: nodeDef.agentName ?? "unknown",
-          result: `[simulated] ${nodeDef.agentName} processed input`,
-          inputReceived: input,
-        };
-      }
-
-      case "tool": {
-        // Tool execution — would call ToolRegistry in production
-        return {
-          status: "ok",
-          toolName: nodeDef.toolName ?? "unknown",
-          result: `[simulated] tool ${nodeDef.toolName} executed`,
-          inputReceived: input,
-        };
-      }
-
-      case "router": {
-        // LLM-as-router — would call an LLM to decide the next node
-        // The actual routing decision is made by edge evaluation in runGraph
-        return {
-          status: "ok",
-          route: "evaluated",
-          inputReceived: input,
-        };
-      }
-
-      case "map": {
-        // Parallel fan-out — for each item in the input list, spawn a sub-execution
-        const items = Array.isArray(input) ? input : [input];
-        return {
-          status: "ok",
-          kind: "map",
-          itemCount: items.length,
-          itemsProcessed: items.length, // In production, parallel execution
-        };
-      }
-
-      case "reduce": {
-        // Fan-in merge — collect results from upstream map outputs
-        return {
-          status: "ok",
-          kind: "reduce",
-          mergedResult: input,
-        };
-      }
-
-      case "subgraph": {
-        // Sub-workflow execution — recursively run a nested workflow
-        return {
-          status: "ok",
-          subgraphId: nodeDef.subgraphId,
-          result: "[simulated] subgraph executed",
-        };
-      }
-
-      case "sleep": {
-        // Timer / delay — just wait
-        const timeout = nodeDef.timeout ?? 1000;
-        await this.sleep(timeout);
-        return { status: "ok", slept: timeout };
-      }
-
-      case "signal": {
-        // Wait for external signal — would block on webhook/human input
-        return {
-          status: "paused",
-          kind: "signal",
-          message: "Waiting for external signal (simulated: auto-resolve)",
-        };
-      }
-
-      default: {
-        throw new Error(`Unknown node kind: ${nodeDef.kind}`);
-      }
-    }
-  }
-
-  // ─── Resumption ─────────────────────────────────────────
-
-  private async resume(
-    workflow: WorkflowDefinition,
-    executionId: string,
-    checkpointId?: string,
-  ): Promise<WorkflowState> {
-    if (!this.checkpointManager) {
-      throw new Error("No checkpoint manager configured — cannot resume");
-    }
-
-    let state: WorkflowState | undefined;
-
-    if (checkpointId) {
-      const cp = await this.checkpointManager.get(executionId, checkpointId);
-      state = cp?.state;
-    } else {
-      // Use the latest checkpoint
-      const checkpoints = await this.checkpointManager.list(executionId);
-      if (checkpoints.length > 0) {
-        state = checkpoints[checkpoints.length - 1]!.state;
-
-        // Re-find the workflow to continue from where we left off
-        // Build edge cache
-        const edgeCache = this.buildEdgeCache(workflow);
-        const completedNodes = new Set(
-          state.nodeHistory
-            .filter((n) => n.status === "completed")
-            .map((n) => n.nodeId),
-        );
-
-        // Find all nodes not yet completed
-        const pending = workflow.nodes.filter(
-          (n) => !completedNodes.has(n.id),
-        );
-
-        if (pending.length > 0) {
-          state.status = "running";
-          state.currentNode = pending[0]!.id;
-          // Continue execution
-          return this.runGraph(workflow, state);
-        }
-      }
-    }
-
-    if (!state) {
-      throw new Error(`No checkpoint found for execution "${executionId}"`);
-    }
-
-    state.status = "completed";
-    return state;
-  }
-
-  // ─── Helpers ────────────────────────────────────────────
-
-  private createInitialState(
-    workflow: WorkflowDefinition,
-    initialData: Record<string, unknown>,
-  ): WorkflowState {
-    // Apply default values from workflow definition
-    const data: Record<string, unknown> = { ...initialData };
-    for (const [key, field] of Object.entries(workflow.initialState)) {
-      if (data[key] === undefined && field.default !== undefined) {
-        data[key] = field.default;
-      }
-    }
-
-    return {
-      executionId: `exec-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      workflowId: workflow.id,
-      currentNode: null,
-      nodeHistory: [],
-      data,
+    const state: WorkflowState = {
+      executionId,
+      workflowId: def.id,
       status: "running",
+      currentNode: def.entryNode,
+      nodeHistory: [],
+      data: { ...initialState },
       startedAt: new Date().toISOString(),
       version: 1,
     };
-  }
 
-  private createNodeExecution(nodeId: NodeId): NodeExecution {
-    return {
-      nodeId,
-      status: "pending",
-      attempt: 0,
-    };
-  }
+    this.activeRuns.set(executionId, state);
 
-  private resolveInput(
-    nodeDef: NodeDefinition,
-    state: WorkflowState,
-  ): unknown {
-    if (!nodeDef.inputMapping || Object.keys(nodeDef.inputMapping).length === 0) {
-      // Default: pass the entire data bag
-      return { ...state.data };
-    }
-
-    // Apply input mapping: build an object with the mapped fields
-    const input: Record<string, unknown> = {};
-    for (const [inputKey, stateKey] of Object.entries(nodeDef.inputMapping)) {
-      input[inputKey] = state.data[stateKey];
-    }
-    return input;
-  }
-
-  private evaluateConditions(edge: EdgeDefinition, state: WorkflowState): boolean {
-    if (!edge.conditions || edge.conditions.length === 0) return true;
-
-    for (const condition of edge.conditions) {
-      const actualValue = this.resolveFieldValue(condition.field, state);
-      if (!this.matchesCondition(actualValue, condition)) {
-        return false;
+    try {
+      const adjacency = new Map<string, string[]>();
+      for (const edge of def.edges) {
+        const targets = adjacency.get(edge.from) ?? [];
+        targets.push(edge.to);
+        adjacency.set(edge.from, targets);
       }
-    }
-    return true;
-  }
 
-  private resolveFieldValue(field: string, state: WorkflowState): unknown {
-    // Dot notation: "data.some.key" -> state.data["some"]["key"]
-    const parts = field.split(".");
-    let value: unknown = state;
-    for (const part of parts) {
-      if (value !== null && typeof value === "object") {
-        value = (value as Record<string, unknown>)[part];
-      } else {
-        return undefined;
-      }
-    }
-    return value;
-  }
+      let currentId: string | undefined = def.entryNode;
+      const terminalSet = new Set(def.terminalNodes);
 
-  private matchesCondition(actual: unknown, condition: Condition): boolean {
-    switch (condition.operator) {
-      case "eq":
-        return actual === condition.value;
-      case "neq":
-        return actual !== condition.value;
-      case "gt":
-        return (actual as number) > (condition.value as number);
-      case "gte":
-        return (actual as number) >= (condition.value as number);
-      case "lt":
-        return (actual as number) < (condition.value as number);
-      case "lte":
-        return (actual as number) <= (condition.value as number);
-      case "exists":
-        return actual !== undefined && actual !== null;
-      case "matches": {
-        if (typeof actual === "string" && typeof condition.value === "string") {
-          try {
-            return new RegExp(condition.value).test(actual);
-          } catch {
-            return actual.includes(condition.value);
-          }
+      while (currentId && !terminalSet.has(currentId)) {
+        state.currentNode = currentId;
+
+        const nodeDef = def.nodes.find((n) => n.id === currentId);
+        if (!nodeDef) throw new Error(`Node "${currentId}" not found`);
+
+        const output = await this.executeNode(nodeDef, state);
+        state.nodeHistory.push({
+          nodeId: currentId,
+          status: "completed",
+          attempt: 1,
+          completedAt: Date.now(),
+          output,
+        });
+        state.version++;
+
+        if (this.config.autoCheckpoint) {
+          await this.checkpointManager.save({
+            id: `cp-${executionId}-${state.version}`,
+            executionId,
+            state: structuredClone(state),
+            createdAt: new Date().toISOString(),
+          });
         }
-        return false;
+
+        const nextTargets = adjacency.get(currentId);
+        if (!nextTargets || nextTargets.length === 0) break;
+        currentId = nextTargets[0];
       }
-      default:
-        return false;
+
+      state.status = "completed";
+      state.currentNode = null;
+    } catch (err) {
+      state.status = "failed";
+      state.error = err instanceof Error ? err.message : String(err);
     }
+
+    this.activeRuns.set(executionId, state);
+    return state;
   }
 
-  private shouldRetry(errorMsg: string, policy: RetryPolicy): boolean {
-    if (policy.retryableErrors.length === 0) return true; // All errors retryable
-    return policy.retryableErrors.some((e) => errorMsg.includes(e));
-  }
+  async pauseWorkflow(executionId: string): Promise<WorkflowState> {
+    const state = this.activeRuns.get(executionId);
+    if (!state) throw new Error(`No execution "${executionId}"`);
+    if (state.status !== "running") throw new Error(`Execution "${executionId}" not running`);
 
-  private calculateBackoff(attempt: number, policy: RetryPolicy): number {
-    const delay = policy.baseDelayMs * Math.pow(policy.backoffFactor, attempt - 1);
-    return Math.min(delay, policy.maxDelayMs);
-  }
-
-  private allTerminalsReached(
-    workflow: WorkflowDefinition,
-    visited: Set<NodeId>,
-  ): boolean {
-    return workflow.terminalNodes.every((t) => visited.has(t));
-  }
-
-  private async saveCheckpoint(state: WorkflowState): Promise<void> {
-    if (!this.checkpointManager) return;
-
-    state.lastCheckpointAt = new Date().toISOString();
-    state.version++;
-
-    const checkpoint: Checkpoint = {
-      id: `cp-${state.version}-${Date.now()}`,
-      executionId: state.executionId,
-      state: JSON.parse(JSON.stringify(state)), // Deep clone
-      createdAt: new Date().toISOString(),
-      label: `v${state.version} — node: ${state.currentNode ?? "none"}`,
-    };
-
-    await this.checkpointManager.save(checkpoint);
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  /**
-   * Build a cache of outgoing edges per node ID for fast lookup.
-   */
-  private buildEdgeCache(
-    workflow: WorkflowDefinition,
-  ): Map<NodeId, EdgeDefinition[]> {
-    const cache = new Map<NodeId, EdgeDefinition[]>();
-    for (const edge of workflow.edges) {
-      const existing = cache.get(edge.from) ?? [];
-      existing.push(edge);
-      cache.set(edge.from, existing);
+    state.status = "paused";
+    if (this.config.autoCheckpoint) {
+      await this.checkpointManager.save({
+        id: `cp-${executionId}-paused`,
+        executionId,
+        state: structuredClone(state),
+        createdAt: new Date().toISOString(),
+        label: "paused",
+      });
     }
-    return cache;
+    return state;
+  }
+
+  async resumeWorkflow(executionId: string): Promise<WorkflowState> {
+    const state = this.activeRuns.get(executionId);
+    if (!state) throw new Error(`No execution "${executionId}"`);
+    if (state.status !== "paused") throw new Error(`Execution "${executionId}" not paused`);
+    state.status = "running";
+    return state;
+  }
+
+  getState(executionId: string): WorkflowState | undefined {
+    return this.activeRuns.get(executionId);
+  }
+
+  async getHistory(executionId: string): Promise<import("./types.js").Checkpoint[]> {
+    return this.checkpointManager.list(executionId);
+  }
+
+  private async executeNode(
+    _nodeDef: WorkflowDefinition["nodes"][number],
+    state: WorkflowState,
+  ): Promise<Record<string, unknown>> {
+    await new Promise((r) => setTimeout(r, 5));
+    return { ...state.data };
   }
 }
