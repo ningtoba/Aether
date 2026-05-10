@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "paths": {
+      "@aether/types": ["../aether-types/src"],
+      "@aether/telemetry": ["../aether-telemetry/src"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

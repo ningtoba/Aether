@@ -1,7 +1,8 @@
 {
-  "name": "@aether/memory",
+  "name": "@aether/memory-old",
   "version": "0.1.0",
   "private": true,
+  "description": "Legacy memory package (placeholder)",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,36 +10,17 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./stores": {
-      "types": "./dist/stores/index.d.ts",
-      "import": "./dist/stores/index.js"
-    },
-    "./vector": {
-      "types": "./dist/vector/index.d.ts",
-      "import": "./dist/vector/index.js"
-    },
-    "./embedding": {
-      "types": "./dist/embedding/index.d.ts",
-      "import": "./dist/embedding/index.js"
-    },
-    "./processing": {
-      "types": "./dist/processing/index.d.ts",
-      "import": "./dist/processing/index.js"
     }
   },
+  "files": ["dist"],
   "scripts": {
     "build": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "typecheck": "tsc --noEmit",
+    "clean": "rm -rf dist"
   },
-  "dependencies": {
-    "uuid": "^11.0.0",
-    "zod": "^3.24.0"
-  },
+  "dependencies": {},
   "devDependencies": {
-    "typescript": "^5.8.0",
-    "vitest": "^3.0.0",
-    "@types/uuid": "^10.0.0"
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
   }
 }

@@ -1,51 +1,15 @@
 {
+  "extends": "./tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "lib": ["ES2022"],
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
-    "composite": true,
-    "incremental": true,
-    "isolatedModules": true,
-    "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "noFallthroughCasesInSwitch": true,
-    "exactOptionalPropertyTypes": false,
-    "noUncheckedIndexedAccess": true,
+    "outDir": "./dist",
+    "rootDir": ".",
     "paths": {
-      "@aether/types": ["./packages/aether-types/src"],
-      "@aether/utils": ["./packages/aether-utils/src"],
-      "@aether/core": ["./packages/aether-core/src"],
-      "@aether/providers": ["./packages/aether-providers/src"],
-      "@aether/orchestrator": ["./packages/aether-orchestrator/src"],
-      "@aether/sdk": ["./packages/aether-sdk/src"],
-      "@aether/memory": ["./packages/aether-memory/src"],
-      "@aether/tools": ["./packages/aether-tools/src"],
-      "@aether/backend": ["./packages/aether-backend/src"],
-      "@aether/frontend": ["./packages/aether-frontend/src"],
-      "@aether/electron": ["./packages/aether-electron/src"]
+      "@aether/docker": ["./packages/docker/src"],
+      "@aether/playwright": ["./packages/playwright/src"],
+      "@aether/ts-runtime": ["./packages/ts-runtime/src"],
+      "@aether/python-venv": ["./packages/python-venv/src"]
     }
   },
-  "exclude": ["node_modules", "dist"],
-  "references": [
-    { "path": "./packages/aether-types" },
-    { "path": "./packages/aether-utils" },
-    { "path": "./packages/aether-core" },
-    { "path": "./packages/aether-providers" },
-    { "path": "./packages/aether-orchestrator" },
-    { "path": "./packages/aether-sdk" },
-    { "path": "./packages/aether-memory" },
-    { "path": "./packages/aether-tools" },
-    { "path": "./packages/aether-backend" },
-    { "path": "./packages/aether-frontend" },
-    { "path": "./packages/aether-electron" }
-  ]
+  "include": ["packages/*/src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

@@ -1,0 +1,134 @@
+name: Package (Electron)
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main, master]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: 'Platform to build for'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - linux
+          - macos
+          - windows
+
+concurrency:
+  group: package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "22"
+
+jobs:
+  package-linux:
+    name: Package Linux
+    if: |
+      (github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'linux')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Package Electron (Linux)
+        run: npx electron-builder --linux --publish=never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-linux
+          path: release/*.AppImage
+          if-no-files-found: warn
+
+      - name: Upload Linux deb
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-linux-deb
+          path: release/*.deb
+          if-no-files-found: warn
+
+  package-macos:
+    name: Package macOS
+    if: |
+      (github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'macos')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Package Electron (macOS)
+        run: npx electron-builder --mac --publish=never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.MACOS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MACOS_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-macos
+          path: release/*.dmg
+          if-no-files-found: warn
+
+  package-windows:
+    name: Package Windows
+    if: |
+      (github.event_name == 'workflow_dispatch' && (inputs.platform == 'all' || inputs.platform == 'windows')) ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+
+      - run: npm ci
+
+      - name: Build all packages
+        run: npm run build
+
+      - name: Package Electron (Windows)
+        run: npx electron-builder --win --publish=never
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-windows
+          path: release/*.exe
+          if-no-files-found: warn
