@@ -1,0 +1,80 @@
+@import "tailwindcss";
+
+:root {
+  --sidebar-width: 240px;
+  --titlebar-height: 38px;
+  color-scheme: dark;
+}
+
+/* ── Reset & Base ── */
+html,
+body,
+#root {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+    Ubuntu, Cantarell, "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+  background: #0f0f11;
+  color: #e1e1e6;
+}
+
+/* ── Layout ── */
+.app-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  width: 100vw;
+}
+
+.app-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+.main-content {
+  flex: 1;
+  overflow-y: auto;
+  background: #0f0f13;
+}
+
+/* ── Drag region for custom titlebar ── */
+.draggable {
+  -webkit-app-region: drag;
+}
+
+/* ── Dark Scrollbar ── */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2a2a3a;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3a3a4e;
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ── Selection ── */
+::selection {
+  background: #3b3b5c;
+  color: #ffffff;
+}

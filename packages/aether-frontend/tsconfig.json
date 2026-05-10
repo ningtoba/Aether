@@ -15,5 +15,13 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx"
+  ],
+  "references": [
+    {
+      "path": "../aether-types"
+    },
+    {
+      "path": "../aether-utils"
+    }
   ]
 }

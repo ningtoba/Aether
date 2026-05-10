@@ -72,3 +72,16 @@ export interface ToolDefinition {
   /** Whether the tool runs in a sandbox */
   sandboxed?: boolean;
 }
+
+/**
+ * Schema for structured output from an agent.
+ * Maps to the SDK's outputType option on Agent.
+ */
+export interface OutputSchema {
+  /** Human-readable name for the schema */
+  name: string;
+  /** JSON Schema definition for the structured output */
+  jsonSchema: Record<string, unknown>;
+  /** Optional Zod-like parser function */
+  parser?: (output: string) => unknown;
+}

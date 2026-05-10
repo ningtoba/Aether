@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "tsc -b --force",
-    "typecheck": "tsc -b --noEmit --force",
+    "typecheck": "tsc -b --force",
     "clean": "npm run clean --workspaces",
     "lint": "eslint packages/*/src/",
     "format": "prettier --write 'packages/*/src/**/*.ts'",
@@ -19,8 +19,8 @@
     "dev:frontend": "npm run dev -w @aether/frontend",
     "dev:backend": "npm run dev -w @aether/backend",
     "dev:electron": "npm run dev -w aether-electron",
-    "dev": "concurrently -n backend,electron -c blue,green \"npm run dev:backend\" \"npm run dev:electron\"",
-    "start": "bun install && bun run build && bun run dev"
+    "dev": "npm run dev -w aether-electron",
+    "start": "npm run dev -w aether-electron"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

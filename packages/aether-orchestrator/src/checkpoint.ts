@@ -1,66 +1,61 @@
-import type { Checkpoint, WorkflowState, EdgeDefinition } from "./types.js";
-
-/** Arbitrary metadata bag */
-export type Metadata = Record<string, unknown>;
-
-/**
- * Interface for checkpoint storage backends.
- */
-export interface CheckpointManager {
-  /**
-   * Persist a state snapshot as a checkpoint.
-   * Returns the created Checkpoint with a generated id.
-   */
-  save(state: WorkflowState, pendingEdges: EdgeDefinition[], metadata?: Metadata): Promise<Checkpoint>;
-
-  /**
-   * Load a specific checkpoint by id.
-   * Returns undefined if no checkpoint with that id exists.
-   */
-  load(id: string): Promise<Checkpoint | undefined>;
-
-  /**
-   * List all checkpoints for a given run, most recent first.
-   */
-  list(runId: string): Promise<Checkpoint[]>;
-}
+import type { Checkpoint, CheckpointManager } from "./types.js";
 
 /**
  * In-memory implementation of CheckpointManager.
- * Checkpoints are held in a Map and are lost on process restart.
+ *
+ * Stores checkpoints in a Map keyed by executionId, with a secondary
+ * index for listing. Checkpoints are ephemeral — lost on process restart.
  */
 export class InMemoryCheckpointManager implements CheckpointManager {
-  private checkpoints: Map<string, Checkpoint> = new Map();
-  private counter = 0;
+  private store = new Map<string, Checkpoint[]>();
 
-  async save(
-    state: WorkflowState,
-    pendingEdges: EdgeDefinition[],
-    metadata?: Metadata,
-  ): Promise<Checkpoint> {
-    const id = `cp-${Date.now()}-${++this.counter}`;
-    const checkpoint: Checkpoint = {
-      id,
-      runId: state.runId,
-      state: { ...state },
-      pendingEdges: [...pendingEdges],
-      timestamp: Date.now(),
-      metadata: metadata ?? {},
-    };
-    this.checkpoints.set(id, checkpoint);
-    return checkpoint;
+  async save(checkpoint: Checkpoint): Promise<void> {
+    const existing = this.store.get(checkpoint.executionId) ?? [];
+    // Replace if same id exists
+    const idx = existing.findIndex((c) => c.id === checkpoint.id);
+    if (idx >= 0) {
+      existing[idx] = checkpoint;
+    } else {
+      existing.push(checkpoint);
+    }
+    this.store.set(checkpoint.executionId, existing);
   }
 
-  async load(id: string): Promise<Checkpoint | undefined> {
-    return this.checkpoints.get(id);
+  async get(executionId: string, checkpointId: string): Promise<Checkpoint | undefined> {
+    const checkpoints = this.store.get(executionId);
+    if (!checkpoints) return undefined;
+    return checkpoints.find((c) => c.id === checkpointId);
   }
 
-  async list(runId: string): Promise<Checkpoint[]> {
-    const results = Array.from(this.checkpoints.values()).filter(
-      (cp) => cp.runId === runId,
-    );
-    // Most recent first
-    results.sort((a, b) => b.timestamp - a.timestamp);
-    return results;
+  async list(executionId: string): Promise<Checkpoint[]> {
+    return this.store.get(executionId) ?? [];
+  }
+
+  async delete(executionId: string, checkpointId: string): Promise<boolean> {
+    const existing = this.store.get(executionId);
+    if (!existing) return false;
+    const idx = existing.findIndex((c) => c.id === checkpointId);
+    if (idx < 0) return false;
+    existing.splice(idx, 1);
+    if (existing.length === 0) this.store.delete(executionId);
+    return true;
+  }
+
+  /** Remove all checkpoints for an execution */
+  clearExecution(executionId: string): void {
+    this.store.delete(executionId);
+  }
+
+  /** Total checkpoint count across all executions */
+  get size(): number {
+    const entries = Array.from(this.store.values());
+    let count = 0;
+    for (const arr of entries) count += arr.length;
+    return count;
+  }
+
+  /** Remove all data */
+  clear(): void {
+    this.store.clear();
   }
 }

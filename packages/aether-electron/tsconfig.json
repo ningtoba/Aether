@@ -8,5 +8,19 @@
   },
   "include": [
     "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../aether-backend"
+    },
+    {
+      "path": "../aether-core"
+    },
+    {
+      "path": "../aether-types"
+    },
+    {
+      "path": "../aether-utils"
+    }
   ]
 }

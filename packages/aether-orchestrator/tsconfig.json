@@ -8,5 +8,22 @@
   },
   "include": [
     "src/**/*.ts"
+  ],
+  "references": [
+    {
+      "path": "../aether-core"
+    },
+    {
+      "path": "../aether-memory"
+    },
+    {
+      "path": "../aether-providers"
+    },
+    {
+      "path": "../aether-types"
+    },
+    {
+      "path": "../aether-utils"
+    }
   ]
 }
