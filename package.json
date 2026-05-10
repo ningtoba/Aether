@@ -9,7 +9,7 @@
   ],
   "scripts": {
     "build": "tsc -b --force",
-    "typecheck": "tsc -b --force",
+    "typecheck": "tsc -b --noEmit --force",
     "clean": "npm run clean --workspaces",
     "lint": "eslint packages/*/src/",
     "format": "prettier --write 'packages/*/src/**/*.ts'",
