@@ -4,7 +4,7 @@
  * @module @aether/orchestrator
  */
 
-export { OrchestrationEngine } from "./engine.js";
+export { LangGraphEngine } from "./engine.js";
 export { WorkflowBuilder } from "./workflow.js";
 export { InMemoryCheckpointManager, createCheckpointSaver } from "./checkpoint.js";
 export { GraphEditor } from "./graph-editor.js";

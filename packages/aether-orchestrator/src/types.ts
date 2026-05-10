@@ -189,6 +189,9 @@ export interface CheckpointManager {
   get(executionId: string, checkpointId: string): Promise<Checkpoint | undefined>;
   list(executionId: string): Promise<Checkpoint[]>;
   delete(executionId: string, checkpointId: string): Promise<boolean>;
+  clearExecution?(executionId: string): void;
+  clear?(): void;
+  size?: number;
 }
 
 // ─── Orchestration Config ────────────────────────────────────
