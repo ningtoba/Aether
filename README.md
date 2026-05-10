@@ -27,8 +27,6 @@ aether/
 │   ├── aether-frontend/      # React-based admin GUI
 │   ├── aether-electron/      # Electron desktop shell with tray, auto-updater, crash reporter
 │   └── docker/               # Docker sandbox for isolated code execution
-├── Dockerfile                # Multi-stage production Docker build
-├── docker-compose.yml        # Docker Compose for local deployment
 ├── tsconfig.json             # Root TypeScript configuration
 └── electron.vite.config.ts   # Electron-vite build configuration
 ```
@@ -55,12 +53,12 @@ Higher-level packages (backend, frontend, electron) consume lower layers via wor
 
 | Layer | Technology |
 |-------|-----------|
-| **Runtime** | Node.js 25, Bun 1.3 |
+| **Runtime** | Node.js 25 |
 | **Language** | TypeScript 5.8 (strict mode) |
-| **Build** | tsc (project references), Vite |
+| **Build** | tsc (project references), electron-vite |
 | **Desktop** | Electron 35 |
 | **Backend** | Node.js http module (no framework), WebSocket |
-| **Frontend** | React 19, TailwindCSS |
+| **Frontend** | React 19, TailwindCSS 4, Framer Motion, Zustand |
 | **Orchestration** | LangGraph-compatible DAG engine |
 | **Container** | Docker (sandboxed execution) |
 | **CI/CD** | GitHub Actions, electron-builder |
@@ -69,28 +67,40 @@ Higher-level packages (backend, frontend, electron) consume lower layers via wor
 
 ## Quick Start
 
-### One Command to Run Everything
+### Prerequisites
+
+- Node.js 22+
+- npm 10+
+
+### One Command to Run
 
 ```bash
-bun run start
+npm install
+npm run start
 ```
 
-This installs deps, builds all packages, then launches both the backend API server and Electron app concurrently.
+This installs dependencies, builds all packages, and launches the Electron app.
 
-### Manual Steps (if preferred)
+### Individual Commands
 
 ```bash
-# Install
-bun install
+# Install dependencies
+npm install
 
 # Build all packages
-bun run build
+npm run build
 
 # Type-check
-bun run typecheck
+npm run typecheck
 
-# Run everything
-bun run dev
+# Run tests
+npm run test
+
+# Launch Electron app (dev mode)
+npm run dev
+
+# Start backend API server only
+npm run dev:backend
 ```
 
 The API server runs on `http://localhost:3001` with health check at `/health`.
