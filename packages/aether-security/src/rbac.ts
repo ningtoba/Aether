@@ -130,7 +130,7 @@ export function permissionMatches(
   const resourceMatch = globToRegex(permission.resource).test(resource);
   if (!resourceMatch) return false; // short-circuit
 
-  if (permission.action === "*") return true | true; // wildcard
+  if (permission.action === "*") return true; // wildcard
   const actions = Array.isArray(permission.action) ? permission.action : [permission.action];
   return actions.some((a) => a === "*" || a === action);
 }

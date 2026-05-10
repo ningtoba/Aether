@@ -15,10 +15,29 @@
  */
 
 import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
-import { readFile, writeFile, mkdir, readFileSync } from "node:fs";
-import { existsSync } from "node:fs";
+import { readFile, writeFile } from "node:fs/promises";
+import { readFileSync, existsSync, mkdirSync } from "node:fs";
 import { homedir, hostname } from "node:os";
 import { join } from "node:path";
+
+// ── Keytar fallback (pure JS JSON file when keytar is unavailable) ─
+
+let _keytar: typeof import("./vault-fallback.js").default | null = null;
+let _keytarAttempted = false;
+
+async function getKeytar(): Promise<typeof import("./vault-fallback.js").default | null> {
+  if (_keytarAttempted) return _keytar;
+  _keytarAttempted = true;
+  try {
+    const keytarModule = await import(/* @vite-ignore */ "keytar" as string);
+    _keytar = keytarModule as unknown as typeof import("./vault-fallback.js").default;
+  } catch {
+    // keytar not available — use the JSON file fallback
+    const fallback = await import("./vault-fallback.js");
+    _keytar = fallback.default;
+  }
+  return _keytar;
+}
 
 // ── Constants ──────────────────────────────────────────────────────
 
@@ -45,28 +64,12 @@ export interface VaultEntry {
   updatedAt: number;
 }
 
-// ── Keytar detection ──────────────────────────────────────────────
-
-let _keytar: typeof import("keytar") | null = null;
-let _keytarAttempted = false;
-
-async function getKeytar(): Promise<typeof import("keytar") | null> {
-  if (_keytarAttempted) return _keytar;
-  _keytarAttempted = true;
-  try {
-    _keytar = await import("keytar");
-  } catch {
-    _keytar = null;
-  }
-  return _keytar;
-}
-
 // ── Fallback encryption helpers ────────────────────────────────────
 
 function deriveMachineKey(): Buffer {
   // Try /etc/machine-id first
   try {
-    const id = require("node:fs").readFileSync("/etc/machine-id", "utf8").trim();
+    const id = readFileSync("/etc/machine-id", "utf8").trim();
     return createHash("sha256").update(id).digest();
   } catch {
     // Fallback: hostname-based, stable-ish
@@ -131,7 +134,7 @@ async function readFileVault(): Promise<FileVaultStore> {
 async function writeFileVault(store: FileVaultStore): Promise<void> {
   const json = JSON.stringify(store);
   const { encrypted, iv, tag } = encrypt(json);
-  await mkdir(VAULT_DIR, { recursive: true });
+  mkdirSync(VAULT_DIR, { recursive: true });
   await writeFile(VAULT_PATH, `${encrypted}.${iv}.${tag}`, "utf8");
 }
 
@@ -144,7 +147,7 @@ async function writeFileVault(store: FileVaultStore): Promise<void> {
  * AES-256-GCM encrypted file at ~/.config/aether/vault.enc.
  */
 export class Vault {
-  private keytar: typeof import("keytar") | null = null;
+  private keytar: typeof import("./vault-fallback.js").default | null = null;
   private ready = false;
   private usingKeytar = false;
 
@@ -322,7 +325,7 @@ export class Vault {
 
     // Verify we can write and read
     try {
-      await mkdir(VAULT_DIR, { recursive: true });
+      mkdirSync(VAULT_DIR, { recursive: true });
       return { ok: true, backend: "file-fallback" };
     } catch (err) {
       return {

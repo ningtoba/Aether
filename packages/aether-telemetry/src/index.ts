@@ -10,6 +10,4 @@
 export * from './logger.js';
 export * from './tracer.js';
 export * from './metrics.js';
-export * from './execution-trace.js';
-export * from './replay.js';
 export * from './types.js';

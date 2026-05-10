@@ -144,7 +144,15 @@ function registerIpcHandlers(): void {
   /* GPU info */
   ipcMain.handle(IPC_CHANNELS.GET_GPU_INFO, async () => {
     try {
-      const gpuInfo = await app.getGPUInfo('basic');
+      const gpuInfo = (await app.getGPUInfo('basic')) as {
+        gpuDevice?: Array<{
+          vendorId?: number;
+          deviceName?: string;
+          driverVersion?: string;
+          dedicatedVideoMemory?: number;
+          isIntegrated?: boolean;
+        }>;
+      } | null;
       return {
         vendor: gpuInfo?.gpuDevice?.[0]?.vendorId
           ? `0x${gpuInfo.gpuDevice[0].vendorId.toString(16)}`

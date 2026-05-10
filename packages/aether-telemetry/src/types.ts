@@ -9,7 +9,7 @@ import type { LevelWithSilent } from "pino";
 export type TelemetryLevel = "debug" | "info" | "warn" | "error" | "fatal";
 
 /** Maps TelemetryLevel to Pino-compatible numeric level */
-export const levelMap: Record<TelemetryLevel, LevelWithSilent> = {
+export const levelMap: Record<TelemetryLevel, number> = {
   debug: 20,
   info: 30,
   warn: 40,
@@ -178,6 +178,31 @@ export interface SpanLogContext {
 export interface TelemetryHandle {
   shutdown: () => Promise<void>;
   flush: () => Promise<void>;
+}
+
+// ─── Metrics Types ─────────────────────────────────────────────────────
+
+/** Key-value attributes for labeling metrics */
+export type TelemetryAttributes = Record<string, string | number | boolean>;
+
+/** Supported metric types */
+export type MetricType = 'counter' | 'gauge' | 'histogram';
+
+/** Metric definition metadata */
+export interface MetricDef {
+  name: string;
+  type: MetricType;
+  description: string;
+  unit?: string;
+}
+
+/** A single data point recording of a metric */
+export interface MetricPoint {
+  name: string;
+  type: MetricType;
+  value: number;
+  labels: TelemetryAttributes;
+  timestamp: number;
 }
 
 /** Replay-specific types for replaying execution traces */

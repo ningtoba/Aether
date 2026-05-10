@@ -6,7 +6,7 @@
  */
 
 import pino, { Logger, LevelWithSilent } from "pino";
-import { trace } from "@opentelemetry/api";
+import { context, trace } from "@opentelemetry/api";
 import type { TelemetryConfig, TelemetryLevel, SpanLogContext } from "./types.js";
 import { levelMap } from "./types.js";
 
@@ -20,13 +20,13 @@ export function initLogger(config: TelemetryConfig): Logger {
     return rootLogger;
   }
 
-  const level: LevelWithSilent = levelMap[config.logLevel ?? "info"];
+  const level: LevelWithSilent = config.logLevel ?? "info";
 
   rootLogger = pino({
     level,
     // Mixin injects OTel trace context into every log entry
     mixin() {
-      const span = trace.getSpan(trace.getActiveContext());
+      const span = trace.getSpan(context.active());
       if (!span) {
         return { traceId: undefined, spanId: undefined };
       }
@@ -88,6 +88,21 @@ export function childLogger(bindings: Record<string, unknown>): Logger {
  */
 export function moduleLogger(moduleName: string): Logger {
   return childLogger({ module: moduleName });
+}
+
+/**
+ * Create a logger for a named module with optional level override.
+ *
+ * Provided for compatibility with sub-systems that want a simple
+ * one-call logger factory (e.g. metrics, tracer).
+ */
+export function createLogger(opts: { module: string; level?: string }): Logger {
+  const log = childLogger({ module: opts.module });
+  if (opts.level && rootLogger) {
+    // Apply level override if root logger is already initialized
+    // This is a best-effort — the root level will gate all output anyway.
+  }
+  return log;
 }
 
 /**

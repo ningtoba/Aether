@@ -11,11 +11,12 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/core": "^2.7.1",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.57.0",
+    "@opentelemetry/instrumentation": "^0.57.0",
     "@opentelemetry/resources": "^1.30.0",
     "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@opentelemetry/sdk-trace-node": "^1.30.0",
-    "@opentelemetry/instrumentation": "^0.57.0",
-    "@opentelemetry/exporter-trace-otlp-proto": "^0.57.0",
     "@opentelemetry/semantic-conventions": "^1.30.0",
     "pino": "^9.6.0"
   },

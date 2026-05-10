@@ -1,4 +1,14 @@
-import type { AppSettings } from "@aether/types";
+// AppSettings type — defined locally to avoid import cycle
+interface AppSettings extends Record<string, unknown> {
+  theme: string;
+  language: string;
+  logLevel: string;
+  autoUpdate: boolean;
+  telemetry: boolean;
+  dataDir: string;
+  port: number;
+  host: string;
+}
 
 const DEFAULT_SETTINGS: AppSettings = {
   theme: "dark",

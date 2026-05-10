@@ -4,7 +4,7 @@
  * Bridges renderer <-> main process for backend operations.
  */
 
-import { ipcMain } from "node:electron";
+import { ipcMain } from "electron";
 
 interface HealthResponse {
   status: "ok" | "error";
@@ -48,11 +48,11 @@ export function registerIpcHandlers(): void {
 
   // ── Window Controls ────────────────────────────────────────────
 
-  ipcMain.on("window:minimize", (event) => {
+  ipcMain.on("window:minimize", (event: Electron.IpcMainEvent) => {
     BrowserWindow.fromWebContents(event.sender)?.minimize();
   });
 
-  ipcMain.on("window:maximize", (event) => {
+  ipcMain.on("window:maximize", (event: Electron.IpcMainEvent) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (win?.isMaximized()) {
       win.unmaximize();
@@ -61,10 +61,10 @@ export function registerIpcHandlers(): void {
     }
   });
 
-  ipcMain.on("window:close", (event) => {
+  ipcMain.on("window:close", (event: Electron.IpcMainEvent) => {
     BrowserWindow.fromWebContents(event.sender)?.close();
   });
 }
 
 // Needed for BrowserWindow reference
-import { BrowserWindow } from "node:electron";
+import { BrowserWindow } from "electron";

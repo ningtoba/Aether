@@ -176,7 +176,11 @@ export class AetherServer {
 
   /** Get the port the server is running on */
   getPort(): number | undefined {
-    return this.server?.address()?.['port'] ?? this.port;
+    const addr = this.server?.address();
+    if (addr && typeof addr !== 'string') {
+      return addr.port;
+    }
+    return this.port;
   }
 
   /** Check if the server is running */

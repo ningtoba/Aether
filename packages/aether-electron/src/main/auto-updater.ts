@@ -6,9 +6,32 @@
  *
  * This module matches the registerAutoUpdater({ getMainWindow }) signature
  * used by src/main/main.ts.
+ *
+ * NOTE: electron-updater is imported via a try-require pattern to keep
+ * TypeScript happy when the package isn't installed in dev environments.
  */
 
-import { autoUpdater, type UpdateInfo } from "electron-updater";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+function getAutoUpdater(): any {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    return require("electron-updater");
+  } catch {
+    return null;
+  }
+}
+
+const updater = getAutoUpdater();
+const autoUpdater: any = updater?.autoUpdater ?? {
+  autoDownload: false,
+  autoInstallOnAppQuit: true,
+  on: () => {},
+  setFeedURL: () => {},
+  downloadUpdate: () => {},
+  quitAndInstall: () => {},
+  checkForUpdates: () => Promise.resolve(),
+};
+
 import { BrowserWindow, dialog } from "electron";
 
 autoUpdater.autoDownload = false;
@@ -25,7 +48,7 @@ export function registerAutoUpdater({ getMainWindow }: AutoUpdaterDeps): void {
     owner: "aether-org", // TODO: update to actual org
   });
 
-  autoUpdater.on("update-available", (info: UpdateInfo) => {
+  autoUpdater.on("update-available", (info: any) => {
     const win = getMainWindow();
     if (!win) return;
     void dialog

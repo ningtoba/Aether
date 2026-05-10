@@ -9,7 +9,7 @@ export interface RouteParams {
 export type RequestHandler = (
   req: IncomingMessage,
   res: ServerResponse,
-  params?: RouteParams,
+  params: RouteParams,
   body?: unknown,
 ) => void | Promise<void>;
 

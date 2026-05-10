@@ -1,5 +1,7 @@
 import type { Checkpoint, WorkflowState, EdgeDefinition } from "./types.js";
-import type { Metadata } from "@aether/types";
+
+/** Arbitrary metadata bag */
+export type Metadata = Record<string, unknown>;
 
 /**
  * Interface for checkpoint storage backends.

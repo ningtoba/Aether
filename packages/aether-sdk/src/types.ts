@@ -64,5 +64,11 @@ export interface ToolDefinition {
   description: string;
   parameters: Record<string, unknown>;
   /** The actual implementation function */
-  handler: (...args: unknown[]) => unknown | Promise<unknown>;
+  handler?: (...args: unknown[]) => unknown | Promise<unknown>;
+  /** Whether the tool is enabled */
+  enabled?: boolean;
+  /** Timeout in milliseconds */
+  timeout?: number;
+  /** Whether the tool runs in a sandbox */
+  sandboxed?: boolean;
 }

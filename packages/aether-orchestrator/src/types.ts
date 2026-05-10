@@ -1,4 +1,5 @@
-import type { Metadata } from "@aether/types";
+/** Arbitrary metadata bag */
+export type Metadata = Record<string, unknown>;
 
 /**
  * Configuration for the orchestration engine.

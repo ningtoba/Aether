@@ -1,6 +1,58 @@
 import { execSync, type ExecSyncOptionsWithBufferEncoding } from "node:child_process";
-import type { ExecResult, SandboxFile, BaseExecOptions, SandboxLimits, SandboxProfile, EnvStatus } from "@aether/types";
-import { SANDBOX_PROFILES, DEFAULT_LIMITS } from "@aether/types";
+
+// ---------------------------------------------------------------------------
+// Local type definitions (replaces @aether/types dependency)
+// ---------------------------------------------------------------------------
+
+export interface BaseExecOptions {
+  timeout?: number;
+  limits?: SandboxProfile | Partial<SandboxLimits>;
+  files?: SandboxFile[];
+  env?: Record<string, string>;
+  cwd?: string;
+}
+
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  signal: NodeJS.Signals | null;
+  duration: number;
+  timedOut: boolean;
+}
+
+export interface SandboxFile {
+  path: string;
+  content: string;
+  mode?: number;
+}
+
+export interface SandboxLimits {
+  memoryMb: number;
+  cpuSeconds: number;
+  processes: number;
+  network: boolean;
+  writeAccess: boolean;
+}
+
+export type SandboxProfile = "minimal" | "standard" | "high" | "unrestricted";
+
+export interface EnvStatus {
+  ready: boolean;
+  type: string;
+  error?: string;
+  version?: string;
+  info?: Record<string, unknown>;
+}
+
+export const SANDBOX_PROFILES: Record<SandboxProfile, SandboxLimits> = {
+  minimal: { memoryMb: 128, cpuSeconds: 10, processes: 20, network: false, writeAccess: false },
+  standard: { memoryMb: 512, cpuSeconds: 30, processes: 50, network: false, writeAccess: false },
+  high: { memoryMb: 2048, cpuSeconds: 120, processes: 100, network: true, writeAccess: true },
+  unrestricted: { memoryMb: 8192, cpuSeconds: 600, processes: 500, network: true, writeAccess: true },
+};
+
+export const DEFAULT_LIMITS: SandboxLimits = { memoryMb: 512, cpuSeconds: 30, processes: 50, network: false, writeAccess: false };
 
 // ---------------------------------------------------------------------------
 // Docker sandbox — isolated code execution via ephemeral containers
@@ -71,12 +123,12 @@ function dockerCmd(
 ): { stdout: string; stderr: string; exitCode: number } {
   try {
     const opts: ExecSyncOptionsWithBufferEncoding = {
-      encoding: "utf-8",
+      encoding: "buffer",
       timeout: timeout ?? 30_000,
       maxBuffer: 10 * 1024 * 1024, // 10 MB
     };
     const stdout = execSync(`docker ${args.join(" ")}`, opts);
-    return { stdout: stdout.trim(), stderr: "", exitCode: 0 };
+    return { stdout: stdout.toString().trim(), stderr: "", exitCode: 0 };
   } catch (err: unknown) {
     const error = err as {
       stdout?: string;

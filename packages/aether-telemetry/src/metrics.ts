@@ -107,7 +107,7 @@ class MetricsRegistry {
       return;
     }
     state.value += value;
-    log.trace(`Counter ${name} += ${value} = ${state.value}`, { metric: name, delta: value, ...extraLabels });
+    log.trace({ metric: name, delta: value, ...extraLabels as Record<string, unknown> }, `Counter ${name} += ${value} = ${state.value}`);
   }
 
   // ── Gauge ─────────────────────────────────────────────────────────

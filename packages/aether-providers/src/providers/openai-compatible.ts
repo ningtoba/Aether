@@ -57,7 +57,7 @@ export class OpenAICompatibleProvider extends ProviderInterface {
           throw await this.parseError(res);
         }
 
-        const json = await res.json();
+        const json: any = await res.json();
         return this.parseResponse(json.code ?? json);
       } finally {
         clearTimeout(timeout);

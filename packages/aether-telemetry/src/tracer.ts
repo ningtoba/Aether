@@ -27,7 +27,7 @@ import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
-  ATTR_DEPLOYMENT_ENVIRONMENT,
+  SEMRESATTRS_DEPLOYMENT_ENVIRONMENT,
 } from "@opentelemetry/semantic-conventions";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 
@@ -49,7 +49,7 @@ export function initTracer(config: TelemetryConfig): void {
   const resource = new Resource({
     [ATTR_SERVICE_NAME]: config.serviceName,
     [ATTR_SERVICE_VERSION]: config.serviceVersion ?? "0.1.0",
-    [ATTR_DEPLOYMENT_ENVIRONMENT]: config.environment ?? "development",
+    [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: config.environment ?? "development",
   });
 
   provider = new BasicTracerProvider({
@@ -82,11 +82,10 @@ export function initTracer(config: TelemetryConfig): void {
 
   provider.register();
 
-  // Build shutdown hook
-  const processors = [...provider.activeSpanProcessor];
+  // Build shutdown hook — use the provider's own shutdown which handles all processors
   _shutdownHook = async () => {
-    for (const sp of processors) {
-      await sp.shutdown();
+    if (provider) {
+      await provider.shutdown();
     }
   };
 

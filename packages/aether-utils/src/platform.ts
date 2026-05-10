@@ -14,7 +14,6 @@ export function getPlatform(): "win32" | "darwin" | "linux" | "unknown" {
 /** Detects development environment */
 export function isDev(): boolean {
   return (
-    (typeof process !== "undefined" && process.env.NODE_ENV === "development") ||
-    (typeof import.meta !== "undefined" && typeof import.meta.env !== "undefined" && import.meta.env.DEV === true)
+    (typeof process !== "undefined" && process.env.NODE_ENV === "development")
   );
 }
