@@ -1,0 +1,45 @@
+[project]
+name = "aether-rag"
+version = "0.1.0"
+description = "Aether RAG system: hybrid retrieval, code indexing, continuous knowledge"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.24.0",
+    "sentence-transformers>=3.0.0",
+    "rank-bm25>=0.2.2",
+    "tree-sitter>=0.23.0",
+    "tree-sitter-python>=0.23.0",
+    "tree-sitter-typescript>=0.23.0",
+    "watchfiles>=1.0.0",
+    "lancedb>=0.12.0",
+    "pydantic>=2.0.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.30.0",
+    "orjson>=3.10.0",
+    "pyyaml>=6.0",
+    "typing-extensions>=4.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "mypy>=1.10.0",
+    "ruff>=0.6.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -1,0 +1,23 @@
+appId: com.aether.app
+productName: Aether
+directories:
+  buildResources: resources
+  output: release
+files:
+  - packages/aether-electron/dist
+  - packages/aether-frontend/dist
+win:
+  target:
+    - nsis
+mac:
+  target:
+    - dmg
+  category: public.app-category.productivity
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Utility
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
