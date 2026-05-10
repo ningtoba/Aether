@@ -2,13 +2,7 @@
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "outDir": "./dist",
-    "rootDir": ".",
-    "paths": {
-      "@aether/docker": ["./packages/docker/src"],
-      "@aether/playwright": ["./packages/playwright/src"],
-      "@aether/ts-runtime": ["./packages/ts-runtime/src"],
-      "@aether/python-venv": ["./packages/python-venv/src"]
-    }
+    "rootDir": "."
   },
   "files": [],
   "include": [],
