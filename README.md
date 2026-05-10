@@ -69,58 +69,28 @@ Higher-level packages (backend, frontend, electron) consume lower layers via wor
 
 ## Quick Start
 
-### Prerequisites
-
-- **Node.js** >= 22
-- **Bun** >= 1.3 (for package management)
-- **TypeScript** >= 5.8
-
-### Install
+### One Command to Run Everything
 
 ```bash
-git clone https://github.com/your-org/aether.git
-cd aether
+bun run start
+```
+
+This installs deps, builds all packages, then launches both the backend API server and Electron app concurrently.
+
+### Manual Steps (if preferred)
+
+```bash
+# Install
 bun install
-```
 
-### Build All Packages
-
-```bash
+# Build all packages
 bun run build
-```
 
-Or build individual packages:
-
-```bash
-bun run build -w @aether/types
-bun run build -w @aether/core
-# etc.
-```
-
-### Development
-
-```bash
-# Type-check all packages
+# Type-check
 bun run typecheck
 
-# Run tests
-bun run test
-
-# Lint
-bun run lint
-```
-
-### Start Services
-
-```bash
-# Start the backend API server
-bun run dev:backend
-
-# Start the frontend dev server (separate terminal)
-bun run dev:frontend
-
-# Start the Electron app
-bun run dev:electron
+# Run everything
+bun run dev
 ```
 
 The API server runs on `http://localhost:3001` with health check at `/health`.
