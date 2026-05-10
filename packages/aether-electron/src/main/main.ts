@@ -53,7 +53,6 @@ function createMainWindow(): BrowserWindow {
   /* Load content */
   if (isDev) {
     win.loadURL(DEV_SERVER_URL);
-    win.webContents.openDevTools({ mode: 'detach' });
   } else {
     win.loadFile(path.join(__dirname, '../renderer/index.html'));
   }

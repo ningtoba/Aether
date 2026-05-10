@@ -13,15 +13,13 @@ import {
 } from "../components/SettingsComponents";
 import { useSettingsStore } from "../stores/settingsStore";
 
-// ─── Mapped types for form state ─────────────────────────────────
+// ─── Type helpers ──────────────────────────────────────────────
 
 type ChunkingStrategy = "fixed" | "sentence" | "paragraph" | "semantic";
 type BackoffType = "fixed" | "exponential" | "linear";
-type DeploymentTarget = "local" | "docker" | "kubernetes" | "cloud";
-type EvalFrequency = "manual" | "per-commit" | "daily" | "weekly";
 type NetworkMode = "bridge" | "host" | "none";
 
-// ─── Helpers ─────────────────────────────────────────────────────
+// ─── Option tables ─────────────────────────────────────────────
 
 const THEME_OPTIONS = [
   { value: "dark", label: "Dark" },
@@ -36,17 +34,79 @@ const LANGUAGE_OPTIONS = [
   { value: "ko", label: "한국어" },
 ];
 
-const STARTUP_OPTIONS = [
-  { value: "restore", label: "Restore previous session" },
-  { value: "minimized", label: "Start minimized" },
-  { value: "hidden", label: "Start hidden" },
+const AUTO_START_OPTIONS = [
+  { value: "disabled", label: "Disabled" },
+  { value: "minimized", label: "Start Minimized" },
+  { value: "hidden", label: "Start Hidden" },
 ];
 
-const STORAGE_OPTIONS = [
-  { value: "sqlite", label: "SQLite" },
+const PROVIDER_OPTIONS = [
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+  { value: "google", label: "Google" },
+  { value: "ollama", label: "Ollama" },
+  { value: "mistral", label: "Mistral" },
+  { value: "cohere", label: "Cohere" },
+  { value: "deepseek", label: "DeepSeek" },
+  { value: "xai", label: "xAI" },
+];
+
+const MODEL_OPTIONS: Record<string, { value: string; label: string }[]> = {
+  openai: [
+    { value: "gpt-4o", label: "GPT-4o" },
+    { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+    { value: "gpt-4-turbo", label: "GPT-4 Turbo" },
+    { value: "gpt-3.5-turbo", label: "GPT-3.5 Turbo" },
+  ],
+  anthropic: [
+    { value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4" },
+    { value: "claude-opus-4-20250514", label: "Claude Opus 4" },
+    { value: "claude-sonnet-4.6-20250717", label: "Claude Sonnet 4.6" },
+    { value: "claude-haiku-3.5-20241022", label: "Claude Haiku 3.5" },
+  ],
+  google: [
+    { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+    { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+    { value: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
+  ],
+  ollama: [
+    { value: "llama3.1", label: "Llama 3.1" },
+    { value: "mistral", label: "Mistral" },
+    { value: "codellama", label: "CodeLlama" },
+  ],
+  mistral: [
+    { value: "mistral-large", label: "Mistral Large" },
+    { value: "mistral-small", label: "Mistral Small" },
+  ],
+  cohere: [
+    { value: "command-r-plus", label: "Command R+" },
+    { value: "command-r", label: "Command R" },
+  ],
+  deepseek: [
+    { value: "deepseek-chat", label: "DeepSeek Chat" },
+    { value: "deepseek-coder", label: "DeepSeek Coder" },
+  ],
+  xai: [
+    { value: "grok-3", label: "Grok 3" },
+    { value: "grok-3-mini", label: "Grok 3 Mini" },
+  ],
+};
+
+const VECTOR_STORE_OPTIONS = [
+  { value: "sqlite", label: "SQLite (built-in)" },
   { value: "qdrant", label: "Qdrant" },
-  { value: "postgres", label: "PostgreSQL" },
-  { value: "memory", label: "In-Memory" },
+  { value: "pgvector", label: "pgvector" },
+  { value: "chroma", label: "Chroma" },
+  { value: "pinecone", label: "Pinecone" },
+];
+
+const EMBEDDING_MODEL_OPTIONS = [
+  { value: "text-embedding-ada-002", label: "OpenAI Ada 002" },
+  { value: "text-embedding-3-small", label: "OpenAI v3 Small" },
+  { value: "text-embedding-3-large", label: "OpenAI v3 Large" },
+  { value: "multilingual-e5-large", label: "E5 Multilingual" },
+  { value: "bge-base-en-v1.5", label: "BGE Base EN" },
+  { value: "all-MiniLM-L6-v2", label: "MiniLM L6 v2" },
 ];
 
 const CHUNK_OPTIONS = [
@@ -54,6 +114,12 @@ const CHUNK_OPTIONS = [
   { value: "sentence", label: "Sentence" },
   { value: "paragraph", label: "Paragraph" },
   { value: "semantic", label: "Semantic" },
+];
+
+const UPDATE_CHANNEL_OPTIONS = [
+  { value: "stable", label: "Stable" },
+  { value: "beta", label: "Beta" },
+  { value: "dev", label: "Dev" },
 ];
 
 const BACKOFF_OPTIONS = [
@@ -75,30 +141,9 @@ const NETWORK_OPTIONS = [
   { value: "none", label: "None" },
 ];
 
-const DEPLOY_TARGET_OPTIONS = [
-  { value: "local", label: "Local" },
-  { value: "docker", label: "Docker" },
-  { value: "kubernetes", label: "Kubernetes" },
-  { value: "cloud", label: "Cloud" },
-];
-
-const EVAL_METRIC_OPTIONS = [
-  { value: "accuracy", label: "Accuracy" },
-  { value: "bleu", label: "BLEU" },
-  { value: "rouge", label: "ROUGE" },
-  { value: "custom", label: "Custom" },
-];
-
-const EVAL_FREQUENCY_OPTIONS = [
-  { value: "manual", label: "Manual" },
-  { value: "per-commit", label: "Per Commit" },
-  { value: "daily", label: "Daily" },
-  { value: "weekly", label: "Weekly" },
-];
-
 const PROVIDER_TAGS = ["openai", "anthropic", "ollama", "google", "mistral", "cohere", "deepseek", "xai"];
 
-// ─── Sub-components for complex editor sections ─────────────────
+// ─── Sub-components ────────────────────────────────────────────
 
 function ApiKeysEditor() {
   const settings = useSettingsStore((s) => s.settings);
@@ -231,8 +276,6 @@ function McpServersEditor() {
   );
 }
 
-// ─── Allowed/Denied path editor ─────────────────────────────────
-
 function AllowedPathsEditor() {
   const settings = useSettingsStore((s) => s.settings);
   const updateSecurity = useSettingsStore((s) => s.updateSecurity);
@@ -281,22 +324,16 @@ function DeniedCommandsEditor() {
   );
 }
 
-// ─── Main Settings Page ─────────────────────────────────────────
+// ─── Main Settings Page ────────────────────────────────────────
 
 export function SettingsPage() {
   const settings = useSettingsStore((s) => s.settings);
   const updateGeneral = useSettingsStore((s) => s.updateGeneral);
   const updateProviders = useSettingsStore((s) => s.updateProviders);
-  const updateOrchestration = useSettingsStore((s) => s.updateOrchestration);
   const updateMemory = useSettingsStore((s) => s.updateMemory);
   const updateExecution = useSettingsStore((s) => s.updateExecution);
-  const updateDocker = useSettingsStore((s) => s.updateDocker);
   const updateSecurity = useSettingsStore((s) => s.updateSecurity);
-  const updateBrowser = useSettingsStore((s) => s.updateBrowser);
-  const updateLogging = useSettingsStore((s) => s.updateLogging);
-  const updatePlugins = useSettingsStore((s) => s.updatePlugins);
-  const updateDeployment = useSettingsStore((s) => s.updateDeployment);
-  const updateEvaluation = useSettingsStore((s) => s.updateEvaluation);
+  const updateOrchestration = useSettingsStore((s) => s.updateOrchestration);
   const updateGUI = useSettingsStore((s) => s.updateGUI);
   const resetAll = useSettingsStore((s) => s.resetAll);
   const isDirty = useSettingsStore((s) => s.isDirty);
@@ -304,19 +341,39 @@ export function SettingsPage() {
 
   const [searchQuery, setSearchQuery] = useState("");
 
+  // ── Local state for sections not backed by the store ──────────
+  const [defaultModel, setDefaultModel] = useState("gpt-4o");
+  const [maxRetries, setMaxRetries] = useState(3);
+  const [requestTimeout, setRequestTimeout] = useState(60);
+  const [autoCheckpoint, setAutoCheckpoint] = useState(true);
+  const [vaultEncryption, setVaultEncryption] = useState(true);
+  const [auditLogging, setAuditLogging] = useState(false);
+  const [corsOrigins, setCorsOrigins] = useState("http://localhost:5173");
+  const [autoUpdate, setAutoUpdate] = useState(true);
+  const [updateChannel, setUpdateChannel] = useState("stable");
+  const [checkingUpdate, setCheckingUpdate] = useState(false);
+
   const g = settings.general;
   const p = settings.providers;
-  const o = settings.orchestration;
   const m = settings.memory;
   const e = settings.execution;
-  const d = settings.docker;
   const sec = settings.security;
-  const br = settings.browser;
-  const l = settings.logging;
-  const pl = settings.plugins;
-  const dep = settings.deployment;
-  const ev = settings.evaluation;
-  const ui = settings.gui;
+
+  // ── About info (static) ──────────────────────────────────────
+  const about = {
+    version: "v1.0.0-beta.2",
+    electron: "33.3.1",
+    chrome: "130.0.6723.152",
+    node: "20.18.0",
+    license: "MIT License",
+    repoUrl: "https://github.com/aether-platform/aether",
+  };
+
+  const handleCheckUpdate = () => {
+    setCheckingUpdate(true);
+    // Simulate update check
+    setTimeout(() => setCheckingUpdate(false), 2000);
+  };
 
   return (
     <div className="settings-page h-full flex flex-col">
@@ -335,16 +392,8 @@ export function SettingsPage() {
                 Unsaved changes
               </span>
             )}
-            <SettingsButton
-              label="Reset All"
-              onClick={resetAll}
-              variant="danger"
-            />
-            <SettingsButton
-              label="Save Settings"
-              onClick={saveSettings}
-              variant="primary"
-            />
+            <SettingsButton label="Reset All" onClick={resetAll} variant="danger" />
+            <SettingsButton label="Save Settings" onClick={saveSettings} variant="primary" />
           </div>
         </div>
         <div className="relative max-w-md">
@@ -369,144 +418,87 @@ export function SettingsPage() {
       {/* ── Scrollable content ── */}
       <div className="flex-1 overflow-y-auto px-8 py-6">
         <div className="max-w-3xl space-y-2">
-          {/* ═══════════════════════════════════════════════════════
-                          1. GENERAL (App / GUI)
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="General" description="Application appearance, startup, and network settings">
-            <SettingsRow label="Theme" description="Light, dark, or system theme">
+
+          {/* ═══════════════════════════════════════════════════════════
+              1. GENERAL - Theme, Language, Auto-Start, Minimize to Tray
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection title="General" description="Application appearance, startup, and interface preferences">
+            <SettingsRow label="Theme" description="Light, dark, or follow system preference">
               <SettingsSelect
                 value={g.theme}
                 options={THEME_OPTIONS}
                 onChange={(v) => updateGeneral({ theme: v as "dark" | "light" | "system" })}
               />
             </SettingsRow>
-            <SettingsRow label="Language" description="Interface language preference">
+            <SettingsRow label="Language" description="Interface language for the application">
               <SettingsSelect
                 value={g.language}
                 options={LANGUAGE_OPTIONS}
                 onChange={(v) => updateGeneral({ language: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Startup Behavior" description="Launch behavior on system startup">
+            <SettingsRow label="Auto-Start" description="Automatically launch Aether on system startup">
               <SettingsSelect
                 value={g.startupBehavior}
-                options={STARTUP_OPTIONS}
+                options={AUTO_START_OPTIONS}
                 onChange={(v) => updateGeneral({ startupBehavior: v as "restore" | "minimized" | "hidden" })}
               />
             </SettingsRow>
-            <SettingsRow label="Minimize to Tray" description="Minimize to system tray instead of closing">
+            <SettingsRow label="Minimize to Tray" description="Close button minimizes to system tray instead of quitting">
               <SettingsToggle
                 checked={g.minimizeToTray}
                 onChange={(v) => updateGeneral({ minimizeToTray: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Data Directory" description="Path to store persistent data">
-              <SettingsInput
-                value={g.dataDir}
-                onChange={(v) => updateGeneral({ dataDir: v })}
-                placeholder="./data"
-                monospace
-              />
-            </SettingsRow>
-            <SettingsRow label="Host" description="Backend server bind address">
-              <SettingsInput
-                value={g.host}
-                onChange={(v) => updateGeneral({ host: v })}
-                placeholder="127.0.0.1"
-                monospace
-              />
-            </SettingsRow>
-            <SettingsRow label="Port" description="Backend server port">
-              <SettingsSlider
-                value={g.port}
-                min={1024}
-                max={65535}
-                onChange={(v) => updateGeneral({ port: v })}
-              />
-            </SettingsRow>
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          2. GUI / UI SETTINGS
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="User Interface" description="UI display preferences">
-            <SettingsRow label="Font Size" description="Base font size in pixels">
-              <SettingsSlider
-                value={ui.fontSize}
-                min={10}
-                max={24}
-                suffix="px"
-                onChange={(v) => updateGUI({ fontSize: v })}
-              />
-            </SettingsRow>
             <SettingsRow label="Compact Mode" description="Reduce padding and spacing throughout the UI">
               <SettingsToggle
-                checked={ui.compactMode}
+                checked={settings.gui.compactMode}
                 onChange={(v) => updateGUI({ compactMode: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Show Timestamps" description="Display timestamps on messages and logs">
-              <SettingsToggle
-                checked={ui.showTimestamps}
-                onChange={(v) => updateGUI({ showTimestamps: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Show Token Usage" description="Display token counts in agent responses">
-              <SettingsToggle
-                checked={ui.showTokenUsage}
-                onChange={(v) => updateGUI({ showTokenUsage: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Refresh Interval" description="Dashboard auto-refresh interval (ms)">
-              <SettingsSlider
-                value={ui.refreshInterval}
-                min={1000}
-                max={60000}
-                step={1000}
-                suffix="ms"
-                onChange={(v) => updateGUI({ refreshInterval: v })}
-              />
-            </SettingsRow>
           </SettingsSection>
 
-          {/* ═══════════════════════════════════════════════════════
-                          3. AI PROVIDERS
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="AI Providers" description="Provider configuration, API keys, and routing">
-            <SettingsRow label="Default Provider" description="Default AI provider for new agents">
+          {/* ═══════════════════════════════════════════════════════════
+              2. AI PROVIDERS - Default Provider, Default Model, Max Retries, Timeout
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection
+            title="AI Providers"
+            description="Configure provider selection, model defaults, and request behavior"
+          >
+            <SettingsRow label="Default Provider" description="Primary AI provider for agent requests">
               <SettingsSelect
                 value={p.defaultProvider}
-                options={PROVIDER_TAGS.map((t) => ({ value: t, label: t.charAt(0).toUpperCase() + t.slice(1) }))}
+                options={PROVIDER_OPTIONS}
                 onChange={(v) => updateProviders({ defaultProvider: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Provider Priorities" description="Order providers by priority (highest first)">
-              <SettingsTagGroup
-                tags={PROVIDER_TAGS}
-                selected={Object.entries(p.providerPriorities)
-                  .sort(([, a], [, b]) => a - b)
-                  .map(([k]) => k)}
-                onChange={(selected) => {
-                  const priorities: Record<string, number> = {};
-                  selected.forEach((tag, i) => { priorities[tag] = i + 1; });
-                  updateProviders({ providerPriorities: priorities });
-                }}
+            <SettingsRow label="Default Model" description="Default model to use for the selected provider">
+              <SettingsSelect
+                value={defaultModel}
+                options={MODEL_OPTIONS[p.defaultProvider] || MODEL_OPTIONS.openai}
+                onChange={(v) => setDefaultModel(v)}
               />
             </SettingsRow>
-            <SettingsRow label="Fallback Chains" description="Ordered fallback providers when primary fails">
-              <SettingsTagGroup
-                tags={PROVIDER_TAGS}
-                selected={p.fallbackChains}
-                onChange={(selected) => updateProviders({ fallbackChains: selected })}
+            <SettingsRow label="Max Retries" description="Maximum number of retry attempts on request failure">
+              <SettingsSlider
+                value={maxRetries}
+                min={0}
+                max={10}
+                suffix="x"
+                onChange={(v) => setMaxRetries(v)}
               />
             </SettingsRow>
-            <SettingsRow label="API Keys" description="Manage API keys for each provider" beta>
-              <ApiKeysEditor />
+            <SettingsRow label="Request Timeout" description="Timeout in seconds for provider API requests">
+              <SettingsSlider
+                value={requestTimeout}
+                min={10}
+                max={300}
+                step={10}
+                suffix="s"
+                onChange={(v) => setRequestTimeout(v)}
+              />
             </SettingsRow>
-            <SettingsRow label="Custom Headers" description="Additional HTTP headers for provider requests" beta>
-              <CustomHeadersEditor />
-            </SettingsRow>
-            <SettingsRow label="Rate Limit — RPM" description="Max requests per minute">
+            <SettingsRow label="Rate Limit — RPM" description="Max requests per minute per provider">
               <SettingsSlider
                 value={p.rateLimits.requestsPerMinute}
                 min={1}
@@ -516,44 +508,33 @@ export function SettingsPage() {
                 onChange={(v) => updateProviders({ rateLimits: { ...p.rateLimits, requestsPerMinute: v } })}
               />
             </SettingsRow>
-            <SettingsRow label="Rate Limit — TPM" description="Max tokens per minute">
-              <SettingsSlider
-                value={p.rateLimits.tokensPerMinute}
-                min={1000}
-                max={10000000}
-                step={10000}
-                suffix=" tpm"
-                onChange={(v) => updateProviders({ rateLimits: { ...p.rateLimits, tokensPerMinute: v } })}
-              />
+            <SettingsRow label="API Keys" description="Manage provider API credentials" beta>
+              <ApiKeysEditor />
             </SettingsRow>
-            <SettingsRow label="Concurrent Requests" description="Max concurrent requests per provider">
-              <SettingsSlider
-                value={p.rateLimits.concurrentRequests}
-                min={1}
-                max={50}
-                suffix=" req"
-                onChange={(v) => updateProviders({ rateLimits: { ...p.rateLimits, concurrentRequests: v } })}
-              />
+            <SettingsRow label="Custom Headers" description="Additional HTTP headers for provider requests" beta>
+              <CustomHeadersEditor />
             </SettingsRow>
           </SettingsSection>
 
-          {/* ═══════════════════════════════════════════════════════
-                          4. ORCHESTRATION
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Orchestration" description="Workflow graph execution and loop controls">
-            <SettingsRow label="Max Turn Loop" description="Hard limit on agent turns before forced stop">
+          {/* ═══════════════════════════════════════════════════════════
+              3. EXECUTION - Max Parallel, Default Max Turns, Timeout, Auto-Checkpoint
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection
+            title="Execution"
+            description="Agent execution concurrency, turn limits, timeouts, and checkpointing"
+          >
+            <SettingsRow label="Max Parallel Executions" description="Maximum number of agents executing simultaneously">
               <SettingsSlider
-                value={o.maxTurnLoop}
-                min={10}
-                max={1000}
-                step={10}
-                suffix=" turns"
-                onChange={(v) => updateOrchestration({ maxTurnLoop: v })}
+                value={e.maxConcurrent}
+                min={1}
+                max={64}
+                suffix=" agents"
+                onChange={(v) => updateExecution({ maxConcurrent: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Default Max Turns" description="Default per-agent max turns">
+            <SettingsRow label="Default Max Turns" description="Maximum turns per agent session before forced stop">
               <SettingsSlider
-                value={o.defaultMaxTurns}
+                value={settings.orchestration.defaultMaxTurns}
                 min={5}
                 max={200}
                 step={5}
@@ -561,26 +542,26 @@ export function SettingsPage() {
                 onChange={(v) => updateOrchestration({ defaultMaxTurns: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Autonomous Loop Limit" description="Max autonomous iterations before human check">
+            <SettingsRow label="Execution Timeout" description="Max wall-clock time per agent execution (seconds)">
               <SettingsSlider
-                value={o.autonomousLoopLimit}
-                min={1}
-                max={200}
-                step={5}
-                suffix=" loops"
-                onChange={(v) => updateOrchestration({ autonomousLoopLimit: v })}
+                value={e.defaultTimeout}
+                min={30}
+                max={3600}
+                step={30}
+                suffix="s"
+                onChange={(v) => updateExecution({ defaultTimeout: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Graph Checkpointing" description="Save workflow graph state at intervals">
+            <SettingsRow label="Auto-Checkpoint" description="Automatically save execution state at intervals">
               <SettingsToggle
-                checked={o.graphCheckpointEnabled}
-                onChange={(v) => updateOrchestration({ graphCheckpointEnabled: v })}
+                checked={autoCheckpoint}
+                onChange={(v) => setAutoCheckpoint(v)}
               />
             </SettingsRow>
-            {o.graphCheckpointEnabled && (
-              <SettingsRow label="Checkpoint Interval" description="Seconds between graph state checkpoints">
+            {autoCheckpoint && (
+              <SettingsRow label="Checkpoint Interval" description="Seconds between automatic state checkpoints">
                 <SettingsSlider
-                  value={o.checkpointInterval}
+                  value={settings.orchestration.checkpointInterval}
                   min={5}
                   max={300}
                   step={5}
@@ -589,72 +570,31 @@ export function SettingsPage() {
                 />
               </SettingsRow>
             )}
-            <SettingsRow label="Max Parallel Nodes" description="Max nodes executed simultaneously in a graph">
+            <SettingsRow label="Max Retries" description="Max per-step retries before marking task as failed">
               <SettingsSlider
-                value={o.maxParallelNodes}
-                min={1}
-                max={32}
-                suffix=" nodes"
-                onChange={(v) => updateOrchestration({ maxParallelNodes: v })}
-              />
-            </SettingsRow>
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          5. RETRY POLICIES
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Retry Policies" description="Backoff and retry settings for failed operations">
-            <SettingsRow label="Max Retry Attempts" description="Max retries before marking a step as failed">
-              <SettingsSlider
-                value={o.retryPolicy.maxAttempts}
+                value={e.maxRetries}
                 min={0}
                 max={20}
                 suffix="x"
-                onChange={(v) =>
-                  updateOrchestration({ retryPolicy: { ...o.retryPolicy, maxAttempts: v } })
-                }
+                onChange={(v) => updateExecution({ maxRetries: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Backoff Strategy" description="How delay increases between retries">
-              <SettingsSelect
-                value={o.retryPolicy.backoff}
-                options={BACKOFF_OPTIONS}
-                onChange={(v) =>
-                  updateOrchestration({ retryPolicy: { ...o.retryPolicy, backoff: v as BackoffType } })
-                }
-              />
-            </SettingsRow>
-            <SettingsRow label="Initial Delay" description="Initial delay before first retry (ms)">
-              <SettingsSlider
-                value={o.retryPolicy.initialDelay}
-                min={100}
-                max={30000}
-                step={100}
-                suffix="ms"
-                onChange={(v) =>
-                  updateOrchestration({ retryPolicy: { ...o.retryPolicy, initialDelay: v } })
-                }
-              />
-            </SettingsRow>
-            <SettingsRow label="Max Delay" description="Maximum delay between retries (ms)">
-              <SettingsSlider
-                value={o.retryPolicy.maxDelay}
-                min={1000}
-                max={300000}
-                step={1000}
-                suffix="ms"
-                onChange={(v) =>
-                  updateOrchestration({ retryPolicy: { ...o.retryPolicy, maxDelay: v } })
-                }
+            <SettingsRow label="Parallel Steps" description="Enable parallel step execution in workflows">
+              <SettingsToggle
+                checked={e.enableParallelSteps}
+                onChange={(v) => updateExecution({ enableParallelSteps: v })}
               />
             </SettingsRow>
           </SettingsSection>
 
-          {/* ═══════════════════════════════════════════════════════
-                          6. MEMORY & EMBEDDINGS
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Memory & Embeddings" description="Storage backend, vector DB, chunking, and retrieval">
-            <SettingsRow label="Memory System" description="Enable persistent memory for agents">
+          {/* ═══════════════════════════════════════════════════════════
+              4. MEMORY - Vector Store, Embedding Model, Chunk Size, Overlap
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection
+            title="Memory"
+            description="Vector database, embedding configuration, and retrieval settings"
+          >
+            <SettingsRow label="Memory System" description="Enable persistent memory and RAG for agents">
               <SettingsToggle
                 checked={m.memoryEnabled}
                 onChange={(v) => updateMemory({ memoryEnabled: v })}
@@ -662,10 +602,10 @@ export function SettingsPage() {
             </SettingsRow>
             {m.memoryEnabled && (
               <>
-                <SettingsRow label="Storage Backend" description="Database engine for memory storage">
+                <SettingsRow label="Vector Store Type" description="Backend database for vector embeddings">
                   <SettingsSelect
                     value={m.storageType}
-                    options={STORAGE_OPTIONS}
+                    options={VECTOR_STORE_OPTIONS}
                     onChange={(v) => updateMemory({ storageType: v as "sqlite" | "qdrant" | "postgres" | "memory" })}
                   />
                 </SettingsRow>
@@ -680,7 +620,7 @@ export function SettingsPage() {
                     />
                   </SettingsRow>
                 )}
-                <SettingsRow label="Collection Name" description="Vector collection / table name">
+                <SettingsRow label="Collection Name" description="Vector collection or table name">
                   <SettingsInput
                     value={m.collectionName}
                     onChange={(v) => updateMemory({ collectionName: v })}
@@ -688,7 +628,7 @@ export function SettingsPage() {
                     monospace
                   />
                 </SettingsRow>
-                <SettingsRow label="Embedding Provider" description="Provider for text embeddings">
+                <SettingsRow label="Embedding Provider" description="Provider service for text embeddings">
                   <SettingsInput
                     value={m.embeddingProvider}
                     onChange={(v) => updateMemory({ embeddingProvider: v })}
@@ -696,42 +636,14 @@ export function SettingsPage() {
                     monospace
                   />
                 </SettingsRow>
-                <SettingsRow label="Embedding Model" description="Model name for embeddings">
-                  <SettingsInput
-                    value={m.embeddingModel}
-                    onChange={(v) => updateMemory({ embeddingModel: v })}
-                    placeholder="text-embedding-ada-002"
-                    monospace
-                  />
-                </SettingsRow>
-                <SettingsRow label="Embedding Dimension" description="Output dimension of embedding vectors">
-                  <SettingsSlider
-                    value={m.embeddingDimension}
-                    min={64}
-                    max={4096}
-                    step={64}
-                    suffix="d"
-                    onChange={(v) => updateMemory({ embeddingDimension: v })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Embedding Batch Size" description="Batch size for embedding API calls">
-                  <SettingsSlider
-                    value={m.embeddingBatchSize}
-                    min={1}
-                    max={200}
-                    step={5}
-                    suffix=" docs"
-                    onChange={(v) => updateMemory({ embeddingBatchSize: v })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Chunking Strategy" description="How to split documents for embedding">
+                <SettingsRow label="Embedding Model" description="Model used to generate embeddings">
                   <SettingsSelect
-                    value={m.chunkingStrategy}
-                    options={CHUNK_OPTIONS}
-                    onChange={(v) => updateMemory({ chunkingStrategy: v as ChunkingStrategy })}
+                    value={m.embeddingModel}
+                    options={EMBEDDING_MODEL_OPTIONS}
+                    onChange={(v) => updateMemory({ embeddingModel: v })}
                   />
                 </SettingsRow>
-                <SettingsRow label="Max Chunk Size" description="Maximum tokens per chunk">
+                <SettingsRow label="Chunk Size" description="Maximum tokens per document chunk">
                   <SettingsSlider
                     value={m.maxChunkSize}
                     min={128}
@@ -751,7 +663,14 @@ export function SettingsPage() {
                     onChange={(v) => updateMemory({ chunkOverlap: v })}
                   />
                 </SettingsRow>
-                <SettingsRow label="Top-K Results" description="Number of results to retrieve per query">
+                <SettingsRow label="Chunking Strategy" description="Algorithm for splitting documents">
+                  <SettingsSelect
+                    value={m.chunkingStrategy}
+                    options={CHUNK_OPTIONS}
+                    onChange={(v) => updateMemory({ chunkingStrategy: v as ChunkingStrategy })}
+                  />
+                </SettingsRow>
+                <SettingsRow label="Top-K Results" description="Number of retrieved chunks per query">
                   <SettingsSlider
                     value={m.topK}
                     min={1}
@@ -760,14 +679,24 @@ export function SettingsPage() {
                     onChange={(v) => updateMemory({ topK: v })}
                   />
                 </SettingsRow>
-                <SettingsRow label="Min Score Threshold" description="Minimum similarity score for results">
+                <SettingsRow label="Min Score Threshold" description="Minimum similarity score for retrieval">
                   <SettingsSlider
-                    value={m.minScore}
+                    value={m.minScore * 100}
                     min={0}
                     max={100}
                     step={5}
                     suffix="%"
                     onChange={(v) => updateMemory({ minScore: v / 100 })}
+                  />
+                </SettingsRow>
+                <SettingsRow label="Embedding Dimension" description="Output dimension of embedding vectors">
+                  <SettingsSlider
+                    value={m.embeddingDimension}
+                    min={64}
+                    max={4096}
+                    step={64}
+                    suffix="d"
+                    onChange={(v) => updateMemory({ embeddingDimension: v })}
                   />
                 </SettingsRow>
                 <SettingsRow label="Reranking" description="Re-rank retrieved results with a cross-encoder">
@@ -786,348 +715,29 @@ export function SettingsPage() {
             )}
           </SettingsSection>
 
-          {/* ═══════════════════════════════════════════════════════
-                          7. EXECUTION
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Execution" description="Agent execution limits, timeouts, and resource budgets">
-            <SettingsRow label="Max Concurrent Agents" description="Number of agents running simultaneously">
-              <SettingsSlider
-                value={e.maxConcurrent}
-                min={1}
-                max={64}
-                suffix=" agents"
-                onChange={(v) => updateExecution({ maxConcurrent: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Default Timeout" description="Default per-agent timeout (seconds)">
-              <SettingsSlider
-                value={e.defaultTimeout}
-                min={30}
-                max={3600}
-                step={30}
-                suffix="s"
-                onChange={(v) => updateExecution({ defaultTimeout: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Max Retries" description="Max per-step retries before failure">
-              <SettingsSlider
-                value={e.maxRetries}
-                min={0}
-                max={20}
-                suffix="x"
-                onChange={(v) => updateExecution({ maxRetries: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Parallel Steps" description="Enable parallel step execution in workflows">
+          {/* ═══════════════════════════════════════════════════════════
+              5. SECURITY - API Key Vault Encryption, RBAC, Audit Logging
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection
+            title="Security"
+            description="Access control, credential management, and audit trail settings"
+          >
+            <SettingsRow label="API Key Vault Encryption" description="Encrypt stored API keys at rest using system keychain">
               <SettingsToggle
-                checked={e.enableParallelSteps}
-                onChange={(v) => updateExecution({ enableParallelSteps: v })}
+                checked={vaultEncryption}
+                onChange={(v) => setVaultEncryption(v)}
               />
             </SettingsRow>
-            <SettingsRow label="Max Memory" description="Max memory per agent (MB)">
-              <SettingsSlider
-                value={e.resourceLimits.maxMemoryMB}
-                min={64}
-                max={32768}
-                step={64}
-                suffix=" MB"
-                onChange={(v) => updateExecution({ resourceLimits: { ...e.resourceLimits, maxMemoryMB: v } })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Max CPU" description="Max CPU percent per agent">
-              <SettingsSlider
-                value={e.resourceLimits.maxCPUPercent}
-                min={10}
-                max={100}
-                step={10}
-                suffix="%"
-                onChange={(v) => updateExecution({ resourceLimits: { ...e.resourceLimits, maxCPUPercent: v } })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Max Disk" description="Max disk usage per agent (MB)">
-              <SettingsSlider
-                value={e.resourceLimits.maxDiskMB}
-                min={50}
-                max={32768}
-                step={50}
-                suffix=" MB"
-                onChange={(v) => updateExecution({ resourceLimits: { ...e.resourceLimits, maxDiskMB: v } })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Token Budget" description="Token budget per agent turn">
-              <SettingsSlider
-                value={e.tokenBudgetPerTurn}
-                min={1024}
-                max={128000}
-                step={1024}
-                suffix=" tokens"
-                onChange={(v) => updateExecution({ tokenBudgetPerTurn: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Context Window" description="Max context window tokens per agent">
-              <SettingsSlider
-                value={e.contextWindowLimit}
-                min={4096}
-                max={1000000}
-                step={4096}
-                suffix=" tokens"
-                onChange={(v) => updateExecution({ contextWindowLimit: v })}
-              />
-            </SettingsRow>
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          8. DOCKER / SANDBOX
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Docker & Sandbox" description="Container execution, sandboxing, and isolation">
-            <SettingsRow label="Sandbox Execution" description="Run agent steps inside Docker containers">
-              <SettingsToggle
-                checked={d.sandboxEnabled}
-                onChange={(v) => updateDocker({ sandboxEnabled: v })}
-              />
-            </SettingsRow>
-            {d.sandboxEnabled && (
-              <>
-                <SettingsRow label="Docker Socket" description="Path to the Docker socket">
-                  <SettingsInput
-                    value={d.dockerSocketPath}
-                    onChange={(v) => updateDocker({ dockerSocketPath: v })}
-                    placeholder="/var/run/docker.sock"
-                    monospace
-                  />
-                </SettingsRow>
-                <SettingsRow label="Default Image" description="Default sandbox Docker image">
-                  <SettingsInput
-                    value={d.defaultImage}
-                    onChange={(v) => updateDocker({ defaultImage: v })}
-                    placeholder="aether-sandbox:latest"
-                    monospace
-                  />
-                </SettingsRow>
-                <SettingsRow label="Network Mode" description="Container network mode">
-                  <SettingsSelect
-                    value={d.networkMode}
-                    options={NETWORK_OPTIONS}
-                    onChange={(v) => updateDocker({ networkMode: v as NetworkMode })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Container Memory Limit" description="Max memory per container (MB)">
-                  <SettingsSlider
-                    value={d.memoryLimit}
-                    min={64}
-                    max={16384}
-                    step={64}
-                    suffix=" MB"
-                    onChange={(v) => updateDocker({ memoryLimit: v })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Container CPU Limit" description="Max CPU cores per container">
-                  <SettingsSlider
-                    value={d.cpuLimit}
-                    min={1}
-                    max={32}
-                    suffix=" cores"
-                    onChange={(v) => updateDocker({ cpuLimit: v })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Sandbox Timeout" description="Max runtime per sandbox session (seconds)">
-                  <SettingsSlider
-                    value={d.timeout}
-                    min={30}
-                    max={3600}
-                    step={30}
-                    suffix="s"
-                    onChange={(v) => updateDocker({ timeout: v })}
-                  />
-                </SettingsRow>
-              </>
-            )}
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          9. BROWSER AUTOMATION
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Browser Automation" description="Headless browser and web scraping configuration">
-            <SettingsRow label="Browser Automation" description="Enable browser automation for agents">
-              <SettingsToggle
-                checked={br.browserAutomationEnabled}
-                onChange={(v) => updateBrowser({ browserAutomationEnabled: v })}
-              />
-            </SettingsRow>
-            {br.browserAutomationEnabled && (
-              <>
-                <SettingsRow label="Headless Mode" description="Run browser without visible window">
-                  <SettingsToggle
-                    checked={br.headlessMode}
-                    onChange={(v) => updateBrowser({ headlessMode: v })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Viewport Width" description="Default browser viewport width (px)">
-                  <SettingsSlider
-                    value={br.defaultViewport.width}
-                    min={640}
-                    max={3840}
-                    step={160}
-                    suffix="px"
-                    onChange={(v) => updateBrowser({ defaultViewport: { ...br.defaultViewport, width: v } })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Viewport Height" description="Default browser viewport height (px)">
-                  <SettingsSlider
-                    value={br.defaultViewport.height}
-                    min={480}
-                    max={2160}
-                    step={60}
-                    suffix="px"
-                    onChange={(v) => updateBrowser({ defaultViewport: { ...br.defaultViewport, height: v } })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Navigation Timeout" description="Max page load timeout (ms)">
-                  <SettingsSlider
-                    value={br.timeout}
-                    min={1000}
-                    max={120000}
-                    step={1000}
-                    suffix="ms"
-                    onChange={(v) => updateBrowser({ timeout: v })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Screenshots" description="Capture screenshots during automation">
-                  <SettingsToggle
-                    checked={br.screenshotEnabled}
-                    onChange={(v) => updateBrowser({ screenshotEnabled: v })}
-                  />
-                </SettingsRow>
-              </>
-            )}
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          10. LOGGING, TRACING & TELEMETRY
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Logging, Tracing & Telemetry" description="Observability, metrics, and diagnostics">
-            <SettingsRow label="Log Level" description="Verbosity of application logs">
-              <SettingsSelect
-                value={l.logLevel}
-                options={LOG_LEVEL_OPTIONS}
-                onChange={(v) => updateLogging({ logLevel: v as "debug" | "info" | "warn" | "error" })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Logging Verbosity" description="Numeric verbosity level for detailed logging">
-              <SettingsSlider
-                value={l.loggingVerbosity}
-                min={0}
-                max={10}
-                suffix=""
-                onChange={(v) => updateLogging({ loggingVerbosity: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Log Retention" description="Days to retain log files">
-              <SettingsSlider
-                value={l.logRetentionDays}
-                min={1}
-                max={365}
-                step={7}
-                suffix=" days"
-                onChange={(v) => updateLogging({ logRetentionDays: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Distributed Tracing" description="Enable OpenTelemetry distributed tracing">
-              <SettingsToggle
-                checked={l.tracingEnabled}
-                onChange={(v) => updateLogging({ tracingEnabled: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Telemetry" description="Send anonymized usage telemetry">
-              <SettingsToggle
-                checked={l.telemetryEnabled}
-                onChange={(v) => updateLogging({ telemetryEnabled: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Metrics Collection" description="Enable Prometheus-style metrics">
-              <SettingsToggle
-                checked={l.metricsEnabled}
-                onChange={(v) => updateLogging({ metricsEnabled: v })}
-              />
-            </SettingsRow>
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          11. PLUGINS
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Plugins" description="Plugin directory, auto-load, and management">
-            <SettingsRow label="Plugin Directory" description="Path to scan for installed plugins">
-              <SettingsInput
-                value={pl.pluginDir}
-                onChange={(v) => updatePlugins({ pluginDir: v })}
-                placeholder="./plugins"
-                monospace
-              />
-            </SettingsRow>
-            <SettingsRow label="Auto-Load Plugins" description="Load enabled plugins on startup">
-              <SettingsToggle
-                checked={pl.autoLoadPlugins}
-                onChange={(v) => updatePlugins({ autoLoadPlugins: v })}
-              />
-            </SettingsRow>
-            <SettingsRow label="Enabled Plugins" description="Plugins enabled for use in agents">
-              <SettingsInput
-                value={pl.enabledPlugins.join(", ")}
-                onChange={(v) =>
-                  updatePlugins({ enabledPlugins: v.split(",").map((s) => s.trim()).filter(Boolean) })
-                }
-                placeholder="plugin-a, plugin-b, plugin-c"
-                width="min-w-[240px]"
-              />
-            </SettingsRow>
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          12. EVALUATION
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Evaluation" description="Agent evaluation metrics, datasets, and frequency">
-            <SettingsRow label="Evaluations" description="Enable agent evaluation framework">
-              <SettingsToggle
-                checked={ev.evalEnabled}
-                onChange={(v) => updateEvaluation({ evalEnabled: v })}
-              />
-            </SettingsRow>
-            {ev.evalEnabled && (
-              <>
-                <SettingsRow label="Metric" description="Primary evaluation metric">
-                  <SettingsSelect
-                    value={ev.evalMetric}
-                    options={EVAL_METRIC_OPTIONS}
-                    onChange={(v) => updateEvaluation({ evalMetric: v as "accuracy" | "bleu" | "rouge" | "custom" })}
-                  />
-                </SettingsRow>
-                <SettingsRow label="Dataset" description="Path or ID of evaluation dataset">
-                  <SettingsInput
-                    value={ev.evalDataset}
-                    onChange={(v) => updateEvaluation({ evalDataset: v })}
-                    placeholder="eval-dataset"
-                    monospace
-                  />
-                </SettingsRow>
-                <SettingsRow label="Frequency" description="How often evaluations run">
-                  <SettingsSelect
-                    value={ev.evalFrequency}
-                    options={EVAL_FREQUENCY_OPTIONS}
-                    onChange={(v) => updateEvaluation({ evalFrequency: v as EvalFrequency })}
-                  />
-                </SettingsRow>
-              </>
-            )}
-          </SettingsSection>
-
-          {/* ═══════════════════════════════════════════════════════
-                          13. SECURITY & RBAC
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Security & RBAC" description="Access control, command policies, MCP servers">
             <SettingsRow label="RBAC" description="Role-based access control for multi-user setups" beta>
               <SettingsToggle
                 checked={sec.rbacEnabled}
                 onChange={(v) => updateSecurity({ rbacEnabled: v })}
+              />
+            </SettingsRow>
+            <SettingsRow label="Audit Logging" description="Record all security-relevant events to the audit log">
+              <SettingsToggle
+                checked={auditLogging}
+                onChange={(v) => setAuditLogging(v)}
               />
             </SettingsRow>
             <SettingsRow label="MCP Server" description="Model Context Protocol server for external tools" beta>
@@ -1155,99 +765,163 @@ export function SettingsPage() {
             </SettingsRow>
           </SettingsSection>
 
-          {/* ═══════════════════════════════════════════════════════
-                          14. DEPLOYMENT & CI/CD
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Deployment & CI/CD" description="Commit settings, deployment targets, and CI pipeline">
-            <SettingsRow label="CI/CD Pipeline" description="Enable automated CI/CD for agent builds" beta>
-              <SettingsToggle
-                checked={dep.cicdEnabled}
-                onChange={(v) => updateDeployment({ cicdEnabled: v })}
+          {/* ═══════════════════════════════════════════════════════════
+              6. NETWORK - Backend Port, Host Binding, CORS Origins
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection
+            title="Network"
+            description="Backend server binding, port configuration, and CORS settings"
+          >
+            <SettingsRow label="Backend Port" description="TCP port for the Aether backend server">
+              <SettingsSlider
+                value={g.port}
+                min={1024}
+                max={65535}
+                onChange={(v) => updateGeneral({ port: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Auto-Commit" description="Automatically commit agent code changes">
-              <SettingsToggle
-                checked={dep.commitSettings.autoCommit}
-                onChange={(v) =>
-                  updateDeployment({ commitSettings: { ...dep.commitSettings, autoCommit: v } })
-                }
-              />
-            </SettingsRow>
-            {dep.commitSettings.autoCommit && (
-              <>
-                <SettingsRow label="Commit Prefix" description="Prefix for auto-generated commit messages">
-                  <SettingsInput
-                    value={dep.commitSettings.commitMessagePrefix}
-                    onChange={(v) =>
-                      updateDeployment({ commitSettings: { ...dep.commitSettings, commitMessagePrefix: v } })
-                    }
-                    placeholder="aether:"
-                    monospace
-                  />
-                </SettingsRow>
-                <SettingsRow label="Signed Commits" description="Sign commits with GPG">
-                  <SettingsToggle
-                    checked={dep.commitSettings.signCommits}
-                    onChange={(v) =>
-                      updateDeployment({ commitSettings: { ...dep.commitSettings, signCommits: v } })
-                    }
-                  />
-                </SettingsRow>
-              </>
-            )}
-            <SettingsRow label="Deployment Target" description="Target environment for deployment">
+            <SettingsRow label="Host Binding" description="Network interface to bind the backend server to">
               <SettingsSelect
-                value={dep.deploymentTarget}
-                options={DEPLOY_TARGET_OPTIONS}
-                onChange={(v) => updateDeployment({ deploymentTarget: v as DeploymentTarget })}
+                value={g.host}
+                options={[
+                  { value: "127.0.0.1", label: "localhost (127.0.0.1)" },
+                  { value: "0.0.0.0", label: "All interfaces (0.0.0.0)" },
+                  { value: "::1", label: "IPv6 localhost (::1)" },
+                ]}
+                onChange={(v) => updateGeneral({ host: v })}
               />
             </SettingsRow>
-            <SettingsRow label="Deployment URL" description="URL for remote deployment target">
+            <SettingsRow label="CORS Origins" description="Allowed CORS origins (comma-separated)">
               <SettingsInput
-                value={dep.deploymentUrl}
-                onChange={(v) => updateDeployment({ deploymentUrl: v })}
-                placeholder="https://deploy.aether.local"
+                value={corsOrigins}
+                onChange={(v) => setCorsOrigins(v)}
+                placeholder="http://localhost:5173, https://app.aether.dev"
+                monospace
+                width="min-w-[260px]"
+              />
+            </SettingsRow>
+            <SettingsRow label="Data Directory" description="Path to store persistent server data">
+              <SettingsInput
+                value={g.dataDir}
+                onChange={(v) => updateGeneral({ dataDir: v })}
+                placeholder="./data"
                 monospace
               />
             </SettingsRow>
           </SettingsSection>
 
-          {/* ═══════════════════════════════════════════════════════
-                          15. LOCAL & CLOUD MODEL SETTINGS
-                         ═══════════════════════════════════════════════ */}
-          <SettingsSection title="Model Settings" description="Local inference and cloud model configuration">
-            <SettingsRow
-              label="Local Models"
-              description="Configure local model endpoints (Ollama, llama.cpp, vLLM)"
-            >
-              <SettingsInput
-                value={p.customHeaders["local_endpoint"] || ""}
-                onChange={(v) => {
-                  const hdrs = { ...p.customHeaders };
-                  if (v) hdrs["local_endpoint"] = v;
-                  else delete hdrs["local_endpoint"];
-                  updateProviders({ customHeaders: hdrs });
-                }}
-                placeholder="http://localhost:11434"
-                monospace
+          {/* ═══════════════════════════════════════════════════════════
+              7. UPDATES - Auto-Update, Channel, Check Now
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection
+            title="Updates"
+            description="Software update settings and version channel selection"
+          >
+            <SettingsRow label="Auto-Update" description="Automatically download and install updates">
+              <SettingsToggle
+                checked={autoUpdate}
+                onChange={(v) => setAutoUpdate(v)}
+              />
+            </SettingsRow>
+            <SettingsRow label="Update Channel" description="Release channel to receive updates from">
+              <SettingsSelect
+                value={updateChannel}
+                options={UPDATE_CHANNEL_OPTIONS}
+                onChange={(v) => setUpdateChannel(v)}
               />
             </SettingsRow>
             <SettingsRow
-              label="Cloud Models"
-              description="Configure cloud model API endpoints"
+              label="Check for Updates"
+              description="Manually check if a newer version is available"
             >
-              <SettingsInput
-                value={p.customHeaders["cloud_endpoint"] || ""}
-                onChange={(v) => {
-                  const hdrs = { ...p.customHeaders };
-                  if (v) hdrs["cloud_endpoint"] = v;
-                  else delete hdrs["cloud_endpoint"];
-                  updateProviders({ customHeaders: hdrs });
-                }}
-                placeholder="https://api.openai.com"
-                monospace
+              <SettingsButton
+                label={checkingUpdate ? "Checking..." : "Check Now"}
+                onClick={handleCheckUpdate}
+                variant="primary"
+                disabled={checkingUpdate}
               />
             </SettingsRow>
+            {checkingUpdate && (
+              <div className="px-5 py-2">
+                <div className="flex items-center gap-2 text-xs text-gray-400">
+                  <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" strokeDasharray="31.4 31.4" />
+                  </svg>
+                  Checking for updates...
+                </div>
+              </div>
+            )}
+            {!checkingUpdate && (
+              <div className="px-5 py-2 text-[11px] text-gray-500">
+                Current version: {about.version} ({updateChannel} channel)
+              </div>
+            )}
+          </SettingsSection>
+
+          {/* ═══════════════════════════════════════════════════════════
+              8. ABOUT - Version, Electron, Chrome, Node, License, Repo
+             ═══════════════════════════════════════════════════════════ */}
+          <SettingsSection
+            title="About"
+            description="Application information and version details"
+          >
+            <div className="px-5 py-4 space-y-3">
+              <div className="flex items-center gap-4">
+                <div className="w-10 h-10 rounded-lg bg-[#a78bfa]/20 flex items-center justify-center shrink-0">
+                  <span className="text-lg font-bold text-[#a78bfa]">A</span>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-200">Aether Platform</h3>
+                  <p className="text-[11px] text-gray-500">Agent orchestration & execution engine</p>
+                </div>
+                <span className="ml-auto text-xs font-mono text-[#a78bfa] bg-[#a78bfa]/10 px-2 py-0.5 rounded">
+                  {about.version}
+                </span>
+              </div>
+
+              <div className="border-t border-[#1e1e24]" />
+
+              <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+                <div>
+                  <span className="text-[11px] text-gray-500">Version</span>
+                  <p className="text-xs font-mono text-gray-300 mt-0.5">{about.version}</p>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500">Electron</span>
+                  <p className="text-xs font-mono text-gray-300 mt-0.5">{about.electron}</p>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500">Chrome</span>
+                  <p className="text-xs font-mono text-gray-300 mt-0.5">{about.chrome}</p>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500">Node.js</span>
+                  <p className="text-xs font-mono text-gray-300 mt-0.5">{about.node}</p>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500">License</span>
+                  <p className="text-xs font-mono text-gray-300 mt-0.5">{about.license}</p>
+                </div>
+                <div>
+                  <span className="text-[11px] text-gray-500">Repository</span>
+                  <a
+                    href={about.repoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-xs font-mono text-[#a78bfa] hover:text-[#c4b5fd] transition-colors mt-0.5 block"
+                  >
+                    {about.repoUrl}
+                  </a>
+                </div>
+              </div>
+
+              <div className="border-t border-[#1e1e24]" />
+
+              <div className="text-[11px] text-gray-500 leading-relaxed">
+                Aether is an open-source agent orchestration platform. Built with Electron, React,
+                and TypeScript. Licensed under the MIT License.
+              </div>
+            </div>
           </SettingsSection>
 
           {/* ── Bottom padding ── */}
