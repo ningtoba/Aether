@@ -187,7 +187,10 @@ export class LangGraphEngine {
           const pm: Record<string, string> = {};
           for (const e of edges) {
             if (hasNode(e.to)) pm["_n_" + e.to] = "_n_" + e.to;
+            else pm[e.to] = (e.to === '__end__' || e.to === 'END') ? END : e.to;
           }
+          // Also allow END as a return path
+          pm[END] = END;
           g.addConditionalEdges(s, router, pm);
         } else {
           // Fan-out: all direct edges followed
