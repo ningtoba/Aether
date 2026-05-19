@@ -1,2 +1,228 @@
-/** @aether/ts-runtime */
+/**
+ * @aether/ts-runtime — TypeScript runtime sandbox for isolated VM execution
+ *
+ * Provides sandboxed execution of TypeScript code in child processes using tsx.
+ * Supports timeouts, output size limits, and basic resource constraints.
+ */
+
+import { execFile } from "node:child_process";
+import { writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { tmpdir } from "node:os";
+
 export const VERSION = "0.1.0";
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+export interface ExecTypeScriptOptions {
+  /** Max execution time in milliseconds (default: 10_000) */
+  timeout?: number;
+  /** Max stdout/stderr output size in bytes (default: 1_048_576 = 1 MB) */
+  maxOutputSize?: number;
+  /** Environment variables to pass to the child process */
+  env?: Record<string, string>;
+  /** Working directory for execution (default: temp directory) */
+  cwd?: string;
+}
+
+export interface ExecResult {
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  timedOut: boolean;
+}
+
+export interface EvalResult<T = unknown> {
+  value: T | null;
+  error: string | null;
+  stdout: string;
+  stderr: string;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function getTsxPath(): string {
+  // Try common locations for tsx binary
+  // This module's own node_modules, hoisted root, or global
+  const __dirname = dirname(new URL(import.meta.url).pathname);
+
+  const candidates = [
+    join(__dirname, "..", "node_modules", ".bin", "tsx"),
+    join(__dirname, "..", "node_modules", "tsx", "dist", "cli.mjs"),
+    join(__dirname, "..", "..", "..", "node_modules", ".bin", "tsx"),
+    join(__dirname, "..", "..", "..", "node_modules", "tsx", "dist", "cli.mjs"),
+    // direct lookup via PATH
+    "tsx",
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate) || candidate === "tsx") {
+        return candidate;
+      }
+    } catch {
+      continue;
+    }
+  }
+  throw new Error(
+    "tsx not found. Ensure @aether/ts-runtime dependencies are installed.",
+  );
+}
+
+/** Write code to a temp file and return the file path. */
+function writeTempFile(code: string): { filePath: string; cleanup: () => void } {
+  const tmpDir = mkdtempSync(join(tmpdir(), "ts-runtime-"));
+  const filePath = join(tmpDir, "script.ts");
+  writeFileSync(filePath, code, "utf-8");
+  return {
+    filePath,
+    cleanup: () => {
+      try {
+        rmSync(tmpDir, { recursive: true, force: true });
+      } catch {
+        // best-effort cleanup
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Public API
+// ---------------------------------------------------------------------------
+
+/**
+ * Run TypeScript code in an isolated child_process using tsx.
+ * Returns stdout, stderr, and exitCode.
+ */
+export function execTypeScript(
+  code: string,
+  options: ExecTypeScriptOptions = {},
+): Promise<ExecResult> {
+  return new Promise((resolve) => {
+    const { filePath, cleanup } = writeTempFile(code);
+    const timeout: number = options.timeout ?? 10_000;
+    const maxOutput: number = options.maxOutputSize ?? 1_048_576;
+
+    const env: Record<string, string> = {
+      ...(process.env as Record<string, string>),
+      NODE_ENV: "sandbox",
+      NODE_NO_WARNINGS: "1",
+      NODE_OPTIONS: "--max-old-space-size=256",
+      ...options.env,
+    };
+
+    // If user explicitly sets NODE_OPTIONS, use theirs instead
+    if (options.env?.NODE_OPTIONS !== undefined) {
+      env.NODE_OPTIONS = options.env.NODE_OPTIONS;
+    }
+
+    const child = execFile(
+      getTsxPath(),
+      [filePath],
+      {
+        timeout,
+        maxBuffer: maxOutput,
+        cwd: options.cwd,
+        env,
+      },
+      (error, stdout, stderr) => {
+        cleanup();
+        const timedOut = error?.killed === true ||
+          (error?.message != null && error.message.includes("timed out")) ||
+          false;
+        resolve({
+          stdout: stdout ?? "",
+          stderr: stderr ?? "",
+          exitCode: (error != null ? (typeof error.code === "number" ? error.code : 1) : 0),
+          timedOut,
+        });
+      },
+    );
+
+    // Safety: ensure process is killed on timeout
+    if (child.exitCode === null) {
+      setTimeout(() => {
+        if (child.exitCode === null) {
+          child.kill("SIGTERM");
+          setTimeout(() => {
+            if (child.exitCode === null) {
+              child.kill("SIGKILL");
+            }
+          }, 2_000);
+        }
+      }, timeout);
+    }
+  });
+}
+
+/**
+ * Run TypeScript code and return the evaluation result.
+ * The code should output its result as JSON via console.log or process.stdout.write.
+ * The captured stdout is parsed as JSON.
+ */
+export async function evalTypeScript<T = unknown>(
+  code: string,
+  context?: Record<string, unknown>,
+  options: ExecTypeScriptOptions = {},
+): Promise<EvalResult<T>> {
+  const contextJson = context ? JSON.stringify(context) : "{}";
+
+  const wrapperCode = `
+const __context = ${contextJson};
+Object.assign(globalThis, __context);
+
+// User code follows
+${code}
+`;
+
+  const result = await execTypeScript(wrapperCode, options);
+
+  if (result.exitCode !== 0) {
+    return {
+      value: null,
+      error: result.stderr || `Process exited with code ${result.exitCode}`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  }
+
+  try {
+    const trimmed = result.stdout.trim();
+    const value = trimmed ? (JSON.parse(trimmed) as T) : null;
+    return {
+      value,
+      error: null,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  } catch (parseErr) {
+    return {
+      value: null,
+      error: `Failed to parse result as JSON: ${(parseErr as Error).message}`,
+      stdout: result.stdout,
+      stderr: result.stderr,
+    };
+  }
+}
+
+/**
+ * Write TypeScript code to a temporary file and return the path.
+ * Useful for debugging or when you need to inspect the generated file.
+ */
+export function writeTempFileForCode(code: string): string {
+  const { filePath } = writeTempFile(code);
+  return filePath;
+}
+
+/**
+ * Read output from a file that was produced by a ts-runtime script.
+ */
+export function readOutputFile(filePath: string): string {
+  if (!existsSync(filePath)) {
+    throw new Error(`Output file not found: ${filePath}`);
+  }
+  return readFileSync(filePath, "utf-8");
+}
