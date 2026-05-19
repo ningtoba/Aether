@@ -22,7 +22,6 @@
     { "path": "./packages/aether-types" },
     { "path": "./packages/aether-utils" },
     { "path": "./packages/docker" },
-    { "path": "./packages/memory" },
     { "path": "./packages/playwright" },
     { "path": "./packages/python-venv" },
     { "path": "./packages/ts-runtime" }

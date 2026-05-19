@@ -178,6 +178,8 @@ export class RAGEngine {
       }
 
       chunks.push(chunk.trim());
+      // If we've reached the end or overlapped past it, stop
+      if (start >= text.length) break;
       start -= overlap; // slide window
       if (start < 0) start = 0;
     }

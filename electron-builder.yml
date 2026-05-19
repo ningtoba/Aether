@@ -4,7 +4,7 @@ directories:
   buildResources: resources
   output: release
 files:
-  - packages/aether-electron/dist
+  - packages/aether-electron/out
   - packages/aether-frontend/dist
 win:
   target:

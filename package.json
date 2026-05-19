@@ -19,8 +19,8 @@
     "dev:frontend": "npm run dev -w @aether/frontend",
     "dev:backend": "npm run dev -w @aether/backend",
     "dev:electron": "npm run dev -w @aether/electron",
-    "dev": "npm run dev -w @aether/electron",
-    "start": "npm run dev -w @aether/electron"
+    "dev": "npm run dev:backend",
+    "start": "npm run dev:electron"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

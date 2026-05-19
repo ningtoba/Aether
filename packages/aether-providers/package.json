@@ -23,12 +23,12 @@
   "dependencies": {
     "@aether/types": "*",
     "@aether/utils": "*",
-    "@aether/core": "*"
+    "@aether/core": "*",
+    "zod": "^3.24.0"
   },
   "devDependencies": {
     "typescript": "^5.8.0",
     "@types/node": "^22.0.0",
-    "vitest": "^3.0.0",
-    "zod": "^3.24.0"
+    "vitest": "^3.0.0"
   }
 }
