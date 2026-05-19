@@ -26,8 +26,6 @@
     "@vitejs/plugin-react": "^4.4.1",
     "electron": "^35.1.2",
     "electron-vite": "^5.0.0",
-    "react": "^19.1.0",
-    "react-dom": "^19.1.0",
     "tailwindcss": "^4.1.4",
     "typescript": "^5.8.0",
     "vite": "^6.0.0",
@@ -41,6 +39,9 @@
     "@langchain/core": "^0.3.43",
     "@tanstack/react-query": "^5.75.5",
     "framer-motion": "^12.9.2",
-    "zustand": "^5.0.5"
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "zustand": "^5.0.5",
+    "electron-updater": "^6.0.0"
   }
 }
