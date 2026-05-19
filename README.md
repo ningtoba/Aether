@@ -39,16 +39,31 @@ aether/
 ```
 aether-types  →  aether-core  →  aether-orchestrator  →  aether-backend
        ↑              ↕                  ↕                       ↑
-       |        aether-providers    aether-memory                |
-       |              ↕                  ↕                       |
-       |        aether-tools  ─────  aether-sdk  ────────────────|
-       |              ↕                                          |
-       |        aether-utils (shared everywhere)                |
-       |                                                         |
-       └─────────── aether-telemetry ←─ aether-security ─────────┘
+       |        aether-providers    aether-memory                 |
+       |              ↕                  ↕                        |
+       |        aether-tools  ─────  aether-sdk  ─────────────────|
+       |              ↕                                           |
+       |        aether-utils (shared everywhere)                  |
+       |                                                          |
+       └──── aether-telemetry ←── aether-security ────────────────┘
 ```
 
-Higher-level packages (backend, frontend, electron) consume lower layers via workspace dependencies.
+Dependency relationships:
+
+- `aether-types` is the leaf — no dependencies
+- `aether-utils` is shared everywhere (no deps on other workspace packages)
+- `aether-telemetry` depends on `aether-types` and `aether-utils`
+- `aether-security` depends on `aether-types` and `aether-utils`
+- `aether-core` depends on `aether-types`, `aether-utils`, `aether-telemetry`
+- `aether-providers` depends on `aether-types`, `aether-utils`, `aether-telemetry`, `aether-core`
+- `aether-memory` depends on `aether-types`, `aether-utils`
+- `aether-tools` depends on `aether-types`, `aether-utils`
+- `aether-sdk` depends on `aether-types`, `aether-utils`, `aether-providers`, `aether-tools`
+- `aether-orchestrator` depends on `aether-types`, `aether-utils`, `aether-core`, `aether-providers`, `aether-memory`
+- `aether-backend` depends on all lower layers
+- `aether-frontend` depends on `aether-types`
+- `aether-electron` depends on `aether-backend` and `aether-frontend`
+- Sandbox packages (`docker`, `ts-runtime`, `python-venv`, `playwright`) depend on `aether-types` and `aether-utils`
 
 ---
 
@@ -67,7 +82,7 @@ Higher-level packages (backend, frontend, electron) consume lower layers via wor
 | **Memory** | In-memory vector store (brute-force cosine), SQLite, Qdrant |
 | **Container** | Docker (sandboxed execution), Dockerode |
 | **Observability** | OpenTelemetry (OTLP), Pino structured logging |
-| **Testing** | Vitest (470+ tests across 31 test files) |
+| **Testing** | Vitest (520+ tests across 35 test files) |
 | **CI/CD** | GitHub Actions, electron-builder |
 
 ---
@@ -83,10 +98,12 @@ Higher-level packages (backend, frontend, electron) consume lower layers via wor
 
 ```bash
 npm install
-npm run start
+npm run dev:electron
 ```
 
 This installs dependencies, builds all packages, and launches the Electron app.
+
+> **Note:** For reproducible installs, a `.npmrc` with `engine-strict=true` and `save-exact=true` is recommended.
 
 ### Individual Commands
 
@@ -100,7 +117,7 @@ npm run build
 # Type-check
 npm run typecheck
 
-# Run tests (470+ tests, 31 test files)
+# Run tests (520+ tests, 35 test files)
 npm run test
 
 # Launch Electron app (dev mode)
@@ -176,17 +193,16 @@ Aether is v0.1.0 with the following implemented:
 - **Telemetry**: Pino structured logging with OTel trace context injection, OpenTelemetry tracing (console + OTLP exporters), metrics (counters, gauges, histograms with percentile support)
 - **Backend**: HTTP/WebSocket server (native, no framework), pattern-matched router, in-memory stores, CRUD routes, native WebSocket frame encoding/decoding
 - **Electron Shell**: Main process with IPC handlers, tray, auto-updater (electron-updater), crash reporter, preload bridge
+- **Electron IPC Bridge**: Typed protocol with 12 channel groups (app, system, backend, agents, providers, executions, plugins, memory, window, update, maximize-changed), contextBridge preload API, `backend-bridge.ts` in-memory stores mirroring all REST API routes
+- **Frontend (React GUI)**: 8 complete pages — Dashboard, Providers, Agents, Workflows, Memory, Executions, Plugins, Settings — all connected to real data via IPC bridge (window.electronAPI). Zustand store with persist middleware for settings. Custom title bar with window controls. Sidebar navigation with active state. Components include: SettingsSection/SettingsRow, toggle switches, dropdown selects, text inputs, sliders, tag groups, key-value editors, buttons with danger/primary variants
 - **Docker Sandbox**: Container lifecycle (create/destroy), file copy, command execution with resource limits, profile-based presets
 - **TypeScript Runtime Sandbox** (`@aether/ts-runtime`): Isolated VM execution via tsx child process, timeouts, output size limits, eval helper with JSON result parsing
 - **Python Venv** (`@aether/python-venv`): Python virtual environment creation, package installation, script/code execution, package listing, full CRUD for venvs
 - **Playwright Browser** (`@aether/playwright`): Browser automation wrapper — launch (chromium/firefox/webkit), navigation, screenshot, content extraction, page evaluation, interaction helpers
 - **SDK**: AetherAgent wrapping OpenAI Agents SDK, AetherRunner with provider support, ToolRegistry, message conversion
+- **Docker Deployment**: Dockerfile + docker-compose.yml for containerized operation via `docker compose up --build`
 - **CI/CD**: GitHub Actions (lint, type-check, test with sharding, build), electron-builder config (Windows/macOS/Linux)
-- **Testing**: 470 tests across 31 test files, covering all packages
-
-### 🚧 In Progress
-- Electron renderer (React) — initial IPC bridge wired, DashboardPage uses real backend data (agents, providers, executions, system info)
-- Frontend admin GUI pages — 7 scaffolded pages (Dashboard, Providers, Agents, Workflows, Memory, Executions, Plugins, Settings) with real data connections via IPC bridge
+- **Testing**: 520+ tests across 35 test files, covering all 17 packages
 
 ---
 

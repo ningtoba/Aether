@@ -38,7 +38,15 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 │  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
 │  │  │  aether-tools    │  │  aether-telemetry        │    │  │
 │  │  │  Tool registry   │  │  OpenTelemetry tracing   │    │  │
-│  │  │  Docker sandbox  │  │  Pino logging + metrics  │    │  │
+│  │  │  Shell executor  │  │  Pino logging + metrics  │    │  │
+│  │  │  File editor     │  └─────────────────────────┘    │  │
+│  │  └──────────────────┘                                 │  │
+│  │                                                        │  │
+│  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
+│  │  │  aether-security │  │  aether-sdk              │    │  │
+│  │  │  RBAC (5 roles)  │  │  AetherAgent/Runner      │    │  │
+│  │  │  Hierarchical    │  │  ToolRegistry            │    │  │
+│  │  │  Glob resource   │  │  Handoff support         │    │  │
 │  │  └──────────────────┘  └─────────────────────────┘    │  │
 │  │                                                        │  │
 │  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
@@ -50,19 +58,18 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 │  ┌───────────────────────────────────────────────┐           │
 │  │          aether-frontend / React renderer      │           │
 │  │  React 19 with TailwindCSS 4 + Framer Motion  │           │
-│  │  Tabbed: Agents, Providers, Orchestration,     │           │
-│  │  Workflow, Memory, Execution, Settings         │           │
+│  │  8 pages tabbed via sidebar navigation:        │           │
+│  │  Dashboard, Providers, Agents, Workflows,      │           │
+│  │  Memory, Executions, Plugins, Settings         │           │
+│  └───────────────────────────────────────────────┘           │
+│                                                              │
+│  ┌───────────────────────────────────────────────┐           │
+│  │  Execution Sandboxes (outside backend)         │           │
+│  │  ┌──────┐  ┌──────────┐  ┌──────────┐ ┌────┐ │           │
+│  │  │Docker│  │ts-runtime│  │python-venv│ │PW  │ │           │
+│  │  └──────┘  └──────────┘  └──────────┘ └────┘ │           │
 │  └───────────────────────────────────────────────┘           │
 └──────────────────────────────────────────────────────────────┘
-
-┌─────────────────────┐  ┌──────────────┐  ┌─────────────────┐
-│  aether-sdk          │  │ Execution    │  │ Plugin System   │
-│  AetherAgent wrapping│  │ Sandboxes    │  │ Hot-loadable    │
-│  OpenAI Agents SDK   │  │ Docker,      │  │ tool/provider   │
-│                      │  │ ts-runtime,  │  │ hooks/middleware │
-│                      │  │ python-venv, │  │                 │
-│                      │  │ playwright   │  │                 │
-└─────────────────────┘  └──────────────┘  └─────────────────┘
 ```
 
 ---
@@ -97,10 +104,13 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 - Configurable embedding simulation for local-only operation
 
 ### `@aether/tools` — Tool Execution
+
 - Tool registry with register/get/list/remove
-- Docker container sandbox (create/destroy/exec via CLI)
+- Docker container sandbox via Dockerode SDK (create/destroy/exec with resource profiles)
+- Shell command executor with configurable timeouts
+- File editor tool (read/write/edit files within allowed paths)
 - Resource profiles: minimal/standard/high/unrestricted
-- File copy, environment injection, timeout handling
+- Environment injection, timeout handling, output size limits
 
 ### `@aether/telemetry` — Observability
 - OpenTelemetry tracing (BasicTracerProvider, console + OTLP exporters)
@@ -130,10 +140,12 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 - Structured logger (levels, formats, child loggers)
 
 ### `@aether/sdk` — Public API for External Consumers
-- AetherAgent wrapping OpenAI Agents SDK Agent
-- AetherRunner with AetherModelProvider bridging
-- ToolRegistry and createTool helper
-- Handoff support between agents
+
+- AetherAgent wrapping OpenAI Agents SDK Agent (instructions, model, tools, handoffs)
+- AetherRunner with AetherModelProvider bridging — execute agents with any configured LLM provider
+- ToolRegistry — register/lookup/execute tools, convert between Aether and SDK tool schemas
+- Handoff support between agents with type-safe handoff definitions
+- Message conversion utilities for cross-format compatibility
 
 ### `@aether/security` — RBAC
 - Hierarchical roles with inheritance
@@ -150,10 +162,23 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 - CORS support with configurable origins
 - Health check with memory/uptime/providers status
 
-### `@aether/frontend` — Shared UI Components
-- React 19 components (Electron renderer)
-- Zustand with persist middleware for settings store
-- 13 settings categories: general, providers, orchestration, memory, execution, docker, security, browser, logging, plugins, deployment, evaluation, GUI
+### `@aether/frontend` — React Admin GUI (Electron Renderer)
+
+- React 19 with TypeScript, TailwindCSS 4, Framer Motion animations
+- **8 pages** routed via a simple page-state switch in `App.tsx`:
+  - `DashboardPage` — system info (platform, arch, version, CPU, memory, GPU), agent overview cards with status indicators, recent executions table, quick stats bar
+  - `ProviderPage` — list/add/configure LLM providers, health checks
+  - `AgentPage` — agent CRUD, model selection, prompt configuration
+  - `WorkflowPage` — visual workflow builder with DAG editing
+  - `MemoryPage` — memory stats, search/query interface, vector store browser
+  - `ExecutionPage` — execution listing, live status, logs viewer
+  - `PluginPage` — plugin install/uninstall, browse available plugins
+  - `SettingsPage` — 13 settings categories via Zustand persist store
+- **Components**: `SettingsSection`/`SettingsRow` containers, `SettingsToggle` (switch), `SettingsSelect` (dropdown), `SettingsInput` (text/password/number), `SettingsSlider` (range), `SettingsTagGroup` (multi-select chips), `SettingsKeyValueEditor`, `SettingsButton` (default/danger/primary variants)
+- **Navigation**: `Sidebar` component with 8 icon-labeled navigation items, active state highlighting, logo area
+- **Window chrome**: `TitleBar` component with custom minimize/maximize/close buttons using SVG icons, maximized state awareness via IPC
+- **State management**: Zustand store with `persist` middleware for settings persistence, local React state for page-specific data
+- **Data connections**: All pages wire to `window.electronAPI` IPC bridge methods (getSystemInfo, listAgents, listProviders, listExecutions, etc.), with fallback states when bridge is unavailable
 
 ### `aether-electron` — Desktop Shell
 - Main process with single-instance lock and window management
@@ -204,6 +229,8 @@ User Input
     ▼
 aether-backend (REST / WS)
     │
+    ├─► aether-security (RBAC auth check)
+    │
     ▼
 aether-orchestrator
     │
@@ -221,7 +248,7 @@ Admin GUI / Electron (display)
 
 ### Execution Flow (detailed)
 
-1. **API Layer** receives agent execution request (`POST /api/execute`)
+1. **API Layer** receives agent execution request (`POST /api/execute`), RBAC check via `aether-security`
 2. **Orchestrator** resolves orchestration mode from workflow definition and agent configs
 3. **Provider** makes LLM calls with configured model (chat, stream, or embeddings)
 4. **Tool Execution** runs any tool calls the LLM generates (Docker sandbox or local)
@@ -341,9 +368,48 @@ External applications can use `@aether/sdk` to create agents, run executions, an
 
 ---
 
+## Docker Deployment
+
+Aether ships with a production-ready `Dockerfile` and `docker-compose.yml` for containerized deployment:
+
+```yaml
+# docker-compose.yml
+services:
+  aether:
+    build: .
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock  # for sandbox execution
+    environment:
+      - AETHER_PORT=3001
+      - AETHER_HOST=0.0.0.0
+    restart: unless-stopped
+```
+
+```bash
+# Build and start
+docker compose up --build
+
+# Run headless (backend only, no Electron)
+docker compose up --build -d
+```
+
+The service starts on port 3001 with the health check endpoint at `/health`.
+
+The Docker image includes:
+- All 17 workspace packages compiled via `tsc -b`
+- The backend API server as the entry point
+- Volume mounts for persistent data (config, memory, venvs)
+- Optional Docker socket mount for sandbox container execution
+- Non-root user for security
+
+---
+
 ## Testing
 
-The project uses Vitest with **470 test cases across 31 test files**:
+The project uses Vitest with **520+ test cases across 35 test files**:
 
 | Package | Tests | Coverage |
 |---------|-------|----------|
@@ -356,6 +422,10 @@ The project uses Vitest with **470 test cases across 31 test files**:
 | aether-security | 38 | RBAC, roles, permissions |
 | aether-sdk | 30 | Agent, model provider, tools |
 | aether-orchestrator | 9 | Engine, builder, graph editor, visualizer |
+| docker | ~18 | Container lifecycle, exec, resource profiles |
+| ts-runtime | ~15 | VM execution, timeout, eval |
+| python-venv | ~12 | Venv CRUD, package install |
+| playwright | ~10 | Browser launch, navigation, eval |
 
 ---
 
@@ -382,4 +452,7 @@ npm run lint
 
 # Format
 npm run format
+
+# Headless backend (no Electron, API only)
+npm run dev:backend
 ```
