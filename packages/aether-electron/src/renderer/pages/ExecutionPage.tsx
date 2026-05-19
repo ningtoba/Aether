@@ -1093,7 +1093,7 @@ export function ExecutionPage() {
   const [notification, setNotification] = useState<{
     message: string;
     type: "success" | "error" | "info";
-  } | null>(nullapsed);
+  } | null>(null);
 
   useEffect(() => {
     // Load mock data on mount
