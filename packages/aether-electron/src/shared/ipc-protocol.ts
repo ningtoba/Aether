@@ -45,6 +45,38 @@ export const IPC_CHANNELS = {
 
   /* GPU */
   GET_GPU_INFO: 'gpu:get-info',
+
+  /* Backend health */
+  BACKEND_HEALTH: 'backend:health',
+
+  /* Agents */
+  AGENTS_LIST: 'agents:list',
+  AGENTS_GET: 'agents:get',
+  AGENTS_CREATE: 'agents:create',
+  AGENTS_UPDATE: 'agents:update',
+  AGENTS_DELETE: 'agents:delete',
+
+  /* Providers */
+  PROVIDERS_LIST: 'providers:list',
+  PROVIDERS_ADD: 'providers:add',
+  PROVIDERS_HEALTH: 'providers:health',
+  PROVIDERS_REMOVE: 'providers:remove',
+
+  /* Executions */
+  EXECUTIONS_LIST: 'executions:list',
+  EXECUTIONS_GET: 'executions:get',
+  EXECUTIONS_START: 'executions:start',
+  EXECUTIONS_CANCEL: 'executions:cancel',
+
+  /* Plugins */
+  PLUGINS_LIST: 'plugins:list',
+  PLUGINS_INSTALL: 'plugins:install',
+  PLUGINS_UNINSTALL: 'plugins:uninstall',
+
+  /* Memory */
+  MEMORY_STATS: 'memory:stats',
+  MEMORY_SEARCH: 'memory:search',
+  MEMORY_CLEAR: 'memory:clear',
 } as const;
 
 export type IpcChannel = (typeof IPC_CHANNELS)[keyof typeof IPC_CHANNELS];
@@ -87,6 +119,96 @@ export interface CrashReport {
   message: string;
   stack?: string;
   context?: Record<string, unknown>;
+}
+
+/* ─── Backend data types ────────────────────────────────────────────── */
+
+export interface AgentRecord {
+  id: string;
+  name: string;
+  model?: string;
+  description?: string;
+  config?: Record<string, unknown>;
+  status: 'idle' | 'running' | 'paused' | 'error' | 'stopped';
+  lastRun?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ProviderRecord {
+  id: string;
+  name: string;
+  type: string;
+  endpoint?: string;
+  apiKeyConfigured: boolean;
+  status?: 'connected' | 'disconnected' | 'error' | 'unknown';
+  defaultModel?: string;
+  models?: Array<{ name: string; contextWindow: number; capabilities: string[] }>;
+  createdAt: string;
+}
+
+export interface ProviderHealthResult {
+  id: string;
+  name: string;
+  status: 'reachable' | 'unreachable' | 'error';
+  latency: number;
+  checkedAt: string;
+}
+
+export interface ExecutionRecord {
+  id: string;
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  agentId?: string;
+  plan?: Record<string, unknown>;
+  input?: unknown;
+  result?: unknown;
+  error?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
+export interface PluginRecord {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  author: string;
+  type: string;
+  enabled: boolean;
+  config?: Record<string, unknown>;
+  installedAt: string;
+}
+
+export interface MemoryStats {
+  type: string;
+  documentCount: number;
+  indexSizeKB: number;
+  dimensionCount: number;
+  status: 'connected' | 'disconnected' | 'error';
+}
+
+export interface MemorySearchResult {
+  id: string;
+  content: string;
+  score: number;
+  scope: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface BackendHealthStatus {
+  status: 'ok' | 'degraded' | 'error';
+  version: string;
+  uptime: number;
+  agentCount: number;
+  providerCount: number;
+  executionCount: number;
+  timestamp: string;
+  memory?: {
+    rss: number;
+    heapTotal: number;
+    heapUsed: number;
+  };
 }
 
 /* ─── IPC handler signatures ─────────────────────────────────────────── */

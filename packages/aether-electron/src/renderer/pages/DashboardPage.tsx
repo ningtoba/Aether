@@ -29,25 +29,6 @@ interface ExecutionRow {
   duration: string;
 }
 
-const MOCK_AGENTS: AgentCardData[] = [
-  { name: "Hermes Reasoner", model: "DeepSeek-V3-Flash", status: "idle", lastActive: "2 min ago", description: "General reasoning & code generation" },
-  { name: "Code Analyst", model: "GPT-4o", status: "running", lastActive: "Just now", description: "Code review & static analysis" },
-  { name: "Data Pipeline", model: "Claude 3 Opus", status: "idle", lastActive: "15 min ago", description: "ETL & data transformation" },
-  { name: "Security Scanner", model: "Llama 3 70B", status: "error", lastActive: "1 hr ago", description: "Vulnerability assessment & auditing" },
-  { name: "Research Agent", model: "Gemini Pro", status: "idle", lastActive: "3 hrs ago", description: "Web research & summarization" },
-  { name: "Workflow Orchestrator", model: "DeepSeek-V4", status: "running", lastActive: "30 sec ago", description: "Multi-agent workflow coordination" },
-];
-
-const MOCK_EXECUTIONS: ExecutionRow[] = [
-  { id: "exec-001", workflowName: "Code Review Pipeline", status: "completed", timestamp: "2026-05-10 23:45:12", duration: "2m 34s" },
-  { id: "exec-002", workflowName: "Data Analysis Suite", status: "running", timestamp: "2026-05-10 23:50:01", duration: "12m 18s" },
-  { id: "exec-003", workflowName: "Security Audit", status: "failed", timestamp: "2026-05-10 22:30:44", duration: "1m 05s" },
-  { id: "exec-004", workflowName: "Research Sync", status: "completed", timestamp: "2026-05-10 21:15:33", duration: "45s" },
-  { id: "exec-005", workflowName: "Deploy Pipeline", status: "completed", timestamp: "2026-05-10 20:00:00", duration: "5m 22s" },
-  { id: "exec-006", workflowName: "Model Fine-tuning", status: "running", timestamp: "2026-05-10 19:45:10", duration: "48m 12s" },
-  { id: "exec-007", workflowName: "Log Aggregation", status: "failed", timestamp: "2026-05-10 18:00:30", duration: "3m 10s" },
-];
-
 const STATUS_COLORS: Record<string, string> = {
   idle: "bg-gray-600",
   running: "bg-emerald-500",
@@ -67,10 +48,36 @@ function formatMemoryGB(bytes: number): string {
   return `${bytes.toFixed(1)} GB`;
 }
 
+function formatTimestamp(iso: string): string {
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const mins = Math.floor(diffMs / 60000);
+  if (mins < 1) return "Just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
+function formatDuration(isoStart: string, isoEnd?: string): string {
+  const start = new Date(isoStart).getTime();
+  const end = isoEnd ? new Date(isoEnd).getTime() : Date.now();
+  const diffSec = Math.floor((end - start) / 1000);
+  if (diffSec < 60) return `${diffSec}s`;
+  const min = Math.floor(diffSec / 60);
+  const sec = diffSec % 60;
+  return `${min}m ${sec}s`;
+}
+
 export function DashboardPage() {
   const [sysInfo, setSysInfo] = useState<SystemInfo | null>(null);
+  const [agents, setAgents] = useState<AgentCardData[]>([]);
+  const [executions, setExecutions] = useState<ExecutionRow[]>([]);
+  const [providerCount, setProviderCount] = useState(0);
 
   useEffect(() => {
+    // Fetch system info
     window.electronAPI?.getSystemInfo().then((info) => {
       setSysInfo({
         platform: info.platform,
@@ -97,17 +104,53 @@ export function DashboardPage() {
         freeMemoryGB: 0,
       });
     });
+
+    // Fetch agents from backend
+    window.electronAPI?.listAgents().then(({ agents: agentRecords }) => {
+      setAgents(agentRecords.map((a) => ({
+        name: a.name,
+        model: a.model ?? "unknown",
+        status: (a.status === "running" ? "running" : a.status === "error" ? "error" : "idle") as "idle" | "running" | "error",
+        lastActive: a.lastRun ? formatTimestamp(a.lastRun) : "Never",
+        description: a.description ?? "",
+      })));
+    }).catch(() => {
+      // Fallback: leave empty
+    });
+
+    // Fetch executions from backend
+    window.electronAPI?.listExecutions().then(({ executions: execRecords }) => {
+      const sorted = [...execRecords].sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      setExecutions(sorted.slice(0, 10).map((e) => ({
+        id: e.id.slice(0, 8),
+        workflowName: `Execution ${e.id.slice(0, 8)}`,
+        status: (e.status === "running" ? "running" : e.status === "failed" ? "failed" : "completed") as "running" | "completed" | "failed",
+        timestamp: new Date(e.createdAt).toLocaleString(),
+        duration: e.startedAt ? formatDuration(e.startedAt, e.completedAt) : "-",
+      })));
+    }).catch(() => {
+      // Fallback: leave empty
+    });
+
+    // Fetch provider count
+    window.electronAPI?.listProviders().then(({ providers: provRecords }) => {
+      setProviderCount(provRecords.length);
+    }).catch(() => {
+      // Fallback
+    });
   }, []);
 
-  const activeExecutions = MOCK_EXECUTIONS.filter((e) => e.status === "running").length;
+  const activeExecutions = executions.filter((e) => e.status === "running").length;
   const memoryUsed = sysInfo && sysInfo.totalMemoryGB > 0
     ? formatMemoryGB(sysInfo.totalMemoryGB - sysInfo.freeMemoryGB)
     : "-";
 
   const quickStats = [
-    { label: "Total Agents", value: String(MOCK_AGENTS.length), icon: "🤖" },
+    { label: "Total Agents", value: String(agents.length), icon: "🤖" },
     { label: "Active Executions", value: String(activeExecutions), icon: "⚡" },
-    { label: "Providers Configured", value: "4", icon: "🔌" },
+    { label: "Providers Configured", value: String(providerCount), icon: "🔌" },
     { label: "Memory Used", value: memoryUsed, icon: "💾" },
   ];
 
@@ -179,30 +222,36 @@ export function DashboardPage() {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Agent Overview</h3>
-          <span className="text-xs text-gray-600">{MOCK_AGENTS.length} agents</span>
+          <span className="text-xs text-gray-600">{agents.length} agents</span>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-          {MOCK_AGENTS.map((agent) => (
-            <div
-              key={agent.name}
-              className="bg-[#0f0f11] border border-[#1e1e24] rounded-xl p-4 hover:border-[#6335e7]/30 transition-colors group"
-            >
-              <div className="flex items-start justify-between mb-2">
-                <div className="flex-1 min-w-0">
-                  <h4 className="text-sm font-semibold text-gray-200 truncate group-hover:text-[#a78bfa] transition-colors">
-                    {agent.name}
-                  </h4>
-                  <p className="text-xs text-gray-500 mt-0.5 truncate">{agent.model}</p>
-                </div>
-                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border ${STATUS_BG[agent.status] || STATUS_BG.idle}`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${STATUS_COLORS[agent.status] || "bg-gray-600"}`} />
-                  {agent.status}
-                </span>
-              </div>
-              <p className="text-xs text-gray-600 line-clamp-2">{agent.description}</p>
-              <p className="text-[10px] text-gray-700 mt-2">Last active: {agent.lastActive}</p>
+          {agents.length === 0 ? (
+            <div className="col-span-full flex items-center justify-center h-24 bg-[#0f0f11] border border-dashed border-[#1e1e24] rounded-xl">
+              <p className="text-gray-600 text-sm">No agents yet — create one to get started</p>
             </div>
-          ))}
+          ) : (
+            agents.map((agent) => (
+              <div
+                key={agent.name}
+                className="bg-[#0f0f11] border border-[#1e1e24] rounded-xl p-4 hover:border-[#6335e7]/30 transition-colors group"
+              >
+                <div className="flex items-start justify-between mb-2">
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-semibold text-gray-200 truncate group-hover:text-[#a78bfa] transition-colors">
+                      {agent.name}
+                    </h4>
+                    <p className="text-xs text-gray-500 mt-0.5 truncate">{agent.model}</p>
+                  </div>
+                  <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border ${STATUS_BG[agent.status] || STATUS_BG.idle}`}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${STATUS_COLORS[agent.status] || "bg-gray-600"}`} />
+                    {agent.status}
+                  </span>
+                </div>
+                <p className="text-xs text-gray-600 line-clamp-2">{agent.description}</p>
+                <p className="text-[10px] text-gray-700 mt-2">Last active: {agent.lastActive}</p>
+              </div>
+            ))
+          )}
         </div>
       </div>
 
@@ -210,7 +259,7 @@ export function DashboardPage() {
       <div>
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-xs font-medium text-gray-500 uppercase tracking-wider">Recent Executions</h3>
-          <span className="text-xs text-gray-600">{MOCK_EXECUTIONS.length} total</span>
+          <span className="text-xs text-gray-600">{executions.length} total</span>
         </div>
         <div className="bg-[#0f0f11] border border-[#1e1e24] rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
@@ -225,23 +274,31 @@ export function DashboardPage() {
                 </tr>
               </thead>
               <tbody>
-                {MOCK_EXECUTIONS.map((exec) => (
-                  <tr
-                    key={exec.id}
-                    className="border-b border-[#1e1e24] last:border-0 hover:bg-[#14141a] transition-colors"
-                  >
-                    <td className="px-4 py-3 font-mono text-xs text-gray-400">{exec.id}</td>
-                    <td className="px-4 py-3 text-gray-200 font-medium">{exec.workflowName}</td>
-                    <td className="px-4 py-3">
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border ${STATUS_BG[exec.status] || STATUS_BG.idle}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${STATUS_COLORS[exec.status] || "bg-gray-600"}`} />
-                        {exec.status}
-                      </span>
+                {executions.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center text-gray-600 text-sm">
+                      No executions yet
                     </td>
-                    <td className="px-4 py-3 text-xs text-gray-500">{exec.timestamp}</td>
-                    <td className="px-4 py-3 text-xs text-gray-400 text-right font-mono">{exec.duration}</td>
                   </tr>
-                ))}
+                ) : (
+                  executions.map((exec) => (
+                    <tr
+                      key={exec.id}
+                      className="border-b border-[#1e1e24] last:border-0 hover:bg-[#14141a] transition-colors"
+                    >
+                      <td className="px-4 py-3 font-mono text-xs text-gray-400">{exec.id}</td>
+                      <td className="px-4 py-3 text-gray-200 font-medium">{exec.workflowName}</td>
+                      <td className="px-4 py-3">
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border ${STATUS_BG[exec.status] || STATUS_BG.idle}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${STATUS_COLORS[exec.status] || "bg-gray-600"}`} />
+                          {exec.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-gray-500">{exec.timestamp}</td>
+                      <td className="px-4 py-3 text-xs text-gray-400 text-right font-mono">{exec.duration}</td>
+                    </tr>
+                  ))
+                )}
               </tbody>
             </table>
           </div>
