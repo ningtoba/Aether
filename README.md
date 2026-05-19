@@ -8,7 +8,7 @@ Aether is a full-stack platform for orchestrating autonomous AI agents. It provi
 
 ## Architecture
 
-Aether is organized into 10 architectural layers, each in its own workspace package:
+Aether is organized into 17 npm workspace packages:
 
 ```
 aether/
@@ -27,7 +27,7 @@ aether/
 │   ├── aether-frontend/      # React-based admin GUI (Electron renderer)
 │   ├── aether-electron/      # Electron desktop shell with tray, auto-updater, crash reporter
 │   ├── docker/               # Docker sandbox for isolated code execution
-│   ├── ts-runtime/           # TypeScript runtime sandbox (isolated VM)
+│   ├── ts-runtime/           # TypeScript runtime sandbox (isolated VM via tsx)
 │   ├── python-venv/          # Python virtual environment management
 │   └── playwright/           # Playwright browser automation
 ├── tsconfig.json             # Root TypeScript configuration (project references)
@@ -67,7 +67,7 @@ Higher-level packages (backend, frontend, electron) consume lower layers via wor
 | **Memory** | In-memory vector store (brute-force cosine), SQLite, Qdrant |
 | **Container** | Docker (sandboxed execution), Dockerode |
 | **Observability** | OpenTelemetry (OTLP), Pino structured logging |
-| **Testing** | Vitest (306+ tests across all packages) |
+| **Testing** | Vitest (470+ tests across 31 test files) |
 | **CI/CD** | GitHub Actions, electron-builder |
 
 ---
@@ -100,7 +100,7 @@ npm run build
 # Type-check
 npm run typecheck
 
-# Run tests (306+ tests, 20 test files)
+# Run tests (470+ tests, 31 test files)
 npm run test
 
 # Launch Electron app (dev mode)
@@ -131,6 +131,10 @@ The API server runs on `http://localhost:3001` with health check at `/health`.
 | `@aether/backend` | HTTP/WebSocket server with REST API for agent, provider, and execution management |
 | `@aether/frontend` | React-based admin GUI (Electron renderer) |
 | `aether-electron` | Electron desktop shell with tray, auto-updater, crash reporter |
+| `@aether/docker` | Docker sandbox container lifecycle, resource profiles, file injection |
+| `@aether/ts-runtime` | TypeScript runtime sandbox — isolated VM execution via tsx with timeouts and resource limits |
+| `@aether/python-venv` | Python virtual environment management — create, install packages, run scripts |
+| `@aether/playwright` | Browser automation — launch, navigate, screenshot, evaluate, interact |
 
 ---
 
@@ -173,13 +177,16 @@ Aether is v0.1.0 with the following implemented:
 - **Backend**: HTTP/WebSocket server (native, no framework), pattern-matched router, in-memory stores, CRUD routes, native WebSocket frame encoding/decoding
 - **Electron Shell**: Main process with IPC handlers, tray, auto-updater (electron-updater), crash reporter, preload bridge
 - **Docker Sandbox**: Container lifecycle (create/destroy), file copy, command execution with resource limits, profile-based presets
+- **TypeScript Runtime Sandbox** (`@aether/ts-runtime`): Isolated VM execution via tsx child process, timeouts, output size limits, eval helper with JSON result parsing
+- **Python Venv** (`@aether/python-venv`): Python virtual environment creation, package installation, script/code execution, package listing, full CRUD for venvs
+- **Playwright Browser** (`@aether/playwright`): Browser automation wrapper — launch (chromium/firefox/webkit), navigation, screenshot, content extraction, page evaluation, interaction helpers
 - **SDK**: AetherAgent wrapping OpenAI Agents SDK, AetherRunner with provider support, ToolRegistry, message conversion
 - **CI/CD**: GitHub Actions (lint, type-check, test with sharding, build), electron-builder config (Windows/macOS/Linux)
-- **Testing**: 306 tests across 20 test files, covering all packages
+- **Testing**: 470 tests across 31 test files, covering all packages
 
 ### 🚧 In Progress
-- Electron renderer (React splash screen scaffolded)
-- Frontend admin GUI pages
+- Electron renderer (React) — initial IPC bridge wired, DashboardPage uses real backend data (agents, providers, executions, system info)
+- Frontend admin GUI pages — 7 scaffolded pages (Dashboard, Providers, Agents, Workflows, Memory, Executions, Plugins, Settings) with real data connections via IPC bridge
 
 ---
 

@@ -1,7 +1,7 @@
 # Aether Architecture
 
 **Version:** 0.1.0  
-**Last Updated:** 2026-05-19
+**Last Updated:** 2026-05-20
 
 ## Overview
 
@@ -58,8 +58,10 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 ┌─────────────────────┐  ┌──────────────┐  ┌─────────────────┐
 │  aether-sdk          │  │ Execution    │  │ Plugin System   │
 │  AetherAgent wrapping│  │ Sandboxes    │  │ Hot-loadable    │
-│  OpenAI Agents SDK   │  │ Docker, WASM,│  │ tool/provider   │
-│                      │  │ Python venv  │  │ hooks/middleware │
+│  OpenAI Agents SDK   │  │ Docker,      │  │ tool/provider   │
+│                      │  │ ts-runtime,  │  │ hooks/middleware │
+│                      │  │ python-venv, │  │                 │
+│                      │  │ playwright   │  │                 │
 └─────────────────────┘  └──────────────┘  └─────────────────┘
 ```
 
@@ -168,6 +170,30 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 - File injection and command execution
 - Health check / availability verification
 
+### `@aether/ts-runtime` — TypeScript Runtime Sandbox
+- Isolated child process execution via tsx
+- Timeout-enforced execution with SIGTERM/SIGKILL cascade
+- Output size limits to prevent memory exhaustion
+- `execTypeScript()` — run code, capture stdout/stderr/exitCode
+- `evalTypeScript()` — run code and parse JSON result with context injection
+- Temp file cleanup on completion
+
+### `@aether/python-venv` — Python Virtual Environment Management
+- `createVenv()` — create Python 3 virtual environments
+- `installPackages()` — pip install within a venv
+- `runPython()` / `runPythonCode()` — execute files or inline code
+- `getInstalledPackages()` — list installed packages via pip JSON output
+- `deleteVenv()` — remove a virtual environment
+- Cross-platform (Windows/Unix) venv path resolution
+
+### `@aether/playwright` — Browser Automation
+- `launchBrowser()` — launch Chromium, Firefox, or WebKit (headless by default)
+- `createPage()` / `navigate()` — page creation and navigation
+- `screenshot()` — take page screenshots (file or Buffer)
+- `evaluate()` — execute JavaScript in page context
+- `click()` / `type()` / `getContent()` / `getPageTitle()` — interaction helpers
+- Lazy dynamic import of playwright-core (graceful without dependency)
+
 ---
 
 ## Data Flow
@@ -202,6 +228,65 @@ Admin GUI / Electron (display)
 5. **Memory** retrieves relevant context via hybrid search before each step, stores results
 6. **Telemetry** records everything as structured spans and metrics
 7. **Response** streams back via WebSocket or returns as complete payload
+
+---
+
+## Electron IPC Bridge
+
+The Electron shell uses a typed IPC (Inter-Process Communication) protocol to bridge the renderer process (React GUI) with the main process (backend data).
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────┐
+│             Renderer Process (React)             │
+│                                                  │
+│  window.electronAPI.getSystemInfo()               │
+│  window.electronAPI.listAgents()                  │
+│  window.electronAPI.listProviders()               │
+│  ...                                              │
+│         │                                         │
+│         ▼ (contextBridge + ipcRenderer)           │
+│  ┌─────────────────────────────────────────────┐  │
+│  │           Main Process                      │  │
+│  │                                             │  │
+│  │  ipc-main → ipc-handlers.ts                │  │
+│  │      (channel routing)                     │  │
+│  │         │                                   │  │
+│  │         ▼                                   │  │
+│  │  backend-bridge.ts                          │  │
+│  │  (in-memory stores, mirrors API routes)     │  │
+│  │  ─ agents, providers, executions,           │  │
+│  │    plugins, memory, health                  │  │
+│  └─────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────┘
+```
+
+### IPC Channels
+
+The protocol is defined in `packages/aether-electron/src/shared/ipc-protocol.ts` with typed handler signatures:
+
+| Channel | Direction | Purpose |
+|---------|-----------|---------|
+| `app:get-version` / `app:get-platform` | Renderer → Main | App metadata |
+| `system:get-info` / `gpu:get-info` | Renderer → Main | System diagnostics |
+| `backend:health` | Renderer → Main | Backend health check |
+| `agents:*` | Renderer → Main | CRUD for agent records |
+| `providers:*` | Renderer → Main | Provider management |
+| `executions:*` | Renderer → Main | Execution lifecycle |
+| `plugins:*` | Renderer → Main | Plugin install/uninstall |
+| `memory:*` | Renderer → Main | Memory stats, search, clear |
+| `window:*` | Renderer → Main | Window controls (minimize, maximize, close) |
+| `update:*` | Main → Renderer | Auto-updater events (available, downloading, error) |
+| `window:maximize-changed` | Main → Renderer | Maximize state events |
+
+### Data Flow (Electron)
+
+1. **Renderers** invoke API via `window.electronAPI` (exposed through contextBridge preload script)
+2. **Main process** receives IPC messages via `ipcMain.handle()` / `ipcMain.on()`
+3. **backend-bridge.ts** provides in-memory data stores (agents, providers, etc.) mirroring the backend REST API routes
+4. **Responses** flow back through IPC to the renderer, which updates React state
+5. This design allows swapping the in-memory bridge for real HTTP calls to `aether-backend` when running in server mode
 
 ---
 
@@ -258,15 +343,19 @@ External applications can use `@aether/sdk` to create agents, run executions, an
 
 ## Testing
 
-The project uses Vitest with 306 test cases across 20 test files:
+The project uses Vitest with **470 test cases across 31 test files**:
 
 | Package | Tests | Coverage |
 |---------|-------|----------|
-| aether-core | 45 | Event bus, lifecycle, config |
-| aether-utils | 95 | Async, IDs, logger, object, platform, string, validation |
-| aether-memory | 61 | Store, vector, RAG |
-| aether-providers | 54 | All 6 providers (chat, stream, embed, errors) |
-| aether-orchestrator | 6 | Engine, builder, graph editor, visualizer |
+| aether-utils | 140 | Async, IDs, logger, object, platform, string, validation |
+| aether-providers | 58 | All 6 providers (chat, stream, embed, errors) |
+| aether-backend | 53 | Router, server, store, websocket |
+| aether-memory | 53 | Store, vector, RAG |
+| aether-core | 46 | Event bus, lifecycle, config |
+| aether-telemetry | 43 | Logger, tracer, metrics |
+| aether-security | 38 | RBAC, roles, permissions |
+| aether-sdk | 30 | Agent, model provider, tools |
+| aether-orchestrator | 9 | Engine, builder, graph editor, visualizer |
 
 ---
 
