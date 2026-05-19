@@ -1,6 +1,10 @@
-import { type IndexedEntry } from "../types/index.js";
+import type { IndexedEntry } from "./scoped-types.js";
 
-/** Vector store abstraction for similarity search. */
+/**
+ * Vector store abstraction for similarity search.
+ * This is a generic interface that can be backed by in-memory,
+ * Qdrant, SQLite, or any other vector database.
+ */
 export interface IVectorStore {
   /** Upsert a vector entry */
   upsert(entry: IndexedEntry): Promise<void>;

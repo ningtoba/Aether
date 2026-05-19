@@ -1,11 +1,13 @@
 /**
- * Shared memory types for @aether/memory
+ * Shared memory types for scoped memory stores.
+ * These types are used by the IMemoryStore interface and its
+ * scoped implementations (EpisodicStore, SemanticStore, TaskStore, ConversationStore).
  */
 
 export type MemoryScope = "episodic" | "semantic" | "task" | "conversation";
 export type MemoryStatus = "active" | "archived" | "deleted";
 
-export interface MemoryEntry {
+export interface ScopedMemoryEntry {
   id: string;
   scope: MemoryScope;
   content: string;
@@ -16,7 +18,7 @@ export interface MemoryEntry {
   updatedAt: string;
 }
 
-export interface MemoryQuery {
+export interface ScopedMemoryQuery {
   scope?: MemoryScope;
   text?: string;
   after?: string;
@@ -25,8 +27,8 @@ export interface MemoryQuery {
   limit?: number;
 }
 
-export interface MemoryQueryResult {
-  entry: MemoryEntry;
+export interface ScopedMemoryQueryResult {
+  entry: ScopedMemoryEntry;
   score: number;
 }
 

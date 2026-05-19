@@ -1,4 +1,5 @@
-import { execSync, type ExecSyncOptionsWithBufferEncoding } from "node:child_process";
+import Dockerode from "dockerode";
+import { Writable } from "node:stream";
 
 // ---------------------------------------------------------------------------
 // Local type definitions (replaces @aether/types dependency)
@@ -82,6 +83,15 @@ const DEFAULT_OPTIONS: Required<DockerSandboxOptions> = {
   operationTimeout: 30_000,
 };
 
+let _docker: Dockerode | null = null;
+
+function getDocker(): Dockerode {
+  if (!_docker) {
+    _docker = new Dockerode();
+  }
+  return _docker;
+}
+
 function resolveLimits(limits?: SandboxProfile | Partial<SandboxLimits>): SandboxLimits {
   if (!limits || (typeof limits === "string" && limits in SANDBOX_PROFILES)) {
     return SANDBOX_PROFILES[(limits as SandboxProfile) ?? "standard"];
@@ -92,15 +102,22 @@ function resolveLimits(limits?: SandboxProfile | Partial<SandboxLimits>): Sandbo
   return DEFAULT_LIMITS;
 }
 
-function limitsToDockerArgs(limits: SandboxLimits): string[] {
-  const args: string[] = [];
-  args.push("--memory", `${limits.memoryMb}m`);
-  args.push("--memory-swap", `${limits.memoryMb}m`); // no swap
-  args.push("--cpus", `${Math.max(1, Math.round(limits.cpuSeconds / 30))}`);
-  args.push("--pids-limit", String(limits.processes));
-  if (!limits.network) args.push("--network", "none");
-  if (!limits.writeAccess) args.push("--read-only");
-  return args;
+function limitsToDockerHostConfig(limits: SandboxLimits): Dockerode.HostConfig {
+  const hostConfig: Dockerode.HostConfig = {
+    Memory: limits.memoryMb * 1024 * 1024,
+    MemorySwap: limits.memoryMb * 1024 * 1024, // no swap
+    NanoCpus: Math.max(1, Math.round(limits.cpuSeconds / 30)) * 1e9,
+    PidsLimit: limits.processes,
+    Init: true,
+    ReadonlyRootfs: !limits.writeAccess,
+    AutoRemove: true,
+  };
+
+  if (!limits.network) {
+    hostConfig.NetworkMode = "none";
+  }
+
+  return hostConfig;
 }
 
 function mergeOptions(user?: DockerSandboxOptions): Required<DockerSandboxOptions> {
@@ -115,33 +132,75 @@ function mergeOptions(user?: DockerSandboxOptions): Required<DockerSandboxOption
   };
 }
 
-// ─── Shell helper ──────────────────────────────────────────────────────────
+// ---------------------------------------------------------------------------
+// Helpers — stream & exec
+// ---------------------------------------------------------------------------
 
-function dockerCmd(
-  args: string[],
-  timeout?: number,
-): { stdout: string; stderr: string; exitCode: number } {
-  try {
-    const opts: ExecSyncOptionsWithBufferEncoding = {
-      encoding: "buffer",
-      timeout: timeout ?? 30_000,
-      maxBuffer: 10 * 1024 * 1024, // 10 MB
-    };
-    const stdout = execSync(`docker ${args.join(" ")}`, opts);
-    return { stdout: stdout.toString().trim(), stderr: "", exitCode: 0 };
-  } catch (err: unknown) {
-    const error = err as {
-      stdout?: string;
-      stderr?: string;
-      status?: number;
-      message?: string;
-    };
-    return {
-      stdout: (error.stdout ?? "").toString().trim(),
-      stderr: (error.stderr ?? error.message ?? "").toString().trim(),
-      exitCode: error.status ?? 1,
-    };
+/**
+ * Demultiplex a Docker attach/exec stream into stdout and stderr strings.
+ *
+ * Docker's streaming API multiplexes stdout (fd 1) and stderr (fd 2) over a
+ * single stream using 8-byte headers.  dockerode exposes `modem.demuxStream()`
+ * to split them.
+ */
+function demuxStream(
+  container: Dockerode.Container,
+  stream: NodeJS.ReadableStream,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const outChunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+
+    const outStream = new Writable({
+      write(chunk: Buffer, _encoding, callback) {
+        outChunks.push(chunk);
+        callback();
+      },
+    });
+
+    const errStream = new Writable({
+      write(chunk: Buffer, _encoding, callback) {
+        errChunks.push(chunk);
+        callback();
+      },
+    });
+
+    // modem.demuxStream is untyped on the Dockerode types but exists at runtime
+    const modem = (container as unknown as { modem: { demuxStream: (s: NodeJS.ReadableStream, o: Writable, e: Writable) => void } }).modem;
+    modem.demuxStream(stream, outStream, errStream);
+
+    stream.on("end", () => {
+      resolve({
+        stdout: Buffer.concat(outChunks).toString("utf-8").trimEnd(),
+        stderr: Buffer.concat(errChunks).toString("utf-8").trimEnd(),
+      });
+    });
+    stream.on("error", reject);
+  });
+}
+
+/** Collect a raw (non-multiplexed) stream into a string. */
+function streamToString(stream: NodeJS.ReadableStream): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
+    stream.on("error", reject);
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8").trimEnd()));
+  });
+}
+
+/** Wait for a container to reach 'running' status with timeout. */
+async function waitForContainerRunning(
+  container: Dockerode.Container,
+  timeoutMs: number,
+): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const info = await container.inspect();
+    if (info.State.Running) return;
+    await new Promise((r) => setTimeout(r, 200));
   }
+  throw new Error("Container did not reach running status within timeout");
 }
 
 // ─── Container lifecycle ───────────────────────────────────────────────────
@@ -156,49 +215,64 @@ let containerCounter = 0;
 export async function createSandbox(
   opts?: DockerSandboxOptions,
 ): Promise<{ containerId: string; name: string }> {
+  const docker = getDocker();
   const config = mergeOptions(opts);
   const limits = resolveLimits(config.limits);
   const name = `${config.namePrefix}-${++containerCounter}-${Date.now()}`;
 
   // Check if Docker is available
-  const ping = dockerCmd(["info", "--format", "{{.ServerVersion}}"], 10_000);
-  if (ping.exitCode !== 0) {
+  try {
+    await docker.ping();
+  } catch {
     throw new Error(
-      `Docker is not available: ${ping.stderr || ping.stdout}\n` +
-        "Make sure Docker is installed and the daemon is running.",
+      "Docker is not available. Make sure Docker is installed and the daemon is running.",
     );
   }
 
-  const limitArgs = limitsToDockerArgs(limits);
-  const volumeArgs = Object.entries(config.volumes).flatMap(([host, container]) => [
-    "-v",
-    `${host}:${container}`,
-  ]);
+  const hostConfig = limitsToDockerHostConfig(limits);
 
-  const createArgs = [
-    "run",
-    "-d",                           // detach
-    "--rm",                         // auto-clean on stop
-    "--name", name,
-    "--init",                       // tini init for proper signal handling
-    ...limitArgs,
-    ...volumeArgs,
-    "-w", config.workdir,
-    config.image,
-    "sleep", "infinity",             // keep alive
-  ];
-
-  const result = dockerCmd(createArgs, config.operationTimeout);
-  if (result.exitCode !== 0) {
-    throw new Error(`Failed to create sandbox: ${result.stderr || result.stdout}`);
+  // Build volume binds
+  const binds: string[] = Object.entries(config.volumes).map(
+    ([host, cont]) => `${host}:${cont}`,
+  );
+  if (binds.length > 0) {
+    hostConfig.Binds = binds;
   }
 
-  return { containerId: result.stdout.trim(), name };
+  const createOptions: Dockerode.ContainerCreateOptions = {
+    Image: config.image,
+    name,
+    WorkingDir: config.workdir,
+    HostConfig: hostConfig,
+    Cmd: ["sleep", "infinity"],
+    AttachStdin: false,
+    AttachStdout: false,
+    AttachStderr: false,
+    OpenStdin: false,
+    StdinOnce: false,
+  };
+
+  const container = await docker.createContainer(createOptions);
+  await container.start();
+  await waitForContainerRunning(container, config.operationTimeout);
+
+  return { containerId: container.id, name };
 }
 
 /** Destroy a sandbox container */
 export async function destroySandbox(containerId: string): Promise<void> {
-  dockerCmd(["rm", "-f", containerId], 15_000);
+  const docker = getDocker();
+  const container = docker.getContainer(containerId);
+  try {
+    await container.kill();
+  } catch {
+    // Container may already be stopped — that's fine
+  }
+  try {
+    await container.remove({ force: true });
+  } catch {
+    // Best-effort cleanup
+  }
 }
 
 // ─── File operations ───────────────────────────────────────────────────────
@@ -209,47 +283,52 @@ export async function copyFilesToSandbox(
   files: SandboxFile[],
   destDir: string = "/workspace",
 ): Promise<void> {
+  const docker = getDocker();
+  const container = docker.getContainer(containerId);
+
   for (const file of files) {
-    // Build a tar stream on stdin for 'docker cp -'
+    // First, ensure the parent directory exists
     const parentDir = file.path.includes("/")
       ? file.path.substring(0, file.path.lastIndexOf("/"))
       : "";
 
-    let createCmd = `mkdir -p '${destDir}/${parentDir}'`;
-    let modeCmd = "";
-    if (file.mode) {
-      modeCmd = ` && chmod ${file.mode.toString(8)} '${destDir}/${file.path}'`;
-    }
+    await execInContainer(container, ["sh", "-c", `mkdir -p '${destDir}/${parentDir}'`]);
 
-    const dockerExec = dockerCmd([
-      "exec", containerId, "sh", "-c",
-      `'${createCmd}${modeCmd}'`,
-    ], 10_000 );
-
-    if (dockerExec.exitCode !== 0) {
-      throw new Error(`Failed to prepare directory for ${file.path}: ${dockerExec.stderr}`);
-    }
-
-    // Write content via heredoc to avoid escaping issues
-    const escapedContent = file.content
-      .replace(/'/g, "'\\''"); // single-quote escaping
-    const writeResult = dockerCmd([
-      "exec", containerId, "sh", "-c",
+    // Write content via heredoc
+    const writeCmd = [
+      "sh", "-c",
       `cat > '${destDir}/${file.path}' << 'AETHER_EOF'\n${file.content}\nAETHER_EOF`,
-    ], 15_000);
-
-    if (writeResult.exitCode !== 0) {
-      throw new Error(`Failed to write ${file.path}: ${writeResult.stderr}`);
-    }
+    ];
+    await execInContainer(container, writeCmd);
 
     // Set mode after writing
     if (file.mode) {
-      dockerCmd([
-        "exec", containerId, "chmod", file.mode.toString(8),
-        `'${destDir}/${file.path}'`,
-      ], 5_000);
+      await execInContainer(container, [
+        "chmod", file.mode.toString(8), `'${destDir}/${file.path}'`,
+      ]);
     }
   }
+}
+
+/** Low-level exec helper that throws on non-zero exit. */
+async function execInContainer(
+  container: Dockerode.Container,
+  cmd: string[],
+): Promise<string> {
+  const exec = await container.exec({
+    Cmd: cmd,
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+  const execStream = await exec.start({ Detach: false, Tty: false });
+  const output = await streamToString(execStream);
+
+  const inspectResult = await exec.inspect();
+  if (inspectResult.ExitCode !== 0) {
+    throw new Error(`Command failed (exit ${inspectResult.ExitCode}): ${output}`);
+  }
+
+  return output;
 }
 
 // ─── Command execution ─────────────────────────────────────────────────────
@@ -277,34 +356,55 @@ export async function execInSandbox(
   }
 
   // 2. Build docker exec command
-  const envArgs: string[] = [];
+  const docker = getDocker();
+  const container = docker.getContainer(containerId);
+
+  const env: string[] = [];
   if (opts?.env) {
     for (const [key, value] of Object.entries(opts.env)) {
-      envArgs.push("-e", `${key}=${value}`);
+      env.push(`${key}=${value}`);
     }
   }
 
   const workdir = opts?.cwd ?? "/workspace";
   const shell = opts?.shell ?? "/bin/sh";
-  const fullCmd = [
-    "exec",
-    "-w", workdir,
-    ...envArgs,
-    containerId,
+
+  // Use timeout command inside container
+  const execCmd = [
     shell, "-c",
-    // Use timeout command inside container
     `timeout ${Math.ceil(limits.cpuSeconds)} ${command}`,
   ];
 
-  const result = dockerCmd(fullCmd, timeout + 5_000);
+  const exec = await container.exec({
+    Cmd: execCmd,
+    Env: env.length > 0 ? env : undefined,
+    WorkingDir: workdir,
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+
+  const execStream = await exec.start({ Detach: false, Tty: false });
+
+  // Demultiplex stdout/stderr from the raw Docker stream
+  const { stdout, stderr } = await demuxStream(container, execStream);
+
+  // Get exit code by inspecting the exec instance
+  let exitCode = 0;
+  let timedOut = false;
+  try {
+    const inspectResult = await exec.inspect();
+    exitCode = inspectResult.ExitCode ?? 0;
+    timedOut = exitCode === 124; // GNU timeout exit code
+  } catch {
+    // If inspect fails, use defaults
+  }
 
   const duration = Date.now() - startTime;
-  const timedOut = result.exitCode === 124; // GNU timeout exit code
 
   return {
-    stdout: result.stdout,
-    stderr: result.stderr,
-    exitCode: result.exitCode,
+    stdout,
+    stderr,
+    exitCode,
     signal: null,
     duration,
     timedOut,
@@ -314,19 +414,21 @@ export async function execInSandbox(
 // ─── Status check ──────────────────────────────────────────────────────────
 
 export async function checkDockerEnv(): Promise<EnvStatus> {
-  const ping = dockerCmd(["info", "--format", "{{.ServerVersion}}"], 10_000);
-  if (ping.exitCode !== 0) {
+  const docker = getDocker();
+  try {
+    const version = await docker.version();
+    return {
+      ready: true,
+      type: "docker",
+      version: version.Version,
+      info: { serverVersion: version.Version, apiVersion: version.ApiVersion },
+    };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Docker daemon not reachable";
     return {
       ready: false,
       type: "docker",
-      error: ping.stderr || "Docker daemon not reachable",
+      error: message,
     };
   }
-
-  return {
-    ready: true,
-    type: "docker",
-    version: ping.stdout,
-    info: { serverVersion: ping.stdout },
-  };
 }

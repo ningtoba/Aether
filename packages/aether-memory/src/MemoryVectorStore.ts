@@ -1,8 +1,11 @@
-import { type IVectorStore } from "./IVectorStore.js";
+import type { IVectorStore } from "./IVectorStore.js";
 
 /**
  * In-memory vector store using brute-force cosine similarity.
  * Excellent for testing, prototyping, and small-scale use.
+ *
+ * Uses Float64Array for vector storage and naive nearest-neighbour
+ * search over all stored vectors.  O(n) per query.
  */
 export class MemoryVectorStore implements IVectorStore {
   private vectors = new Map<string, Float64Array>();

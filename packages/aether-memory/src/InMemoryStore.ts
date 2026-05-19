@@ -1,24 +1,33 @@
-import { v4 as uuid } from "uuid";
-import { type MemoryEntry, type MemoryScope, type MemoryQuery, type MemoryQueryResult, type MemoryStatus } from "../types/index.js";
-import { type IMemoryStore } from "./IMemoryStore.js";
+import { randomUUID } from "node:crypto";
+import type {
+  MemoryScope,
+  MemoryStatus,
+  ScopedMemoryEntry,
+  ScopedMemoryQuery,
+  ScopedMemoryQueryResult,
+} from "./scoped-types.js";
+import type { IMemoryStore } from "./IMemoryStore.js";
 
 /**
- * In-memory store backed by Maps.
+ * In-memory store backed by Maps, implementing IMemoryStore.
  * Used as default / testing fallback when no vector DB is available.
+ *
+ * This complements the higher-level MemoryStore with a scope-based
+ * abstraction (one store instance per scope).
  */
 export class InMemoryStore implements IMemoryStore {
   readonly scope: MemoryScope;
-  private entries = new Map<string, MemoryEntry>();
+  private entries = new Map<string, ScopedMemoryEntry>();
 
   constructor(scope: MemoryScope) {
     this.scope = scope;
   }
 
-  async write(entry: Omit<MemoryEntry, "id" | "createdAt" | "updatedAt">): Promise<MemoryEntry> {
+  async write(entry: Omit<ScopedMemoryEntry, "id" | "createdAt" | "updatedAt">): Promise<ScopedMemoryEntry> {
     const now = new Date().toISOString();
-    const full: MemoryEntry = {
+    const full: ScopedMemoryEntry = {
       ...entry,
-      id: uuid(),
+      id: randomUUID(),
       createdAt: now,
       updatedAt: now,
     };
@@ -26,15 +35,15 @@ export class InMemoryStore implements IMemoryStore {
     return full;
   }
 
-  async writeMany(entries: Omit<MemoryEntry, "id" | "createdAt" | "updatedAt">[]): Promise<MemoryEntry[]> {
+  async writeMany(entries: Omit<ScopedMemoryEntry, "id" | "createdAt" | "updatedAt">[]): Promise<ScopedMemoryEntry[]> {
     return Promise.all(entries.map((e) => this.write(e)));
   }
 
-  async read(id: string): Promise<MemoryEntry | null> {
+  async read(id: string): Promise<ScopedMemoryEntry | null> {
     return this.entries.get(id) ?? null;
   }
 
-  async query(query: MemoryQuery): Promise<MemoryQueryResult[]> {
+  async query(query: ScopedMemoryQuery): Promise<ScopedMemoryQueryResult[]> {
     let results = Array.from(this.entries.values());
 
     // Filter by scope
@@ -81,8 +90,8 @@ export class InMemoryStore implements IMemoryStore {
 
   async update(
     id: string,
-    updates: Partial<Pick<MemoryEntry, "metadata" | "status" | "content">>
-  ): Promise<MemoryEntry | null> {
+    updates: Partial<Pick<ScopedMemoryEntry, "metadata" | "status" | "content">>
+  ): Promise<ScopedMemoryEntry | null> {
     const entry = this.entries.get(id);
     if (!entry) return null;
     Object.assign(entry, updates, { updatedAt: new Date().toISOString() });
@@ -101,7 +110,7 @@ export class InMemoryStore implements IMemoryStore {
     return this.entries.delete(id);
   }
 
-  async count(filter?: Partial<Pick<MemoryEntry, "scope" | "status">>): Promise<number> {
+  async count(filter?: Partial<Pick<ScopedMemoryEntry, "scope" | "status">>): Promise<number> {
     let entries = Array.from(this.entries.values());
     if (filter?.scope) entries = entries.filter((e) => e.scope === filter.scope!);
     if (filter?.status) entries = entries.filter((e) => e.status === filter.status!);
@@ -111,7 +120,7 @@ export class InMemoryStore implements IMemoryStore {
   async searchText(
     text: string,
     options?: { limit?: number; scope?: MemoryScope; status?: MemoryStatus }
-  ): Promise<MemoryQueryResult[]> {
+  ): Promise<ScopedMemoryQueryResult[]> {
     return this.query({
       text,
       scope: options?.scope,
