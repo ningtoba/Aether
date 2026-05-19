@@ -4,6 +4,9 @@
   "private": true,
   "description": "Aether — Autonomous AI orchestration platform",
   "type": "module",
+  "engines": {
+    "node": ">=22.0.0"
+  },
   "workspaces": [
     "packages/*"
   ],

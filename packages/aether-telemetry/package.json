@@ -2,6 +2,9 @@
   "name": "@aether/telemetry",
   "version": "0.1.0",
   "private": true,
+  "publishConfig": {
+    "access": "restricted"
+  },
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

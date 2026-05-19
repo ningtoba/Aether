@@ -2,6 +2,9 @@
   "name": "@aether/docker",
   "version": "0.0.1",
   "private": true,
+  "publishConfig": {
+    "access": "restricted"
+  },
   "type": "module",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
