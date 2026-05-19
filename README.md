@@ -15,19 +15,22 @@ aether/
 ├── packages/
 │   ├── aether-types/         # Core type definitions and interfaces
 │   ├── aether-core/          # Core runtime, event bus, lifecycle, config management
-│   ├── aether-providers/     # LLM provider abstraction (OpenAI, Anthropic, Ollama, etc.)
-│   ├── aether-orchestrator/  # Orchestration engine (sequential, parallel, DAG, debate, hierarchical)
+│   ├── aether-providers/     # LLM provider abstraction (Anthropic, Gemini, Ollama, etc.)
+│   ├── aether-orchestrator/  # Orchestration engine (DAG, sequential, parallel, map-reduce)
 │   ├── aether-memory/        # Memory backend abstraction (vector stores, embeddings, RAG)
-│   ├── aether-tools/         # Built-in tool definitions, shell executor, event bus
+│   ├── aether-tools/         # Built-in tool definitions, shell executor, tool registry
 │   ├── aether-sdk/           # Public SDK for building plugins and integrations
 │   ├── aether-utils/         # Shared utilities (async, config, validation, platform detection)
-│   ├── aether-telemetry/     # Logging, metrics, distributed tracing
+│   ├── aether-telemetry/     # Logging, metrics, distributed tracing (OpenTelemetry)
 │   ├── aether-security/      # RBAC, authentication, authorization
 │   ├── aether-backend/       # HTTP API server with REST API & WebSocket streaming
-│   ├── aether-frontend/      # React-based admin GUI
+│   ├── aether-frontend/      # React-based admin GUI (Electron renderer)
 │   ├── aether-electron/      # Electron desktop shell with tray, auto-updater, crash reporter
-│   └── docker/               # Docker sandbox for isolated code execution
-├── tsconfig.json             # Root TypeScript configuration
+│   ├── docker/               # Docker sandbox for isolated code execution
+│   ├── ts-runtime/           # TypeScript runtime sandbox (isolated VM)
+│   ├── python-venv/          # Python virtual environment management
+│   └── playwright/           # Playwright browser automation
+├── tsconfig.json             # Root TypeScript configuration (project references)
 └── electron.vite.config.ts   # Electron-vite build configuration
 ```
 
@@ -53,14 +56,18 @@ Higher-level packages (backend, frontend, electron) consume lower layers via wor
 
 | Layer | Technology |
 |-------|-----------|
-| **Runtime** | Node.js 25 |
-| **Language** | TypeScript 5.8 (strict mode) |
+| **Runtime** | Node.js 22+ |
+| **Language** | TypeScript 5.9 (strict mode) |
 | **Build** | tsc (project references), electron-vite |
 | **Desktop** | Electron 35 |
 | **Backend** | Node.js http module (no framework), WebSocket |
 | **Frontend** | React 19, TailwindCSS 4, Framer Motion, Zustand |
-| **Orchestration** | LangGraph-compatible DAG engine |
-| **Container** | Docker (sandboxed execution) |
+| **Orchestration** | LangGraph-compatible DAG engine (LangGraph v1) |
+| **LLM Providers** | Anthropic, Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible |
+| **Memory** | In-memory vector store (brute-force cosine), SQLite, Qdrant |
+| **Container** | Docker (sandboxed execution), Dockerode |
+| **Observability** | OpenTelemetry (OTLP), Pino structured logging |
+| **Testing** | Vitest (306+ tests across all packages) |
 | **CI/CD** | GitHub Actions, electron-builder |
 
 ---
@@ -93,7 +100,7 @@ npm run build
 # Type-check
 npm run typecheck
 
-# Run tests
+# Run tests (306+ tests, 20 test files)
 npm run test
 
 # Launch Electron app (dev mode)
@@ -112,17 +119,17 @@ The API server runs on `http://localhost:3001` with health check at `/health`.
 | Package | Description |
 |---------|-------------|
 | `@aether/types` | Shared TypeScript type definitions (providers, agents, execution, memory, tools) |
-| `@aether/core` | Core runtime, event bus (EventEmitter), lifecycle manager, configuration manager |
-| `@aether/providers` | LLM provider abstraction with registry, vault, model capabilities |
-| `@aether/orchestrator` | Orchestration engine (sequential, parallel, DAG, debate, hierarchical) |
-| `@aether/memory` | Pluggable memory backends (vector store, RAG, embedding configuration) |
-| `@aether/tools` | Built-in tools, shell executor, tool registry, event bus |
-| `@aether/sdk` | Public SDK for building plugins and integrations |
-| `@aether/utils` | Shared utilities: async helpers, config, validation, platform detection |
-| `@aether/telemetry` | Structured logging, metrics collection, distributed tracing |
-| `@aether/security` | Role-based access control (RBAC) |
+| `@aether/core` | Core runtime, event bus (typed EventEmitter), lifecycle manager, configuration manager |
+| `@aether/providers` | LLM provider abstraction with registry, vault (encrypted keychain), model capabilities |
+| `@aether/orchestrator` | Orchestration engine with WorkflowBuilder (DAG), LangGraph wrapper, Mermaid/DOT visualization |
+| `@aether/memory` | Pluggable memory backends (in-memory vector store, RAG with hybrid search, memory store) |
+| `@aether/tools` | Built-in tools, shell executor, tool registry |
+| `@aether/sdk` | Public SDK wrapping OpenAI Agents SDK (AetherAgent, AetherRunner, ToolRegistry) |
+| `@aether/utils` | Shared utilities: async helpers (retry, backoff, parallel), validation, string, object, platform detection |
+| `@aether/telemetry` | OpenTelemetry tracing (OTLP exporter), Pino structured logging, metrics collection (counters/gauges/histograms) |
+| `@aether/security` | Role-based access control (RBAC) with hierarchical roles, glob-based resource patterns |
 | `@aether/backend` | HTTP/WebSocket server with REST API for agent, provider, and execution management |
-| `@aether/frontend` | React-based admin GUI |
+| `@aether/frontend` | React-based admin GUI (Electron renderer) |
 | `aether-electron` | Electron desktop shell with tray, auto-updater, crash reporter |
 
 ---
@@ -150,6 +157,32 @@ WebSocket endpoint is available at `ws://localhost:3001/` (upgraded from the HTT
 
 ---
 
+## Project Status
+
+Aether is v0.1.0 with the following implemented:
+
+### ✅ Complete
+- **Type System**: All type definitions across 9 domains (providers, agents, execution, graph, memory, tools, settings, sandbox, base)
+- **Core Runtime**: Event bus (typed pub/sub with async/retry modes), lifecycle manager (5-stage state machine), config manager
+- **Utilities**: Async helpers (retry with exponential/linear/fixed backoff, parallel with concurrency, timeout), validation, string manipulation, object deep merge/clone, ID generation, platform detection, structured logger
+- **LLM Providers**: Anthropic, Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible — all with chat, streaming, embeddings, model listing, and error handling
+- **Orchestration**: LangGraph engine, workflow builder (fluent API with agent/router/map/reduce nodes), checkpoint manager, graph editor, visualizer (Mermaid, DOT, text tree)
+- **Memory**: In-memory vector store (cosine similarity), memory store (TTL, keyword search), RAG engine (hybrid retrieval, 3 chunking strategies)
+- **Security**: RBAC with 5 built-in roles (admin, operator, developer, agent, viewer), hierarchical inheritance, glob resource matching
+- **Telemetry**: Pino structured logging with OTel trace context injection, OpenTelemetry tracing (console + OTLP exporters), metrics (counters, gauges, histograms with percentile support)
+- **Backend**: HTTP/WebSocket server (native, no framework), pattern-matched router, in-memory stores, CRUD routes, native WebSocket frame encoding/decoding
+- **Electron Shell**: Main process with IPC handlers, tray, auto-updater (electron-updater), crash reporter, preload bridge
+- **Docker Sandbox**: Container lifecycle (create/destroy), file copy, command execution with resource limits, profile-based presets
+- **SDK**: AetherAgent wrapping OpenAI Agents SDK, AetherRunner with provider support, ToolRegistry, message conversion
+- **CI/CD**: GitHub Actions (lint, type-check, test with sharding, build), electron-builder config (Windows/macOS/Linux)
+- **Testing**: 306 tests across 20 test files, covering all packages
+
+### 🚧 In Progress
+- Electron renderer (React splash screen scaffolded)
+- Frontend admin GUI pages
+
+---
+
 ## Docker Deployment
 
 ```bash
@@ -157,12 +190,6 @@ docker compose up --build
 ```
 
 The service starts on port 3001 with the health check endpoint at `/health`.
-
----
-
-## Project Status
-
-Aether is in early development (v0.1.0). The scaffold is in place with package structure, build system, and CI/CD configured. Core implementations are being actively developed.
 
 ---
 
