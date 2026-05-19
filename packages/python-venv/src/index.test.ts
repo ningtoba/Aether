@@ -114,10 +114,10 @@ describe("getInstalledPackages", () => {
 
 describe("runPythonCode", () => {
   it("should throw because no valid venv exists by default", async () => {
-    const result = runPythonCode('print("hello")');
-    // Without a valid venv, execution should fail
-    expect(result.exitCode).not.toBe(0);
-    expect(result.stderr).toBeTruthy();
+    // Without a valid venv, execution should throw
+    expect(() => runPythonCode('print("hello")')).toThrow(
+      "Virtual environment not found",
+    );
   });
 });
 
