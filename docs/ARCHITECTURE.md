@@ -1,7 +1,7 @@
 # Aether Architecture
 
 **Version:** 0.1.0  
-**Last Updated:** 2026-05-10
+**Last Updated:** 2026-05-19
 
 ## Overview
 
@@ -17,26 +17,28 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 │                    (Electron Shell)                           │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │                 aether-backend                          │  │
-│  │   HTTP Server (Express/Fastify)                        │  │
+│  │   HTTP Server (Node.js http module)                    │  │
 │  │   REST API + WebSocket for exec logs                   │  │
 │  │                                                        │  │
 │  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
 │  │  │  aether-core     │  │  aether-orchestrator     │    │  │
-│  │  │  Runtime base    │  │  LangGraph/Agents SDK    │    │  │
-│  │  │  Plugin loader   │  │  Sequential, parallel,   │    │  │
-│  │  │  Config manager  │  │  workflow, debate modes  │    │  │
+│  │  │  Event bus       │  │  LangGraph DAG engine    │    │  │
+│  │  │  Lifecycle mgr   │  │  WorkflowBuilder API     │    │  │
+│  │  │  Config manager  │  │  Visualizer (Mermaid)    │    │  │
 │  │  └──────────────────┘  └─────────────────────────┘    │  │
 │  │                                                        │  │
 │  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
 │  │  │  aether-providers│  │  aether-memory           │    │  │
-│  │  │  LLM provider    │  │  Vector store, SQLite    │    │  │
-│  │  │  abstraction     │  │  filesystem watch, RAG   │    │  │
-│  │  └──────────────────┘  └─────────────────────────┘    │  │
+│  │  │  Anthropic       │  │  In-memory vector store  │    │  │
+│  │  │  Gemini          │  │  Memory store (keyword)  │    │  │
+│  │  │  Ollama/vLLM/    │  │  RAG engine (hybrid)     │    │  │
+│  │  │  llama.cpp/OR    │  └─────────────────────────┘    │  │
+│  │  └──────────────────┘                                 │  │
 │  │                                                        │  │
 │  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
 │  │  │  aether-tools    │  │  aether-telemetry        │    │  │
-│  │  │  Sandbox exec,   │  │  OpenTelemetry, Pino     │    │  │
-│  │  │  Docker, Browser │  │  logging, tracing        │    │  │
+│  │  │  Tool registry   │  │  OpenTelemetry tracing   │    │  │
+│  │  │  Docker sandbox  │  │  Pino logging + metrics  │    │  │
 │  │  └──────────────────┘  └─────────────────────────┘    │  │
 │  │                                                        │  │
 │  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
@@ -46,17 +48,17 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 │  └────────────────────────────────────────────────────────┘  │
 │                                                              │
 │  ┌───────────────────────────────────────────────┐           │
-│  │          aether-frontend / admin-gui           │           │
-│  │  Svelte 5 web app (Vite) or Electron renderer │           │
-│  │  Tabs: Agents, Providers, Orchestration,       │           │
-│  │  Workflow, Memory, Execution, Plugins          │           │
+│  │          aether-frontend / React renderer      │           │
+│  │  React 19 with TailwindCSS 4 + Framer Motion  │           │
+│  │  Tabbed: Agents, Providers, Orchestration,     │           │
+│  │  Workflow, Memory, Execution, Settings         │           │
 │  └───────────────────────────────────────────────┘           │
 └──────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────┐  ┌──────────────┐  ┌─────────────────┐
 │  aether-sdk          │  │ Execution    │  │ Plugin System   │
-│  Public API for      │  │ Sandboxes    │  │ Hot-loadable    │
-│  external apps       │  │ Docker, WASM,│  │ tool/provider   │
+│  AetherAgent wrapping│  │ Sandboxes    │  │ Hot-loadable    │
+│  OpenAI Agents SDK   │  │ Docker, WASM,│  │ tool/provider   │
 │                      │  │ Python venv  │  │ hooks/middleware │
 └─────────────────────┘  └──────────────┘  └─────────────────┘
 ```
@@ -66,97 +68,105 @@ Aether is a full-stack autonomous AI orchestration platform. It manages LLM prov
 ## Package Map
 
 ### `@aether/core` — Runtime Foundation
-- Plugin loader and hot-reload system
-- Configuration manager (file/env/CLI)
-- Lifecycle hooks (init, start, stop, health)
-- Shared event bus
+- Typed event bus (pub/sub with async/retry modes)
+- Configuration manager with generic type support and defaults
+- Lifecycle manager (5-stage state machine: init → ready → running → stopping → stopped)
+- Hook system for lifecycle transitions
 
 ### `@aether/providers` — LLM Provider Abstraction
-- Provider registry with pluggable backends
-- Built-in: OpenAI-compatible, Anthropic, Ollama, vLLM
-- Unified interface: `chat()`, `embed()`, `stream()`
-- Model discovery, fallback routing, rate limiting
+- Provider registry with lazy initialization and dynamic type registration
+- Built-in providers: Anthropic (Messages API), Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible
+- Unified interface: `complete()`, `completeStream()`, `embed()`, `listModels()`, `healthCheck()`
+- Encrypted vault for API key storage (OS keychain via keytar, AES-256-GCM file fallback)
+- Model capability registry for feature detection
 
 ### `@aether/orchestrator` — Multi-Agent Workflows
-- Orchestration modes:
-  - **Sequential** — agents run one after another, output pipes to next
-  - **Parallel** — agents run concurrently, results merged
-  - **Workflow (DAG)** — directed graph with router/condition/merge nodes
-  - **Debate** — agents critique each other's outputs
-  - **Hierarchical** — supervisor delegates to sub-agents
-- LangGraph integration for stateful graphs
-- OpenAI Agents SDK integration for dynamic delegation
-- Execution state machine: queued -> running -> paused -> completed|failed
+- LangGraph engine wrapper with StateGraph integration
+- Fluent WorkflowBuilder: agentNode, routerNode, mapNode, reduceNode, connect, connectIf, connectViaLLM
+- In-memory checkpointing with save/get/list/delete
+- Mutable graph editor for runtime modifications
+- Visualizer: Mermaid.js, DOT (Graphviz), and text tree representations
+- Execution state machine tracking node-level status, history, and accumulated data
 
 ### `@aether/memory` — Memory & Knowledge
-- SQLite via `better-sqlite3` for persistent state
-- Vector embeddings via `@xenova/transformers` (local, no API key)
-- Configurable backends: pgvector, ChromaDB, Qdrant, Pinecone
-- Filesystem watcher for auto-ingestion (`chokidar`)
-- RAG pipeline: chunk -> embed -> store -> retrieve
-- Top-K semantic search with configurable dimensions
+- MemoryStore: In-memory key-value store with keyword scoring, type/metadata filtering, TTL expiry, max capacity compaction
+- InMemoryVectorStore: Map-based brute-force cosine search with configurable dimensions
+- RAGEngine: Document chunking (fixed/sentence/paragraph with overlap), hybrid retrieval (keyword + vector, 1.2x keyword boost), deduplication
+- Configurable embedding simulation for local-only operation
 
-### `@aether/tools` — Tool Execution Sandbox
-- Docker container sandbox for safe code execution
-- Playwright browser automation
-- TypeScript runtime sandbox (isolated VM)
-- Python virtual environment management
-- File system access with path allow-listing
-- HTTP/web tool belt (fetch, scrape, search)
+### `@aether/tools` — Tool Execution
+- Tool registry with register/get/list/remove
+- Docker container sandbox (create/destroy/exec via CLI)
+- Resource profiles: minimal/standard/high/unrestricted
+- File copy, environment injection, timeout handling
 
 ### `@aether/telemetry` — Observability
-- OpenTelemetry tracing (OTLP exporter)
-- Pino structured logging
-- Health check endpoints
-- Metrics collection (request count, latency, error rate)
-- Execution audit trail
+- OpenTelemetry tracing (BasicTracerProvider, console + OTLP exporters)
+- Pino structured logging with automatic OTel trace context injection
+- Metrics registry: counters, gauges, histograms with percentile computation
+- Semantic attributes and span names conventions
+- W3C trace context propagation for distributed tracing
 
 ### `@aether/types` — Shared Type Definitions
-- `LLMProvider` — provider connection config
+- `LLMProvider` — provider connection config with 8 provider types
 - `MemoryConfig` — vector store / embedding settings
 - `AgentConfig` — full agent definition (prompt, model, tools)
 - `WorkflowConfig` — DAG of nodes and edges
 - `OrchestrationConfig` — multi-agent orchestration plan
 - `Execution` — run state, logs, timestamps
-- `Plugin` — hot-loadable extension descriptor
 - `ToolConfig` — tool binding with typed parameters
+- `SandboxLimits` / `SandboxProfile` — sandbox resource constraints
+- `Base` types — UUID, SemVer, Timestamp, JSON, enums, pagination, error details
 
 ### `@aether/utils` — Utilities
-- Cryptography (key generation, hashing)
-- Date/time formatting
-- Object deep merge / clone
-- Retry with backoff
-- Rate limiter (token bucket)
-- JSON schema validation
+- Cryptography (key generation, ID generation)
+- String manipulation (truncate, slugify, capitalize, escapeHtml, template)
+- Object deep merge / clone / pick / omit / equality
+- Async (delay, timeout, retry with 3 backoff strategies, parallel with concurrency, race)
+- JSON schema validation (URL, port, string, object)
+- Platform detection (Electron, Node.js, OS)
+- Structured logger (levels, formats, child loggers)
 
 ### `@aether/sdk` — Public API for External Consumers
-- Programmatic agent creation and execution
-- Webhook registration for async callbacks
-- Client library for other services
-- API key authentication helpers
+- AetherAgent wrapping OpenAI Agents SDK Agent
+- AetherRunner with AetherModelProvider bridging
+- ToolRegistry and createTool helper
+- Handoff support between agents
+
+### `@aether/security` — RBAC
+- Hierarchical roles with inheritance
+- 5 built-in roles: admin, operator, developer, agent, viewer
+- Glob-based resource pattern matching
+- Permission resolution with specificity sorting
+- Deny-by-default security model
 
 ### `@aether/backend` — HTTP Server
-- REST API endpoints for all CRUD operations
-- WebSocket for real-time execution logs
-- Authentication middleware (API key / JWT)
-- Rate limiting
-- Static file serving for admin UI
+- Node.js built-in http module (no framework dependency)
+- Pattern-matched router with `:param` placeholders
+- Native WebSocket implementation (RFC 6455 frame encoding/decoding)
+- In-memory agent, provider, and execution stores
+- CORS support with configurable origins
+- Health check with memory/uptime/providers status
 
 ### `@aether/frontend` — Shared UI Components
-- Svelte 5 components used by both admin-gui and electron renderer
-- Shared stores, styling, and utilities
-- Dark theme design system
+- React 19 components (Electron renderer)
+- Zustand with persist middleware for settings store
+- 13 settings categories: general, providers, orchestration, memory, execution, docker, security, browser, logging, plugins, deployment, evaluation, GUI
 
-### `@aether/electron` — Desktop Shell
-- Electron main process
-- Auto-updater with `electron-updater`
-- Native OS integration (tray, notifications)
-- Window management
+### `aether-electron` — Desktop Shell
+- Main process with single-instance lock and window management
+- System tray with context menu
+- Auto-updater with electron-updater (GitHub releases)
+- Crash reporter with log rotation (10MB max)
+- GPU feature flags for hardware acceleration
+- preload.ts contextBridge API
+- electron-vite build configuration
 
-### `@aether/admin-gui` — Admin Web Interface
-- Svelte 5 SPA with Vite
-- Tabbed layout: Agents, Providers, Orchestration, Workflow, Memory, Execution, Plugins
-- Proxies `/api` to backend in dev mode
+### `@aether/docker` — Docker Sandbox
+- Container lifecycle management (create, destroy via CLI)
+- Resource-constrained execution with profile presets
+- File injection and command execution
+- Health check / availability verification
 
 ---
 
@@ -171,7 +181,7 @@ aether-backend (REST / WS)
     ▼
 aether-orchestrator
     │
-    ├─► aether-core (plugin lifecycle, config)
+    ├─► aether-core (event bus, lifecycle, config)
     ├─► aether-providers (LLM calls)
     ├─► aether-memory (retrieve / store)
     ├─► aether-tools (sandbox execution)
@@ -186,11 +196,11 @@ Admin GUI / Electron (display)
 ### Execution Flow (detailed)
 
 1. **API Layer** receives agent execution request (`POST /api/execute`)
-2. **Orchestrator** resolves orchestration mode and agent configs
-3. **Provider** makes LLM calls with configured model
-4. **Tool Execution** runs any tool calls the LLM generates
-5. **Memory** retrieves relevant context before each step, stores results
-6. **Telemetry** records everything as structured spans
+2. **Orchestrator** resolves orchestration mode from workflow definition and agent configs
+3. **Provider** makes LLM calls with configured model (chat, stream, or embeddings)
+4. **Tool Execution** runs any tool calls the LLM generates (Docker sandbox or local)
+5. **Memory** retrieves relevant context via hybrid search before each step, stores results
+6. **Telemetry** records everything as structured spans and metrics
 7. **Response** streams back via WebSocket or returns as complete payload
 
 ---
@@ -204,29 +214,30 @@ Aether reads configuration from (in order of precedence):
 4. Defaults
 
 Key configuration domains:
-- `providers` — LLM provider definitions
-- `agents` — agent definitions
-- `orchestration` — orchestration plans
-- `memory` — storage backend config
-- `tools` — sandbox and tool config
-- `server` — HTTP server settings
-- `logging` — telemetry and log level
+- `providers` — LLM provider definitions (type, API key, endpoint, model)
+- `agents` — agent definitions (instructions, model, tools, handoffs)
+- `orchestration` — orchestration plans (timeout, parallelism, retry policy)
+- `memory` — storage backend config (type, embedding, chunking)
+- `tools` — sandbox and tool config (Docker, browser)
+- `server` — HTTP server settings (port, host, CORS)
+- `logging` — telemetry and log level (Pino, OTel)
 
 ---
 
 ## Security Model
 
-- **Sandboxed execution** — Tools run in Docker containers or isolated VMs
+- **Sandboxed execution** — Tools run in Docker containers with resource limits
 - **API authentication** — All endpoints require API key or JWT
-- **Provider key isolation** — LLM API keys stored in config, never leaked to sandboxes
+- **Provider key isolation** — LLM API keys stored in encrypted vault, never leaked to sandboxes
 - **Path allow-listing** — File system tools only access explicitly allowed paths
 - **Rate limiting** — Per-API-key request throttling
+- **RBAC** — Role-based access control with 5 built-in roles
 
 ---
 
 ## Extension Points
 
-### Plugins
+### Plugins (planned)
 Plugins can hook into any lifecycle event:
 - `core:beforeInit` / `core:afterInit`
 - `provider:beforeChat` / `provider:afterChat`
@@ -242,3 +253,44 @@ Plugin types:
 
 ### SDK
 External applications can use `@aether/sdk` to create agents, run executions, and register webhooks programmatically.
+
+---
+
+## Testing
+
+The project uses Vitest with 306 test cases across 20 test files:
+
+| Package | Tests | Coverage |
+|---------|-------|----------|
+| aether-core | 45 | Event bus, lifecycle, config |
+| aether-utils | 95 | Async, IDs, logger, object, platform, string, validation |
+| aether-memory | 61 | Store, vector, RAG |
+| aether-providers | 54 | All 6 providers (chat, stream, embed, errors) |
+| aether-orchestrator | 6 | Engine, builder, graph editor, visualizer |
+
+---
+
+## Development
+
+```bash
+# Install
+npm install
+
+# Build all packages
+npm run build
+
+# Type-check
+npm run typecheck
+
+# Run all tests
+npm run test
+
+# Run tests in watch mode
+npm run test:watch
+
+# Lint
+npm run lint
+
+# Format
+npm run format
+```
