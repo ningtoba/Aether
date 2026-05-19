@@ -1,5 +1,5 @@
 // AppSettings type — defined locally to avoid import cycle
-interface AppSettings extends Record<string, unknown> {
+export interface AppSettings extends Record<string, unknown> {
   theme: string;
   language: string;
   logLevel: string;
@@ -25,7 +25,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 export class ConfigManager<T extends Record<string, unknown> = AppSettings> {
   private settings: T;
 
-  constructor(defaults?: Partial<T>) {
+  constructor(defaults?: Record<string, unknown>) {
     this.settings = { ...DEFAULT_SETTINGS, ...defaults } as unknown as T;
   }
 
