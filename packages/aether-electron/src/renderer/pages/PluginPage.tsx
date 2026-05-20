@@ -295,7 +295,7 @@ function PluginDetails({
           <div className="space-y-2">
             {manifest.configOptions.map((opt) => {
               const currentVal =
-                config[opt.key] !== undefined ? config[opt.key] : opt.default1;
+                config[opt.key] !== undefined ? config[opt.key] : opt.default;
 
               const handleChange = (val: string | number | boolean) => {
                 onConfigChange(opt.key, val);

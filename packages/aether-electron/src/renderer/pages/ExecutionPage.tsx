@@ -249,7 +249,9 @@ function generateMockExecutions(): ExecutionSummary[] {
       completedNodes: completed,
       error: status === "failed" ? "Node execution error: step timed out" : undefined,
     });
-  });
+    }
+  }
+  );
 
   return results.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
 }
@@ -520,7 +522,7 @@ function NodeGraph({
   const nodeHeight = 44;
   const hGap = 24;
   const totalWidth = nodes.length * (nodeWidth + hGap);
-  const startX = 20 ......;
+  const startX = 20;
   const yCenter = 60;
 
   return (
@@ -696,7 +698,7 @@ function ExecutionTimeline({ nodeHistory }: { nodeHistory: NodeExecution[] }) {
                 </div>
               )}
 
-              {node.output && (
+              {!!node.output && (
                 <details className="text-xs">
                   <summary className="text-gray-500 cursor-pointer hover:text-gray-400">
                     Output preview
@@ -782,24 +784,22 @@ function ExecutionDetail({
 
       {/* Tabs */}
       <div className="flex gap-1 border-b border-[#1e1e24]">
-        {([
+        {[
           { id: "timeline" as const, label: "Timeline" },
           { id: "graph" as const, label: "Graph" },
           { id: "stream" as const, label: "Live Stream" },
-        ]).map((tab) => (
+        ].map((tab) => {
+          const tabActive = activeTab === tab.id;
+          return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === tab.id
-                  ? "text-violet-400 border-violet-500"
-                  : "text-gray-500 border-transparent hover:text-gray-300"
-              }`}
+              className={"px-4 py-2.5 text-sm font-medium border-b-2 transition-colors " + (tabActive ? "text-violet-400 border-violet-500" : "text-gray-500 border-transparent hover:text-gray-300")}
             >
               {tab.label}
             </button>
-          ))
-        ]}
+          );
+        })}
       </div>
 
       {/* Tab Content */}
@@ -830,7 +830,7 @@ function ExecutionDetail({
                 completedNodes: execution.completedNodes,
                 nodes: nodes,
                 nodeHistory: nodeHistory,
-              } satisfies WorkflowState & Record<string, unknown>,
+              },
               null,
               2
             )}
