@@ -1,6 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { AetherModel, AetherModelProvider } from './model-provider.js';
+import type { FunctionCallItem, FunctionCallResultItem } from '@openai/agents';
 import type { CompletionResponse, ProviderInterface } from '@aether/providers';
+import { AetherModel, AetherModelProvider } from './model-provider.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock @aether/providers
 vi.mock('@aether/providers', () => ({}));
@@ -86,16 +87,43 @@ describe('AetherModel', () => {
     completeStream: vi.fn(),
   } as any;
 
-  it('should get a response from the provider', async () => {
+  it('threads tool_call_id through a sequential tool loop (real SDK item types)', async () => {
     const model = new (AetherModel as any)(mockProvider, 'gpt-4o');
+    const call: FunctionCallItem = {
+      type: 'function_call',
+      callId: 'call_1',
+      name: 'get_weather',
+      arguments: '{"city":"SF"}',
+    };
+    const result: FunctionCallResultItem = {
+      type: 'function_call_result',
+      callId: 'call_1',
+      name: 'get_weather',
+      status: 'completed',
+      output: '72',
+    };
     const request = {
-      input: 'Hello',
+      input: [
+        { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'weather?' }] },
+        call,
+        result,
+      ],
       tools: [],
       modelSettings: {},
     };
-    const response = await model.getResponse(request);
-    expect(response).toBeDefined();
-    expect(mockProvider.complete).toHaveBeenCalled();
+    await model.getResponse(request);
+
+    const providerRequest = (mockProvider.complete as any).mock.calls[0][0];
+    const messages = providerRequest.messages as Array<Record<string, unknown>>;
+    // The assistant call is a structured tool_calls entry, not a text placeholder.
+    const assistant = messages.find((m) => (m as any).role === 'assistant');
+    expect((assistant as any).toolCalls).toEqual([
+      { id: 'call_1', name: 'get_weather', input: { city: 'SF' } },
+    ]);
+    // The result carries the id of the call it answers.
+    const tool = messages.find((m) => (m as any).role === 'tool');
+    expect((tool as any).toolCallId).toBe('call_1');
+    expect((tool as any).content).toBe('72');
   });
 
   it('should suggest retry for transient provider errors (429/5xx/timeout)', () => {

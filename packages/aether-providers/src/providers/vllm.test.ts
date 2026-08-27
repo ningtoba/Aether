@@ -247,3 +247,48 @@ describe('VLLMProvider', () => {
     });
   });
 });
+describe('VLLMProvider tool-loop serialization', () => {
+  it('emits tool_calls and tool_call_id on the wire', async () => {
+    const provider = makeProvider();
+    mockFetch(
+      { ok: true, status: 200 },
+      {
+        id: 'cmpl-tool',
+        model: 'mistralai/Mistral-7B-Instruct-v0.3',
+        choices: [
+          { index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' },
+        ],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+      },
+    );
+
+    await provider.complete({
+      model: 'mistralai/Mistral-7B-Instruct-v0.3',
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call_9', name: 'get_weather', input: { city: 'SF' } }],
+        },
+        { role: 'tool', content: '"sunny"', name: 'get_weather', toolCallId: 'call_9' },
+      ],
+    });
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
+
+    const assistant = body.messages[0];
+    expect(assistant.tool_calls).toEqual([
+      {
+        id: 'call_9',
+        type: 'function',
+        function: { name: 'get_weather', arguments: '{"city":"SF"}' },
+      },
+    ]);
+    expect(assistant.content).toBeNull();
+
+    const tool = body.messages[1];
+    expect(tool.role).toBe('tool');
+    expect(tool.tool_call_id).toBe('call_9');
+  });
+});

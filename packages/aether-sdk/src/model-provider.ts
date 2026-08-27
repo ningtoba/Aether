@@ -71,7 +71,14 @@ function toProviderMessages(
       case 'function_call':
         messages.push({
           role: 'assistant',
-          content: `[tool_call: ${String(item.name ?? 'unknown')}]`,
+          content: '',
+          toolCalls: [
+            {
+              id: String(item.callId ?? ''),
+              name: String(item.name ?? 'unknown'),
+              input: safeParseJsonArguments(item.arguments),
+            },
+          ],
         });
         break;
       case 'function_call_result':
@@ -80,6 +87,10 @@ function toProviderMessages(
           content:
             typeof item.output === 'string' ? item.output : JSON.stringify(item.output ?? ''),
           name: String(item.name ?? 'unknown'),
+          // Providers require tool_call_id / tool_use_id to associate the
+          // result with the original call; without it OpenAI-compatible
+          // endpoints reject tool-role messages with a 400.
+          toolCallId: String(item.callId ?? ''),
         });
         break;
       case 'reasoning':
@@ -93,6 +104,16 @@ function toProviderMessages(
   }
 
   return messages;
+}
+
+function safeParseJsonArguments(raw: unknown): Record<string, unknown> {
+  if (typeof raw !== 'string') return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 function toProviderTools(tools: ModelRequest['tools']): ProviderToolDefinition[] {

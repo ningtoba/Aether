@@ -371,3 +371,51 @@ describe('AnthropicProvider', () => {
     });
   });
 });
+describe('AnthropicProvider tool-loop serialization', () => {
+  it('emits tool_use blocks and tool_result with tool_use_id on the wire', async () => {
+    const provider = makeProvider();
+    mockFetch(
+      { ok: true, status: 200 },
+      {
+        id: 'msg_tool',
+        type: 'message',
+        role: 'assistant',
+        model: 'claude-sonnet-4-20250514',
+        content: [{ type: 'text', text: 'ok' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    );
+
+    await provider.complete({
+      model: 'claude-sonnet-4-20250514',
+      messages: [
+        {
+          role: 'assistant',
+          content: 'thinking',
+          toolCalls: [{ id: 'call_9', name: 'get_weather', input: { city: 'SF' } }],
+        },
+        { role: 'tool', content: '"sunny"', name: 'get_weather', toolCallId: 'call_9' },
+      ],
+    });
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
+
+    expect(body.messages[0].role).toBe('assistant');
+    expect(body.messages[0].content[0]).toEqual({ type: 'text', text: 'thinking' });
+    expect(body.messages[0].content[1]).toEqual({
+      type: 'tool_use',
+      id: 'call_9',
+      name: 'get_weather',
+      input: { city: 'SF' },
+    });
+
+    expect(body.messages[1].role).toBe('user');
+    expect(body.messages[1].content[0]).toEqual({
+      type: 'tool_result',
+      tool_use_id: 'call_9',
+      content: '"sunny"',
+    });
+  });
+});

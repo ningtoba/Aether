@@ -404,3 +404,36 @@ describe('GeminiProvider', () => {
     });
   });
 });
+describe('GeminiProvider tool-loop serialization', () => {
+  it('emits functionCall and functionResponse parts on the wire', async () => {
+    const provider = makeProvider();
+    mockFetch({ ok: true, status: 200 }, {
+      candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+    } as never);
+
+    await provider.complete({
+      model: 'gemini-test-model',
+      messages: [
+        {
+          role: 'assistant',
+          content: '',
+          toolCalls: [{ id: 'call_9', name: 'get_weather', input: { city: 'SF' } }],
+        },
+        { role: 'tool', content: '"sunny"', name: 'get_weather', toolCallId: 'call_9' },
+      ],
+    });
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
+
+    expect(body.contents[0].role).toBe('model');
+    expect(body.contents[0].parts).toEqual([
+      { functionCall: { name: 'get_weather', args: { city: 'SF' } } },
+    ]);
+
+    expect(body.contents[1].role).toBe('function');
+    expect(body.contents[1].parts).toEqual([
+      { functionResponse: { name: 'get_weather', response: { output: '"sunny"' } } },
+    ]);
+  });
+});

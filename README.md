@@ -233,7 +233,18 @@ This iteration made Aether actually runnable and fixed wire-level provider bugs 
 - **Provider wire fixes** — Gemini streaming URL no longer builds `?alt=sse?key=…` (double `?` — the API key was never sent, so authenticated streaming 403'd); `toolChoice: required` is mapped to the valid wire value `required` (was `any`); `getRetryAdvice` now honours the SDK's `{ suggested }` contract and never retries permanent errors; `ProviderRegistry.get()` shares one in-flight initialization and clears a provider whose `initialize()` failed.
 - **Docs made truthful** — README/ARCHITECTURE: dev-command semantics, SQLite/Qdrant backends marked planned (not implemented), `@aether/frontend` labeled a placeholder, test counts corrected.
 
-Verification: **585 tests passing across 40 files, `tsc -b` clean, lint + format checks green**, and a live backend smoke test (`/health`, graceful SIGTERM).
+
+### Latest Iteration — v0.1.3 Tool-Loop Wire Fix
+
+Sequential multi-turn tool use now works on every provider. Previously the SDK converted assistant tool calls to a text placeholder (`[tool_call: name]`) and tool results to a `{role: 'tool'}` message **without `tool_call_id`** — OpenAI-compatible endpoints reject that with a 400, and Anthropic/Gemini lost the correlation id too, so every tool-using agent failed on its second model call.
+
+- `aether-providers` `Message` gained `toolCalls`/`toolCallId`; only the SDK's converter populates them (verified: the installed `@openai/agents` `FunctionCallItem`/`FunctionCallResultItem` use camelCase `callId`/`arguments`, matching the conversion — pinned at compile time by a test typed against the real SDK items).
+- **OpenAI-family** (OpenAI-compatible, vLLM, OpenRouter, Ollama, llama.cpp): assistant tool calls serialize as structured `tool_calls` (`{id, type: 'function', function: {name, arguments}}`), results carry `tool_call_id`.
+- **Anthropic**: `tool_use` blocks (+ companion text) and `tool_result` with `tool_use_id` in a user turn.
+- **Gemini**: `functionCall` / `functionResponse` parts (Gemini rejects bare text "function" parts).
+- New discriminating wire tests per provider family (OpenAI-compatible, Anthropic, Gemini) plus an SDK-level test exercising the real SDK item types.
+
+Verification: **590 tests passing (was 585) across 40 files, `tsc -b` clean, lint + format checks green**, and a dual-adversarial review loop including an independent settlement of the SDK item-schema question against the installed dependency.
 
 ---
 
@@ -241,11 +252,11 @@ Verification: **585 tests passing across 40 files, `tsc -b` clean, lint + format
 
 Next iterations target the remaining control-plane and correctness work:
 
-- **Streaming tool calls** — accumulate tool-call fragments in `completeStream` so streamed tool runs work across all providers (currently the final `done` drops tool calls; multi-turn tool loops also lose `tool_call_id`, causing 400s on on OpenAI-compatible providers).
+- **Streaming tool calls** — accumulate tool-call fragments and final text in `completeStream` so **streamed** tool runs work across all providers (the final `done` event currently drops accumulated tool calls/text). Sequential tool loops were fixed in v0.1.3 (`tool_call_id` now threaded through every provider's serializer).
 - **Credential storage** — the vault's AES-256-GCM fallback is unreachable dead code (the keytar-less branch loads the plaintext JSON store and reports `usingKeychain: true`); make the encrypted-file store reachable with 0600 perms, and stop persisting raw provider API keys in the renderer settings store.
 - **Authentication & authorization** — the HTTP/WebSocket API is unauthenticated on `0.0.0.0:3001`; wire the existing `aether-security` RBAC into routes and add per-session auth.
 - **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.
-- **Reliability parity** — memory-store `defaultTtlMs` at write time, per-subscriber event-bus isolation, Gemini batch embeddings, provider-streaming `tool_call_id` threading.
+- **Reliability parity** — memory-store `defaultTtlMs` at write time, per-subscriber event-bus isolation, Gemini batch embeddings.
 
 ---
 

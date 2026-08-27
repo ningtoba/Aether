@@ -294,7 +294,7 @@ export class LlamaCppProvider extends ProviderInterface {
     return payload;
   }
 
-  protected serializeMessages(messages: any[]): Record<string, unknown>[] {
+  protected serializeMessages(messages: Message[]): Record<string, unknown>[] {
     return messages.map((msg) => {
       const base: Record<string, unknown> = { role: msg.role };
 
@@ -326,6 +326,24 @@ export class LlamaCppProvider extends ProviderInterface {
               return { type: 'text', text: JSON.stringify(block) };
           }
         });
+      }
+
+      // Assistant tool calls become structured tool_calls (the OpenAI wire).
+      if (msg.toolCalls && msg.toolCalls.length > 0) {
+        base.content = null;
+        base.tool_calls = msg.toolCalls.map((tc) => ({
+          id: tc.id,
+          type: 'function',
+          function: {
+            name: tc.name,
+            arguments: JSON.stringify(tc.input ?? {}),
+          },
+        }));
+      }
+
+      // tool-role results must reference the call they answer.
+      if (msg.role === 'tool' && msg.toolCallId) {
+        base.tool_call_id = msg.toolCallId;
       }
 
       if (msg.name) base.name = msg.name;

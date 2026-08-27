@@ -7,6 +7,7 @@ import {
   ProviderConfig,
   ProviderError,
   ProviderErrorCode,
+  Message,
   StreamEvent,
   ToolCall,
 } from '../types.js';
@@ -335,7 +336,7 @@ export class GeminiProvider extends ProviderInterface {
    * Roles are "user" or "model" (not "assistant").
    * System messages are extracted and returned separately.
    */
-  protected serializeContents(messages: any[]): {
+  protected serializeContents(messages: Message[]): {
     contents: Record<string, unknown>[];
     systemInstruction: string | null;
   } {
@@ -364,7 +365,27 @@ export class GeminiProvider extends ProviderInterface {
           role = 'user';
       }
 
-      const parts = this.serializeParts(msg.content);
+      // Assistant tool calls → functionCall parts; tool results →
+      // functionResponse parts (Gemini rejects a bare "function" text part).
+      let parts: Record<string, unknown>[];
+      if (msg.role === 'assistant' && Array.isArray(msg.toolCalls) && msg.toolCalls.length > 0) {
+        parts = msg.toolCalls.map((tc) => ({
+          functionCall: { name: tc.name, args: tc.input ?? {} },
+        }));
+      } else if (msg.role === 'tool' && msg.toolCallId) {
+        parts = [
+          {
+            functionResponse: {
+              name: msg.name ?? '',
+              response: {
+                output: typeof msg.content === 'string' ? msg.content : '',
+              },
+            },
+          },
+        ];
+      } else {
+        parts = this.serializeParts(msg.content);
+      }
       if (parts.length > 0) {
         contents.push({ role, parts });
       }

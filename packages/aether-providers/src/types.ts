@@ -82,6 +82,10 @@ export interface Message {
   role: MessageRole;
   content: Content;
   name?: string;
+  /** Assistant tool calls (OpenAI-compatible tool_calls / Anthropic tool_use / Gemini functionCall). */
+  toolCalls?: ToolCall[];
+  /** For role 'tool' messages: the id of the tool call this result answers. */
+  toolCallId?: string;
 }
 
 // ── Tool definitions ──────────────────────────────────────────────

@@ -7,6 +7,7 @@ import {
   ProviderConfig,
   ProviderError,
   ProviderErrorCode,
+  Message,
   StreamEvent,
   ToolCall,
   TokenUsage,
@@ -289,7 +290,7 @@ export class AnthropicProvider extends ProviderInterface {
    * System messages are excluded — they are handled separately as
    * a top-level field.
    */
-  protected serializeMessages(messages: any[]): Record<string, unknown>[] {
+  protected serializeMessages(messages: Message[]): Record<string, unknown>[] {
     const result: Record<string, unknown>[] = [];
 
     for (const msg of messages) {
@@ -297,6 +298,34 @@ export class AnthropicProvider extends ProviderInterface {
       if (msg.role === 'system') continue;
 
       const role = msg.role === 'tool' ? 'user' : msg.role;
+
+      // Assistant tool calls become tool_use blocks (keeping any companion
+      // text first); results become a user message containing a tool_result
+      // block carrying the tool_use_id.
+      if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+        const blocks: Record<string, unknown>[] = [];
+        if (typeof msg.content === 'string' && msg.content.length > 0) {
+          blocks.push({ type: 'text', text: msg.content });
+        }
+        for (const tc of msg.toolCalls) {
+          blocks.push({ type: 'tool_use', id: tc.id, name: tc.name, input: tc.input ?? {} });
+        }
+        result.push({ role: 'assistant', content: blocks });
+        continue;
+      }
+      if (msg.role === 'tool' && msg.toolCallId) {
+        result.push({
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: msg.toolCallId,
+              content: typeof msg.content === 'string' ? msg.content : '',
+            },
+          ],
+        });
+        continue;
+      }
 
       if (typeof msg.content === 'string') {
         // Single text content block
