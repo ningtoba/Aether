@@ -1,32 +1,32 @@
-import { z } from "zod";
+import { z } from 'zod';
 
 // ── Provider identifiers ──────────────────────────────────────────
 
 export const ProviderName = z.enum([
-  "openai",
-  "anthropic",
-  "gemini",
-  "ollama",
-  "vllm",
-  "llamacpp",
-  "openrouter",
-  "custom",
+  'openai',
+  'anthropic',
+  'gemini',
+  'ollama',
+  'vllm',
+  'llamacpp',
+  'openrouter',
+  'custom',
 ]);
 export type ProviderName = z.infer<typeof ProviderName>;
 
 // ── Model capabilities ────────────────────────────────────────────
 
 export const Capability = z.enum([
-  "chat",
-  "completion",
-  "embeddings",
-  "function_calling",
-  "streaming",
-  "vision",
-  "audio",
-  "tool_use",
-  "json_mode",
-  "reasoning",
+  'chat',
+  'completion',
+  'embeddings',
+  'function_calling',
+  'streaming',
+  'vision',
+  'audio',
+  'tool_use',
+  'json_mode',
+  'reasoning',
 ]);
 export type Capability = z.infer<typeof Capability>;
 
@@ -46,32 +46,32 @@ export interface ModelCapabilities {
 
 // ── Message types ─────────────────────────────────────────────────
 
-export type MessageRole = "system" | "user" | "assistant" | "tool";
+export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 export interface ContentBlock {
-  type: "text" | "image_url" | "tool_use" | "tool_result";
+  type: 'text' | 'image_url' | 'tool_use' | 'tool_result';
 }
 
 export interface TextBlock extends ContentBlock {
-  type: "text";
+  type: 'text';
   text: string;
 }
 
 export interface ImageUrlBlock extends ContentBlock {
-  type: "image_url";
+  type: 'image_url';
   imageUrl: string;
-  detail?: "low" | "high" | "auto";
+  detail?: 'low' | 'high' | 'auto';
 }
 
 export interface ToolUseBlock extends ContentBlock {
-  type: "tool_use";
+  type: 'tool_use';
   id: string;
   name: string;
   input: Record<string, unknown>;
 }
 
 export interface ToolResultBlock extends ContentBlock {
-  type: "tool_result";
+  type: 'tool_result';
   toolUseId: string;
   content: string;
 }
@@ -103,9 +103,9 @@ export interface CompletionRequest {
   stop?: string[];
   stream?: boolean;
   tools?: ToolDefinition[];
-  toolChoice?: "auto" | "any" | "none" | { type: "function"; function: { name: string } };
+  toolChoice?: 'auto' | 'any' | 'none' | { type: 'function'; function: { name: string } };
   jsonMode?: boolean;
-  reasoningEffort?: "low" | "medium" | "high";
+  reasoningEffort?: 'low' | 'medium' | 'high';
   /** Provider-specific options passed through */
   extra?: Record<string, unknown>;
 }
@@ -116,7 +116,7 @@ export interface CompletionResponse {
   content: string | null;
   toolCalls?: ToolCall[];
   usage: TokenUsage;
-  finishReason: "stop" | "length" | "tool_calls" | "content_filter" | "error";
+  finishReason: 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'error';
   /** Raw provider response for debugging */
   raw?: unknown;
 }
@@ -136,10 +136,10 @@ export interface TokenUsage {
 // ── Streaming ─────────────────────────────────────────────────────
 
 export type StreamEvent =
-  | { type: "delta"; content: string }
-  | { type: "tool_call_delta"; id: string; name: string; input: string }
-  | { type: "done"; response: CompletionResponse }
-  | { type: "error"; error: ProviderError };
+  | { type: 'delta'; content: string }
+  | { type: 'tool_call_delta'; id: string; name: string; input: string }
+  | { type: 'done'; response: CompletionResponse }
+  | { type: 'error'; error: ProviderError };
 
 // ── Embeddings ────────────────────────────────────────────────────
 
@@ -157,16 +157,16 @@ export interface EmbeddingResponse {
 // ── Errors ────────────────────────────────────────────────────────
 
 export enum ProviderErrorCode {
-  Authentication = "authentication",
-  RateLimited = "rate_limited",
-  QuotaExceeded = "quota_exceeded",
-  ContextTooLong = "context_too_long",
-  ModelNotFound = "model_not_found",
-  ModelUnavailable = "model_unavailable",
-  BadRequest = "bad_request",
-  Timeout = "timeout",
-  Internal = "internal",
-  Network = "network",
+  Authentication = 'authentication',
+  RateLimited = 'rate_limited',
+  QuotaExceeded = 'quota_exceeded',
+  ContextTooLong = 'context_too_long',
+  ModelNotFound = 'model_not_found',
+  ModelUnavailable = 'model_unavailable',
+  BadRequest = 'bad_request',
+  Timeout = 'timeout',
+  Internal = 'internal',
+  Network = 'network',
 }
 
 export class ProviderError extends Error {
@@ -177,7 +177,7 @@ export class ProviderError extends Error {
     public readonly retryable: boolean = false,
   ) {
     super(message);
-    this.name = "ProviderError";
+    this.name = 'ProviderError';
   }
 }
 
@@ -203,7 +203,7 @@ export interface ProviderConfig {
 
 export interface FallbackConfig {
   providers: string[]; // ordered list of provider names to try
-  strategy: "sequential" | "race";
+  strategy: 'sequential' | 'race';
 }
 
 export interface RouteRule {

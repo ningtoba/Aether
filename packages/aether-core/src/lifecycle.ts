@@ -1,10 +1,10 @@
-export type LifecycleStage = "init" | "ready" | "running" | "stopping" | "stopped";
+export type LifecycleStage = 'init' | 'ready' | 'running' | 'stopping' | 'stopped';
 
 export type LifecycleHook = () => void | Promise<void>;
 
 /** Manages application lifecycle stages with hook support */
 export class LifecycleManager {
-  private _stage: LifecycleStage = "init";
+  private _stage: LifecycleStage = 'init';
   private hooks = new Map<LifecycleStage, LifecycleHook[]>();
   private error?: Error;
 
@@ -13,11 +13,11 @@ export class LifecycleManager {
   }
 
   get isRunning(): boolean {
-    return this._stage === "running";
+    return this._stage === 'running';
   }
 
   get isStopped(): boolean {
-    return this._stage === "stopped";
+    return this._stage === 'stopped';
   }
 
   get lastError(): Error | undefined {
@@ -53,14 +53,14 @@ export class LifecycleManager {
 
   /** Start the lifecycle (init -> ready -> running) */
   async start(): Promise<void> {
-    await this.transition("init");
-    await this.transition("ready");
-    await this.transition("running");
+    await this.transition('init');
+    await this.transition('ready');
+    await this.transition('running');
   }
 
   /** Stop the lifecycle (running -> stopping -> stopped) */
   async stop(): Promise<void> {
-    await this.transition("stopping");
-    await this.transition("stopped");
+    await this.transition('stopping');
+    await this.transition('stopped');
   }
 }

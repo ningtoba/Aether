@@ -8,7 +8,7 @@
  * @module @aether/orchestrator
  */
 
-import type { WorkflowDefinition, NodeDefinition, EdgeDefinition, NodeId } from "./types.js";
+import type { WorkflowDefinition, NodeDefinition, EdgeDefinition, NodeId } from './types.js';
 
 // ─── Edit operations ───────────────────────────────────────
 
@@ -32,49 +32,49 @@ export type GraphEdit =
   | RemoveTerminalEdit;
 
 export interface AddNodeEdit {
-  type: "add-node";
+  type: 'add-node';
   node: NodeDefinition;
 }
 
 export interface RemoveNodeEdit {
-  type: "remove-node";
+  type: 'remove-node';
   nodeId: string;
 }
 
 export interface UpdateNodeEdit {
-  type: "update-node";
+  type: 'update-node';
   nodeId: string;
   patch: Partial<NodeDefinition>;
 }
 
 export interface AddEdgeEdit {
-  type: "add-edge";
+  type: 'add-edge';
   edge: EdgeDefinition;
 }
 
 export interface RemoveEdgeEdit {
-  type: "remove-edge";
+  type: 'remove-edge';
   edgeId: string;
 }
 
 export interface UpdateEdgeEdit {
-  type: "update-edge";
+  type: 'update-edge';
   edgeId: string;
   patch: Partial<EdgeDefinition>;
 }
 
 export interface SetEntryEdit {
-  type: "set-entry";
+  type: 'set-entry';
   nodeId: string;
 }
 
 export interface AddTerminalEdit {
-  type: "add-terminal";
+  type: 'add-terminal';
   nodeId: string;
 }
 
 export interface RemoveTerminalEdit {
-  type: "remove-terminal";
+  type: 'remove-terminal';
   nodeId: string;
 }
 
@@ -108,17 +108,30 @@ export class GraphEditor {
   edit(edit: GraphEdit): GraphEditResult {
     try {
       switch (edit.type) {
-        case "add-node": return this.addNode(edit);
-        case "remove-node": return this.removeNode(edit);
-        case "update-node": return this.updateNode(edit);
-        case "add-edge": return this.addEdge(edit);
-        case "remove-edge": return this.removeEdge(edit);
-        case "update-edge": return this.updateEdge(edit);
-        case "set-entry": return this.setEntry(edit);
-        case "add-terminal": return this.addTerminal(edit);
-        case "remove-terminal": return this.removeTerminal(edit);
+        case 'add-node':
+          return this.addNode(edit);
+        case 'remove-node':
+          return this.removeNode(edit);
+        case 'update-node':
+          return this.updateNode(edit);
+        case 'add-edge':
+          return this.addEdge(edit);
+        case 'remove-edge':
+          return this.removeEdge(edit);
+        case 'update-edge':
+          return this.updateEdge(edit);
+        case 'set-entry':
+          return this.setEntry(edit);
+        case 'add-terminal':
+          return this.addTerminal(edit);
+        case 'remove-terminal':
+          return this.removeTerminal(edit);
         default:
-          return { success: false, workflow: this.workflow, error: `Unknown edit type: ${(edit as any).type}` };
+          return {
+            success: false,
+            workflow: this.workflow,
+            error: `Unknown edit type: ${(edit as any).type}`,
+          };
       }
     } catch (err) {
       return {
@@ -157,14 +170,14 @@ export class GraphEditor {
 
     // Check entry node exists
     if (!this.workflow.entryNode) {
-      errors.push("No entry node defined");
+      errors.push('No entry node defined');
     } else if (!this.workflow.nodes.some((n) => n.id === this.workflow.entryNode)) {
       errors.push(`Entry node "${this.workflow.entryNode}" does not exist`);
     }
 
     // Check at least one terminal node
     if (this.workflow.terminalNodes.length === 0) {
-      errors.push("No terminal nodes defined");
+      errors.push('No terminal nodes defined');
     }
 
     // Check all terminal nodes exist
@@ -228,11 +241,9 @@ export class GraphEditor {
 
     // Clean up entry/terminal references
     if (this.workflow.entryNode === edit.nodeId) {
-      this.workflow.entryNode = this.workflow.nodes[0]?.id ?? "";
+      this.workflow.entryNode = this.workflow.nodes[0]?.id ?? '';
     }
-    this.workflow.terminalNodes = this.workflow.terminalNodes.filter(
-      (id) => id !== edit.nodeId,
-    );
+    this.workflow.terminalNodes = this.workflow.terminalNodes.filter((id) => id !== edit.nodeId);
 
     return { success: true, workflow: this.workflow };
   }

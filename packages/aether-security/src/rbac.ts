@@ -14,7 +14,7 @@
 // ─── Core types ────────────────────────────────────────────────────────
 
 /** Unique role identifier. */
-export type RoleId = string & { readonly __brand: "RoleId" };
+export type RoleId = string & { readonly __brand: 'RoleId' };
 
 /** A typed permission — grants an action on a resource. */
 export interface Permission {
@@ -52,58 +52,74 @@ export interface AccessDecision {
 
 export const BUILTIN_ROLES: Record<string, RoleDefinition> = {
   admin: {
-    id: "admin" as RoleId,
-    name: "Administrator",
-    description: "Full unrestricted access to all resources and operations.",
-    permissions: [{ resource: "*", action: "*", reason: "Administrator — full access" }],
+    id: 'admin' as RoleId,
+    name: 'Administrator',
+    description: 'Full unrestricted access to all resources and operations.',
+    permissions: [{ resource: '*', action: '*', reason: 'Administrator — full access' }],
     system: true,
   },
   operator: {
-    id: "operator" as RoleId,
-    name: "Operator",
-    description: "Operational access — manage agents, view logs, execute tools.",
+    id: 'operator' as RoleId,
+    name: 'Operator',
+    description: 'Operational access — manage agents, view logs, execute tools.',
     permissions: [
-      { resource: "agents:*", action: ["read", "execute"], reason: "Operators can execute agents" },
-      { resource: "tools:*", action: ["read", "execute"], reason: "Operators can use tools" },
-      { resource: "logs:*", action: ["read"], reason: "Operators can view logs" },
-      { resource: "system:status", action: ["read"], reason: "Operators can check system status" },
+      { resource: 'agents:*', action: ['read', 'execute'], reason: 'Operators can execute agents' },
+      { resource: 'tools:*', action: ['read', 'execute'], reason: 'Operators can use tools' },
+      { resource: 'logs:*', action: ['read'], reason: 'Operators can view logs' },
+      { resource: 'system:status', action: ['read'], reason: 'Operators can check system status' },
     ],
     extends: [],
     system: true,
   },
   developer: {
-    id: "developer" as RoleId,
-    name: "Developer",
-    description: "Create and modify agents, tools, and configurations.",
+    id: 'developer' as RoleId,
+    name: 'Developer',
+    description: 'Create and modify agents, tools, and configurations.',
     permissions: [
-      { resource: "agents:*", action: ["read", "write", "execute"], reason: "Developers manage agents" },
-      { resource: "tools:custom:*", action: ["read", "write", "execute"], reason: "Developers create custom tools" },
-      { resource: "providers:config", action: ["read"], reason: "Developers can view provider config" },
-      { resource: "logs:*", action: ["read"], reason: "Developers can view logs" },
+      {
+        resource: 'agents:*',
+        action: ['read', 'write', 'execute'],
+        reason: 'Developers manage agents',
+      },
+      {
+        resource: 'tools:custom:*',
+        action: ['read', 'write', 'execute'],
+        reason: 'Developers create custom tools',
+      },
+      {
+        resource: 'providers:config',
+        action: ['read'],
+        reason: 'Developers can view provider config',
+      },
+      { resource: 'logs:*', action: ['read'], reason: 'Developers can view logs' },
     ],
     extends: [],
     system: true,
   },
   agent: {
-    id: "agent" as RoleId,
-    name: "Agent Runtime",
-    description: "Minimum permissions for an autonomous agent to operate.",
+    id: 'agent' as RoleId,
+    name: 'Agent Runtime',
+    description: 'Minimum permissions for an autonomous agent to operate.',
     permissions: [
-      { resource: "tools:runtime:*", action: ["execute"], reason: "Agents can run tools" },
-      { resource: "memory:session:*", action: ["read", "write"], reason: "Agents can read/write their session memory" },
-      { resource: "system:health", action: ["read"], reason: "Agents can check health" },
+      { resource: 'tools:runtime:*', action: ['execute'], reason: 'Agents can run tools' },
+      {
+        resource: 'memory:session:*',
+        action: ['read', 'write'],
+        reason: 'Agents can read/write their session memory',
+      },
+      { resource: 'system:health', action: ['read'], reason: 'Agents can check health' },
     ],
     extends: [],
     system: true,
   },
   viewer: {
-    id: "viewer" as RoleId,
-    name: "Viewer",
-    description: "Read-only access to agents, logs, and system status.",
+    id: 'viewer' as RoleId,
+    name: 'Viewer',
+    description: 'Read-only access to agents, logs, and system status.',
     permissions: [
-      { resource: "agents:*", action: ["read"], reason: "Viewers can view agents" },
-      { resource: "logs:*", action: ["read"], reason: "Viewers can view logs" },
-      { resource: "system:*", action: ["read"], reason: "Viewers can read system info" },
+      { resource: 'agents:*', action: ['read'], reason: 'Viewers can view agents' },
+      { resource: 'logs:*', action: ['read'], reason: 'Viewers can view logs' },
+      { resource: 'system:*', action: ['read'], reason: 'Viewers can read system info' },
     ],
     extends: [],
     system: true,
@@ -115,9 +131,9 @@ export const BUILTIN_ROLES: Record<string, RoleDefinition> = {
 /** Convert a glob-style resource pattern to RegExp. */
 function globToRegex(pattern: string): RegExp {
   const escaped = pattern
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*")
-    .replace(/\?/g, ".");
+    .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+    .replace(/\*/g, '.*')
+    .replace(/\?/g, '.');
   return new RegExp(`^${escaped}$`);
 }
 
@@ -130,9 +146,9 @@ export function permissionMatches(
   const resourceMatch = globToRegex(permission.resource).test(resource);
   if (!resourceMatch) return false; // short-circuit
 
-  if (permission.action === "*") return true; // wildcard
+  if (permission.action === '*') return true; // wildcard
   const actions = Array.isArray(permission.action) ? permission.action : [permission.action];
-  return actions.some((a) => a === "*" || a === action);
+  return actions.some((a) => a === '*' || a === action);
 }
 
 // ─── RBAC Guard ─────────────────────────────────────────────────────────
@@ -248,11 +264,7 @@ export class RBACGuard {
    * Returns an AccessDecision with the first matching permission.
    * If deny-by-default and no permission matches, access is denied.
    */
-  checkAccess(
-    roleIds: RoleId[],
-    resource: string,
-    action: string,
-  ): AccessDecision {
+  checkAccess(roleIds: RoleId[], resource: string, action: string): AccessDecision {
     const effectivePerms = this.resolveEffectivePermissions(roleIds);
 
     // Flatten all inherited permissions
@@ -286,9 +298,11 @@ export class RBACGuard {
     // Deny by default
     return {
       granted: false,
-      role: "" as RoleId,
+      role: '' as RoleId,
       permission: `${action} on ${resource}`,
-      reason: this.denyByDefault ? "Denied by default — no matching permission" : "No permission granted",
+      reason: this.denyByDefault
+        ? 'Denied by default — no matching permission'
+        : 'No permission granted',
       evaluatedAt: Date.now(),
     };
   }

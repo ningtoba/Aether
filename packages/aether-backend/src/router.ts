@@ -37,10 +37,18 @@ export class Router {
   }
 
   /** Convenience methods */
-  get(path: string, handler: RequestHandler): void { this.on('GET', path, handler); }
-  post(path: string, handler: RequestHandler): void { this.on('POST', path, handler); }
-  put(path: string, handler: RequestHandler): void { this.on('PUT', path, handler); }
-  delete(path: string, handler: RequestHandler): void { this.on('DELETE', path, handler); }
+  get(path: string, handler: RequestHandler): void {
+    this.on('GET', path, handler);
+  }
+  post(path: string, handler: RequestHandler): void {
+    this.on('POST', path, handler);
+  }
+  put(path: string, handler: RequestHandler): void {
+    this.on('PUT', path, handler);
+  }
+  delete(path: string, handler: RequestHandler): void {
+    this.on('DELETE', path, handler);
+  }
 
   /** Match an incoming request to a route handler */
   match(method: string, url: string): { handler: RequestHandler; params: RouteParams } | null {

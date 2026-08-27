@@ -14,26 +14,26 @@
  * keychain but keeps secrets out of plaintext on disk.
  */
 
-import { randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
-import { readFileSync, existsSync, mkdirSync } from "node:fs";
-import { homedir, hostname } from "node:os";
-import { join } from "node:path";
+import { randomBytes, createCipheriv, createDecipheriv, createHash } from 'node:crypto';
+import { readFile, writeFile } from 'node:fs/promises';
+import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { homedir, hostname } from 'node:os';
+import { join } from 'node:path';
 
 // ── Keytar fallback (pure JS JSON file when keytar is unavailable) ─
 
-let _keytar: typeof import("./vault-fallback.js").default | null = null;
+let _keytar: typeof import('./vault-fallback.js').default | null = null;
 let _keytarAttempted = false;
 
-async function getKeytar(): Promise<typeof import("./vault-fallback.js").default | null> {
+async function getKeytar(): Promise<typeof import('./vault-fallback.js').default | null> {
   if (_keytarAttempted) return _keytar;
   _keytarAttempted = true;
   try {
-    const keytarModule = await import(/* @vite-ignore */ "keytar" as string);
-    _keytar = keytarModule as unknown as typeof import("./vault-fallback.js").default;
+    const keytarModule = await import(/* @vite-ignore */ 'keytar' as string);
+    _keytar = keytarModule as unknown as typeof import('./vault-fallback.js').default;
   } catch {
     // keytar not available — use the JSON file fallback
-    const fallback = await import("./vault-fallback.js");
+    const fallback = await import('./vault-fallback.js');
     _keytar = fallback.default;
   }
   return _keytar;
@@ -41,13 +41,13 @@ async function getKeytar(): Promise<typeof import("./vault-fallback.js").default
 
 // ── Constants ──────────────────────────────────────────────────────
 
-const VAULT_DIR = join(homedir(), ".config", "aether");
-const VAULT_PATH = join(VAULT_DIR, "vault.enc");
-const ALGORITHM = "aes-256-gcm";
+const VAULT_DIR = join(homedir(), '.config', 'aether');
+const VAULT_PATH = join(VAULT_DIR, 'vault.enc');
+const ALGORITHM = 'aes-256-gcm';
 const KEY_LENGTH = 32; // 256 bits
-const IV_LENGTH = 16;  // 128 bits
+const IV_LENGTH = 16; // 128 bits
 const TAG_LENGTH = 16; // 128 bits
-const SERVICE_NAME = "aether-agent";
+const SERVICE_NAME = 'aether-agent';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -55,7 +55,7 @@ export interface VaultEntry {
   /** Provider ID this key belongs to */
   providerId: string;
   /** Key type: api-key or auth-token */
-  type: "api-key" | "auth-token";
+  type: 'api-key' | 'auth-token';
   /** The encrypted secret (hex-encoded ciphertext) */
   encrypted: string;
   /** Creation timestamp */
@@ -69,12 +69,12 @@ export interface VaultEntry {
 function deriveMachineKey(): Buffer {
   // Try /etc/machine-id first
   try {
-    const id = readFileSync("/etc/machine-id", "utf8").trim();
-    return createHash("sha256").update(id).digest();
+    const id = readFileSync('/etc/machine-id', 'utf8').trim();
+    return createHash('sha256').update(id).digest();
   } catch {
     // Fallback: hostname-based, stable-ish
     const seed = `${hostname()}-aether-vault-v1`;
-    return createHash("sha256").update(seed).digest();
+    return createHash('sha256').update(seed).digest();
   }
 }
 
@@ -83,22 +83,22 @@ function encrypt(data: string): { encrypted: string; iv: string; tag: string } {
   const iv = randomBytes(IV_LENGTH);
   const cipher = createCipheriv(ALGORITHM, key, iv);
 
-  let encrypted = cipher.update(data, "utf8", "hex");
-  encrypted += cipher.final("hex");
-  const tag = cipher.getAuthTag().toString("hex");
+  let encrypted = cipher.update(data, 'utf8', 'hex');
+  encrypted += cipher.final('hex');
+  const tag = cipher.getAuthTag().toString('hex');
 
-  return { encrypted, iv: iv.toString("hex"), tag };
+  return { encrypted, iv: iv.toString('hex'), tag };
 }
 
 function decrypt(encrypted: string, ivHex: string, tagHex: string): string {
   const key = deriveMachineKey();
-  const iv = Buffer.from(ivHex, "hex");
-  const tag = Buffer.from(tagHex, "hex");
+  const iv = Buffer.from(ivHex, 'hex');
+  const tag = Buffer.from(tagHex, 'hex');
   const decipher = createDecipheriv(ALGORITHM, key, iv);
   decipher.setAuthTag(tag);
 
-  let decrypted = decipher.update(encrypted, "hex", "utf8");
-  decrypted += decipher.final("utf8");
+  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  decrypted += decipher.final('utf8');
   return decrypted;
 }
 
@@ -109,7 +109,7 @@ interface FileVaultStore {
 }
 
 interface FileVaultEntry {
-  type: "api-key" | "auth-token";
+  type: 'api-key' | 'auth-token';
   ciphertext: string; // JSON: { encrypted, iv, tag }
   createdAt: number;
   updatedAt: number;
@@ -120,9 +120,9 @@ async function readFileVault(): Promise<FileVaultStore> {
     return { entries: {} };
   }
   try {
-    const raw = await readFile(VAULT_PATH, "utf8");
+    const raw = await readFile(VAULT_PATH, 'utf8');
     // The file vault itself is encrypted at rest
-    const parts = raw.split(".");
+    const parts = raw.split('.');
     if (parts.length !== 3) return { entries: {} };
     const decrypted = decrypt(parts[0], parts[1], parts[2]);
     return JSON.parse(decrypted);
@@ -135,7 +135,7 @@ async function writeFileVault(store: FileVaultStore): Promise<void> {
   const json = JSON.stringify(store);
   const { encrypted, iv, tag } = encrypt(json);
   mkdirSync(VAULT_DIR, { recursive: true });
-  await writeFile(VAULT_PATH, `${encrypted}.${iv}.${tag}`, "utf8");
+  await writeFile(VAULT_PATH, `${encrypted}.${iv}.${tag}`, 'utf8');
 }
 
 // ── Public API ─────────────────────────────────────────────────────
@@ -147,7 +147,7 @@ async function writeFileVault(store: FileVaultStore): Promise<void> {
  * AES-256-GCM encrypted file at ~/.config/aether/vault.enc.
  */
 export class Vault {
-  private keytar: typeof import("./vault-fallback.js").default | null = null;
+  private keytar: typeof import('./vault-fallback.js').default | null = null;
   private ready = false;
   private usingKeytar = false;
 
@@ -172,19 +172,11 @@ export class Vault {
    * @param type - Key type
    * @param secret - The plaintext secret to store
    */
-  async set(
-    providerId: string,
-    type: "api-key" | "auth-token",
-    secret: string,
-  ): Promise<void> {
+  async set(providerId: string, type: 'api-key' | 'auth-token', secret: string): Promise<void> {
     if (!this.ready) await this.initialize();
 
     if (this.usingKeytar && this.keytar) {
-      await this.keytar.setPassword(
-        SERVICE_NAME,
-        `${providerId}:${type}`,
-        secret,
-      );
+      await this.keytar.setPassword(SERVICE_NAME, `${providerId}:${type}`, secret);
       return;
     }
 
@@ -217,17 +209,11 @@ export class Vault {
    * @param type - Key type
    * @returns The plaintext secret, or null if not found
    */
-  async get(
-    providerId: string,
-    type: "api-key" | "auth-token",
-  ): Promise<string | null> {
+  async get(providerId: string, type: 'api-key' | 'auth-token'): Promise<string | null> {
     if (!this.ready) await this.initialize();
 
     if (this.usingKeytar && this.keytar) {
-      const password = await this.keytar.getPassword(
-        SERVICE_NAME,
-        `${providerId}:${type}`,
-      );
+      const password = await this.keytar.getPassword(SERVICE_NAME, `${providerId}:${type}`);
       return password ?? null;
     }
 
@@ -254,17 +240,11 @@ export class Vault {
    * @param type - Key type
    * @returns true if deleted, false if not found
    */
-  async delete(
-    providerId: string,
-    type: "api-key" | "auth-token",
-  ): Promise<boolean> {
+  async delete(providerId: string, type: 'api-key' | 'auth-token'): Promise<boolean> {
     if (!this.ready) await this.initialize();
 
     if (this.usingKeytar && this.keytar) {
-      return this.keytar.deletePassword(
-        SERVICE_NAME,
-        `${providerId}:${type}`,
-      );
+      return this.keytar.deletePassword(SERVICE_NAME, `${providerId}:${type}`);
     }
 
     // File fallback
@@ -289,26 +269,25 @@ export class Vault {
 
     if (this.usingKeytar && this.keytar) {
       const passwords = await this.keytar.findCredentials(SERVICE_NAME);
-      return passwords
-        .map((p) => {
-          const colonIdx = p.account.lastIndexOf(":");
-          if (colonIdx === -1) {
-            return { providerId: p.account, type: "api-key" };
-          }
-          return {
-            providerId: p.account.slice(0, colonIdx),
-            type: p.account.slice(colonIdx + 1),
-          };
-        });
+      return passwords.map((p) => {
+        const colonIdx = p.account.lastIndexOf(':');
+        if (colonIdx === -1) {
+          return { providerId: p.account, type: 'api-key' };
+        }
+        return {
+          providerId: p.account.slice(0, colonIdx),
+          type: p.account.slice(colonIdx + 1),
+        };
+      });
     }
 
     // File fallback
     const store = await readFileVault();
     return Object.entries(store.entries).map(([key]) => {
-      const colonIdx = key.lastIndexOf(":");
+      const colonIdx = key.lastIndexOf(':');
       return {
         providerId: colonIdx === -1 ? key : key.slice(0, colonIdx),
-        type: colonIdx === -1 ? "api-key" : key.slice(colonIdx + 1),
+        type: colonIdx === -1 ? 'api-key' : key.slice(colonIdx + 1),
       };
     });
   }
@@ -316,21 +295,21 @@ export class Vault {
   // ── Health ─────────────────────────────────────────────────────
 
   /** Check if the vault is operational */
-  async health(): Promise<{ ok: boolean; backend: "keytar" | "file-fallback"; message?: string }> {
+  async health(): Promise<{ ok: boolean; backend: 'keytar' | 'file-fallback'; message?: string }> {
     if (!this.ready) await this.initialize();
 
     if (this.usingKeytar) {
-      return { ok: true, backend: "keytar" };
+      return { ok: true, backend: 'keytar' };
     }
 
     // Verify we can write and read
     try {
       mkdirSync(VAULT_DIR, { recursive: true });
-      return { ok: true, backend: "file-fallback" };
+      return { ok: true, backend: 'file-fallback' };
     } catch (err) {
       return {
         ok: false,
-        backend: "file-fallback",
+        backend: 'file-fallback',
         message: `Cannot access vault directory: ${err}`,
       };
     }

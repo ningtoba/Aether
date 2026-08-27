@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "./types.js";
+import type { ToolDefinition } from './types.js';
 
 /**
  * Create a function tool definition that can be registered with an agent.

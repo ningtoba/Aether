@@ -6,12 +6,12 @@
  * works gracefully even if playwright-core is not installed.
  */
 
-import { execSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
-export const VERSION = "0.1.0";
+export const VERSION = '0.1.0';
 /** Browser types that may be launched or auto-installed. */
-export const BROWSER_NAMES = ["chromium", "firefox", "webkit"] as const;
+export const BROWSER_NAMES = ['chromium', 'firefox', 'webkit'] as const;
 
 /** Type guard for supported browser names (durable contract, also used at runtime). */
 export function isSupportedBrowser(name: string): name is (typeof BROWSER_NAMES)[number] {
@@ -24,7 +24,7 @@ export function isSupportedBrowser(name: string): name is (typeof BROWSER_NAMES)
 
 export interface LaunchOptions {
   /** Browser type: "chromium" (default), "firefox", or "webkit" */
-  browser?: "chromium" | "firefox" | "webkit";
+  browser?: 'chromium' | 'firefox' | 'webkit';
   /** Whether to run in headless mode (default: true) */
   headless?: boolean;
   /** Additional browser launch args */
@@ -48,7 +48,7 @@ export interface ScreenshotOptions {
   /** Full page screenshot (default: false) */
   fullPage?: boolean;
   /** Image type (default: "png") */
-  type?: "png" | "jpeg";
+  type?: 'png' | 'jpeg';
   /** Quality (1-100, only for jpeg) */
   quality?: number;
 }
@@ -57,7 +57,7 @@ export interface ScreenshotOptions {
 // Module-level state (lazy dynamic import)
 // ---------------------------------------------------------------------------
 
-type PlaywrightModule = typeof import("playwright-core");
+type PlaywrightModule = typeof import('playwright-core');
 let _pw: PlaywrightModule | null = null;
 let _pwError: Error | null = null;
 
@@ -67,12 +67,12 @@ async function getPlaywright(): Promise<PlaywrightModule> {
 
   try {
     // Dynamic import works in both CJS and ESM
-    _pw = (await import("playwright-core")) as unknown as PlaywrightModule;
+    _pw = (await import('playwright-core')) as unknown as PlaywrightModule;
     return _pw;
   } catch (err) {
     _pwError = new Error(
-      "playwright-core is not installed. Run: npm install playwright-core\n" +
-        "Or if you need browsers: npx playwright install chromium",
+      'playwright-core is not installed. Run: npm install playwright-core\n' +
+        'Or if you need browsers: npx playwright install chromium',
     );
     throw _pwError;
   }
@@ -87,7 +87,7 @@ async function getPlaywright(): Promise<PlaywrightModule> {
  * Returns true if successful or already installed, false otherwise.
  */
 async function ensureBrowserInstalled(
-  browserName: "chromium" | "firefox" | "webkit",
+  browserName: 'chromium' | 'firefox' | 'webkit',
 ): Promise<boolean> {
   const pw = await getPlaywright();
   try {
@@ -106,7 +106,7 @@ async function ensureBrowserInstalled(
     // arbitrary commands on the host.
     if (!isSupportedBrowser(browserName)) return false;
     execSync(`npx playwright install ${browserName}`, {
-      stdio: "pipe",
+      stdio: 'pipe',
       timeout: 120_000,
     });
     return true;
@@ -126,9 +126,9 @@ async function ensureBrowserInstalled(
  */
 export async function launchBrowser(
   options: LaunchOptions = {},
-): Promise<import("playwright-core").Browser> {
+): Promise<import('playwright-core').Browser> {
   const pw = await getPlaywright();
-  const browserType = options.browser ?? "chromium";
+  const browserType = options.browser ?? 'chromium';
   const headless = options.headless ?? true;
 
   if (options.install) {
@@ -150,10 +150,10 @@ export async function launchBrowser(
  * Optionally navigates to a URL.
  */
 export async function createPage(
-  browser: import("playwright-core").Browser,
+  browser: import('playwright-core').Browser,
   url?: string,
   options: PageOptions = {},
-): Promise<import("playwright-core").Page> {
+): Promise<import('playwright-core').Page> {
   const context = await browser.newContext({
     viewport: {
       width: options.width ?? 1280,
@@ -164,7 +164,7 @@ export async function createPage(
   const page = await context.newPage();
 
   if (url) {
-    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
   }
 
   return page;
@@ -174,12 +174,12 @@ export async function createPage(
  * Navigate the page to a URL.
  */
 export async function navigate(
-  page: import("playwright-core").Page,
+  page: import('playwright-core').Page,
   url: string,
-  options?: { waitUntil?: "load" | "domcontentloaded" | "networkidle" },
+  options?: { waitUntil?: 'load' | 'domcontentloaded' | 'networkidle' },
 ): Promise<void> {
   await page.goto(url, {
-    waitUntil: options?.waitUntil ?? "domcontentloaded",
+    waitUntil: options?.waitUntil ?? 'domcontentloaded',
   });
 }
 
@@ -188,7 +188,7 @@ export async function navigate(
  * If no path is provided, returns the screenshot as a Buffer.
  */
 export async function screenshot(
-  page: import("playwright-core").Page,
+  page: import('playwright-core').Page,
   filePath?: string,
   options: ScreenshotOptions = {},
 ): Promise<Buffer | void> {
@@ -208,7 +208,7 @@ export async function screenshot(
 /**
  * Get the full HTML content of the page.
  */
-export async function getContent(page: import("playwright-core").Page): Promise<string> {
+export async function getContent(page: import('playwright-core').Page): Promise<string> {
   return page.content();
 }
 
@@ -216,7 +216,7 @@ export async function getContent(page: import("playwright-core").Page): Promise<
  * Execute JavaScript in the page context.
  */
 export async function evaluate<T = unknown>(
-  page: import("playwright-core").Page,
+  page: import('playwright-core').Page,
   fn: string | (() => T),
 ): Promise<T> {
   return page.evaluate(fn as any) as Promise<T>;
@@ -225,10 +225,7 @@ export async function evaluate<T = unknown>(
 /**
  * Click an element on the page.
  */
-export async function click(
-  page: import("playwright-core").Page,
-  selector: string,
-): Promise<void> {
+export async function click(page: import('playwright-core').Page, selector: string): Promise<void> {
   await page.click(selector);
 }
 
@@ -236,7 +233,7 @@ export async function click(
  * Type text into an element on the page.
  */
 export async function type(
-  page: import("playwright-core").Page,
+  page: import('playwright-core').Page,
   selector: string,
   text: string,
   options?: { delay?: number },
@@ -252,15 +249,13 @@ export async function type(
 /**
  * Get the page title.
  */
-export async function getPageTitle(page: import("playwright-core").Page): Promise<string> {
+export async function getPageTitle(page: import('playwright-core').Page): Promise<string> {
   return page.title();
 }
 
 /**
  * Close a browser instance and all its pages/contexts.
  */
-export async function closeBrowser(
-  browser: import("playwright-core").Browser,
-): Promise<void> {
+export async function closeBrowser(browser: import('playwright-core').Browser): Promise<void> {
   await browser.close();
 }

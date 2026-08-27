@@ -146,25 +146,52 @@ interface ElectronAPI {
   // ── Agents ──
   listAgents: () => Promise<{ agents: AgentRecord[] }>;
   getAgent: (id: string) => Promise<{ agent: AgentRecord } | { error: string }>;
-  createAgent: (data: { name: string; model?: string; description?: string; config?: Record<string, unknown> }) => Promise<{ agent: AgentRecord }>;
-  updateAgent: (id: string, data: Record<string, unknown>) => Promise<{ agent: AgentRecord } | { error: string }>;
+  createAgent: (data: {
+    name: string;
+    model?: string;
+    description?: string;
+    config?: Record<string, unknown>;
+  }) => Promise<{ agent: AgentRecord }>;
+  updateAgent: (
+    id: string,
+    data: Record<string, unknown>,
+  ) => Promise<{ agent: AgentRecord } | { error: string }>;
   deleteAgent: (id: string) => Promise<{ success: boolean } | { error: string }>;
 
   // ── Providers ──
   listProviders: () => Promise<{ providers: ProviderRecord[] }>;
-  addProvider: (data: { name: string; type: string; endpoint?: string; apiKey?: string; defaultModel?: string; models?: unknown[] }) => Promise<{ provider: ProviderRecord }>;
-  checkProviderHealth: (id: string) => Promise<{ health: ProviderHealthResult } | { error: string }>;
+  addProvider: (data: {
+    name: string;
+    type: string;
+    endpoint?: string;
+    apiKey?: string;
+    defaultModel?: string;
+    models?: unknown[];
+  }) => Promise<{ provider: ProviderRecord }>;
+  checkProviderHealth: (
+    id: string,
+  ) => Promise<{ health: ProviderHealthResult } | { error: string }>;
   removeProvider: (id: string) => Promise<{ success: boolean } | { error: string }>;
 
   // ── Executions ──
   listExecutions: () => Promise<{ executions: ExecutionRecord[] }>;
   getExecution: (id: string) => Promise<{ execution: ExecutionRecord } | { error: string }>;
-  startExecution: (data: { agentId?: string; plan?: Record<string, unknown>; input?: unknown }) => Promise<{ execution: ExecutionRecord }>;
+  startExecution: (data: {
+    agentId?: string;
+    plan?: Record<string, unknown>;
+    input?: unknown;
+  }) => Promise<{ execution: ExecutionRecord }>;
   cancelExecution: (id: string) => Promise<{ execution: ExecutionRecord } | { error: string }>;
 
   // ── Plugins ──
   listPlugins: () => Promise<{ plugins: PluginRecord[] }>;
-  installPlugin: (data: { name: string; version?: string; description?: string; author?: string; type?: string }) => Promise<{ plugin: PluginRecord }>;
+  installPlugin: (data: {
+    name: string;
+    version?: string;
+    description?: string;
+    author?: string;
+    type?: string;
+  }) => Promise<{ plugin: PluginRecord }>;
   uninstallPlugin: (id: string) => Promise<{ success: boolean } | { error: string }>;
 
   // ── Memory ──

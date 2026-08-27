@@ -16,17 +16,11 @@ interface ProviderRecord {
 
 const providers = new Map<string, ProviderRecord>();
 
-export async function listProviders(
-  _req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
+export async function listProviders(_req: IncomingMessage, res: ServerResponse): Promise<void> {
   jsonResponse(res, 200, { providers: Array.from(providers.values()) });
 }
 
-export async function addProvider(
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
+export async function addProvider(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const parsed = await parseBody<{
     id?: string;
     name?: string;

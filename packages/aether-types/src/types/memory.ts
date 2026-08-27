@@ -1,13 +1,8 @@
 /** Memory entry identification */
-export type MemoryId = string & { readonly __brand: "MemoryId" };
+export type MemoryId = string & { readonly __brand: 'MemoryId' };
 
 /** Type of memory storage */
-export type MemoryType =
-  | "episodic"
-  | "semantic"
-  | "task"
-  | "conversation"
-  | "graph";
+export type MemoryType = 'episodic' | 'semantic' | 'task' | 'conversation' | 'graph';
 
 /** A single memory entry stored in the system */
 export interface MemoryEntry {
@@ -38,11 +33,11 @@ export interface MemorySearchResult {
 
 /** Configuration for a vector store backend */
 export interface VectorStoreConfig {
-  type: "qdrant" | "sqlite" | "memory";
+  type: 'qdrant' | 'sqlite' | 'memory';
   url?: string;
   collectionName: string;
   embeddingDimension: number;
-  indexType?: "hnsw" | "flat";
+  indexType?: 'hnsw' | 'flat';
 }
 
 /** Memory store statistics */
@@ -59,14 +54,14 @@ export interface ChunkingConfig {
   maxChunkSize: number;
   overlap: number;
   separator: string;
-  strategy: "fixed" | "sentence" | "paragraph" | "semantic";
+  strategy: 'fixed' | 'sentence' | 'paragraph' | 'semantic';
 }
 
 /** Memory summarization request */
 export interface SummarizationRequest {
   entryIds: MemoryId[];
   maxLength: number;
-  format: "bullet" | "paragraph" | "json";
+  format: 'bullet' | 'paragraph' | 'json';
 }
 
 /** RAG (Retrieval Augmented Generation) configuration */

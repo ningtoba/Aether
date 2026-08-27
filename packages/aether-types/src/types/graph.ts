@@ -1,11 +1,11 @@
 /** Graph identification */
-export type GraphId = string & { readonly __brand: "GraphId" };
+export type GraphId = string & { readonly __brand: 'GraphId' };
 
 /** A node in an orchestration graph */
 export interface GraphNode {
   id: string;
   name: string;
-  type: "agent" | "tool" | "router" | "transform" | "endpoint";
+  type: 'agent' | 'tool' | 'router' | 'transform' | 'endpoint';
   config: Record<string, unknown>;
 }
 
@@ -35,7 +35,7 @@ export interface GraphDefinition {
 /** Retry policy for failed graph nodes */
 export interface RetryPolicy {
   maxAttempts: number;
-  backoff: "fixed" | "exponential" | "linear";
+  backoff: 'fixed' | 'exponential' | 'linear';
   initialDelay: number;
   maxDelay: number;
   retryableErrors: string[];
@@ -44,7 +44,7 @@ export interface RetryPolicy {
 /** Runtime state of graph execution */
 export interface GraphExecutionState {
   graphId: GraphId;
-  status: "idle" | "running" | "error" | "completed" | "paused";
+  status: 'idle' | 'running' | 'error' | 'completed' | 'paused';
   currentNode: string;
   nodeStates: Record<string, unknown>;
   error?: string;
@@ -67,7 +67,7 @@ export interface GraphCheckpoint {
 /** Node execution result */
 export interface NodeResult {
   nodeId: string;
-  status: "success" | "error" | "skipped";
+  status: 'success' | 'error' | 'skipped';
   output: Record<string, unknown>;
   error?: string;
   duration: number;

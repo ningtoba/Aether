@@ -15,25 +15,25 @@ export type NodeId = string;
 
 /** The kind of execution a graph node performs */
 export type NodeKind =
-  | "agent"       // LLM agent execution (wraps AetherAgent)
-  | "tool"        // Function tool execution
-  | "router"      // Conditional branching (LLM-as-router)
-  | "map"         // Parallel fan-out (map-reduce pattern)
-  | "reduce"      // Fan-in merge
-  | "subgraph"    // Nested sub-workflow
-  | "sleep"       // Timer / delay
-  | "signal";     // Wait for external signal (webhook, human input)
+  | 'agent' // LLM agent execution (wraps AetherAgent)
+  | 'tool' // Function tool execution
+  | 'router' // Conditional branching (LLM-as-router)
+  | 'map' // Parallel fan-out (map-reduce pattern)
+  | 'reduce' // Fan-in merge
+  | 'subgraph' // Nested sub-workflow
+  | 'sleep' // Timer / delay
+  | 'signal'; // Wait for external signal (webhook, human input)
 
 /** Runtime policy for errors on a node */
-export type NodeErrorPolicy = "fail" | "retry" | "skip" | "fallback";
+export type NodeErrorPolicy = 'fail' | 'retry' | 'skip' | 'fallback';
 
 /** Configuration for retrying a node on failure */
 export interface RetryPolicy {
   maxAttempts: number;
   baseDelayMs: number;
   maxDelayMs: number;
-  backoffFactor: number;      // exponential: delay *= backoffFactor
-  retryableErrors: string[];  // error name substrings to retry on
+  backoffFactor: number; // exponential: delay *= backoffFactor
+  retryableErrors: string[]; // error name substrings to retry on
 }
 
 /** A single node (step) inside a workflow graph */
@@ -74,16 +74,16 @@ export interface NodeDefinition {
 
 /** Defines the kind of routing an edge uses */
 export type EdgeKind =
-  | "direct"        // Always follow, no condition
-  | "conditional"   // Follow based on a condition expression
-  | "llm-route";    // Let an LLM router decide the next node
+  | 'direct' // Always follow, no condition
+  | 'conditional' // Follow based on a condition expression
+  | 'llm-route'; // Let an LLM router decide the next node
 
 /** A condition expression for conditional edges */
 export interface Condition {
   /** Field path in state to evaluate (dot notation, e.g. "result.status") */
   field: string;
   /** Operator */
-  operator: "eq" | "neq" | "gt" | "gte" | "lt" | "lte" | "exists" | "matches";
+  operator: 'eq' | 'neq' | 'gt' | 'gte' | 'lt' | 'lte' | 'exists' | 'matches';
   /** Value to compare against */
   value: unknown;
 }
@@ -113,7 +113,7 @@ export interface WorkflowDefinition {
   id: string;
   name: string;
   description?: string;
-  version: string;           // semver
+  version: string; // semver
 
   nodes: NodeDefinition[];
   edges: EdgeDefinition[];
@@ -134,7 +134,7 @@ export interface WorkflowDefinition {
 // ─── Execution State ─────────────────────────────────────────
 
 /** Runtime status of a single node in the current execution */
-export type NodeStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type NodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'skipped';
 
 /** Snapshot of a node's execution state */
 export interface NodeExecution {
@@ -160,7 +160,7 @@ export interface WorkflowState {
   /** Accumulated state bag (JSON-serialisable) shared across nodes */
   data: Record<string, unknown>;
   /** Status of the overall execution */
-  status: "pending" | "running" | "completed" | "failed" | "paused" | "cancelled";
+  status: 'pending' | 'running' | 'completed' | 'failed' | 'paused' | 'cancelled';
   /** Error message if status === "failed" */
   error?: string;
   /** ISO timestamp when execution started */
@@ -218,9 +218,9 @@ export interface OrchestrationConfig {
 
 /** Default configuration values */
 export const DEFAULT_ORCHESTRATION_CONFIG: OrchestrationConfig = {
-  defaultTimeout: 300_000,          // 5 min
+  defaultTimeout: 300_000, // 5 min
   maxParallelism: 8,
   autoCheckpoint: true,
-  maxExecutionTime: 3_600_000,      // 1 hour
+  maxExecutionTime: 3_600_000, // 1 hour
   pollingInterval: 500,
 };

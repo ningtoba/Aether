@@ -1,4 +1,4 @@
-import type { SandboxLimits } from "./sandbox.js";
+import type { SandboxLimits } from './sandbox.js';
 
 // ============================================================
 // Execution environment interfaces
@@ -34,7 +34,7 @@ export interface BaseExecOptions {
 /** Environment status */
 export interface EnvStatus {
   ready: boolean;
-  type: "docker" | "playwright" | "ts-runtime" | "python-venv";
+  type: 'docker' | 'playwright' | 'ts-runtime' | 'python-venv';
   version?: string;
   error?: string;
   info?: Record<string, unknown>;

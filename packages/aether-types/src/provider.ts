@@ -1,123 +1,123 @@
 // ─── Provider identity ───────────────────────────────────────────
 
 export type ProviderId =
-  | "openai"
-  | "anthropic"
-  | "google"
-  | "openrouter"
-  | "ollama"
-  | "vllm"
-  | "llamacpp"
-  | "groq"
-  | "together"
-  | "deepseek"
-  | "mistral"
-  | "xai"
-  | "custom";
+  | 'openai'
+  | 'anthropic'
+  | 'google'
+  | 'openrouter'
+  | 'ollama'
+  | 'vllm'
+  | 'llamacpp'
+  | 'groq'
+  | 'together'
+  | 'deepseek'
+  | 'mistral'
+  | 'xai'
+  | 'custom';
 
 /** Well-known provider metadata */
 export const WELL_KNOWN_PROVIDERS: Record<ProviderId, WellKnownProvider> = {
   openai: {
-    id: "openai",
-    name: "OpenAI",
-    defaultBaseUrl: "https://api.openai.com/v1",
-    authType: "api-key",
+    id: 'openai',
+    name: 'OpenAI',
+    defaultBaseUrl: 'https://api.openai.com/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 500, tpm: 200_000 },
-    models: ["gpt-4o", "gpt-4o-mini", "o3", "o4-mini", "gpt-4.1", "gpt-4.1-mini"],
+    models: ['gpt-4o', 'gpt-4o-mini', 'o3', 'o4-mini', 'gpt-4.1', 'gpt-4.1-mini'],
   },
   anthropic: {
-    id: "anthropic",
-    name: "Anthropic",
-    defaultBaseUrl: "https://api.anthropic.com/v1",
-    authType: "api-key",
+    id: 'anthropic',
+    name: 'Anthropic',
+    defaultBaseUrl: 'https://api.anthropic.com/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 50, tpm: 40_000 },
-    models: ["claude-sonnet-4", "claude-5-haiku"],
+    models: ['claude-sonnet-4', 'claude-5-haiku'],
   },
   google: {
-    id: "google",
-    name: "Google AI",
-    defaultBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
-    authType: "api-key",
+    id: 'google',
+    name: 'Google AI',
+    defaultBaseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    authType: 'api-key',
     rateLimits: { rpm: 60, tpm: 100_000 },
-    models: ["gemini-2.5-pro", "gemini-2.0-flash"],
+    models: ['gemini-2.5-pro', 'gemini-2.0-flash'],
   },
   openrouter: {
-    id: "openrouter",
-    name: "OpenRouter",
-    defaultBaseUrl: "https://openrouter.ai/api/v1",
-    authType: "api-key",
+    id: 'openrouter',
+    name: 'OpenRouter',
+    defaultBaseUrl: 'https://openrouter.ai/api/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 200, tpm: 100_000 },
     models: [],
   },
   ollama: {
-    id: "ollama",
-    name: "Ollama",
-    defaultBaseUrl: "http://localhost:11434/v1",
-    authType: "none",
+    id: 'ollama',
+    name: 'Ollama',
+    defaultBaseUrl: 'http://localhost:11434/v1',
+    authType: 'none',
     rateLimits: { rpm: 100, tpm: 200_000 },
     models: [],
   },
   vllm: {
-    id: "vllm",
-    name: "vLLM",
-    defaultBaseUrl: "http://localhost:8000/v1",
-    authType: "none",
+    id: 'vllm',
+    name: 'vLLM',
+    defaultBaseUrl: 'http://localhost:8000/v1',
+    authType: 'none',
     rateLimits: { rpm: 100, tpm: 200_000 },
     models: [],
   },
   llamacpp: {
-    id: "llamacpp",
-    name: "llama.cpp",
-    defaultBaseUrl: "http://localhost:8080/v1",
-    authType: "none",
+    id: 'llamacpp',
+    name: 'llama.cpp',
+    defaultBaseUrl: 'http://localhost:8080/v1',
+    authType: 'none',
     rateLimits: { rpm: 100, tpm: 200_000 },
     models: [],
   },
   groq: {
-    id: "groq",
-    name: "Groq",
-    defaultBaseUrl: "https://api.groq.com/openai/v1",
-    authType: "api-key",
+    id: 'groq',
+    name: 'Groq',
+    defaultBaseUrl: 'https://api.groq.com/openai/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 30, tpm: 20_000 },
-    models: ["llama-4-scout", "llama-4-maverick", "deepseek-r1-distill-llama-70b"],
+    models: ['llama-4-scout', 'llama-4-maverick', 'deepseek-r1-distill-llama-70b'],
   },
   together: {
-    id: "together",
-    name: "Together AI",
-    defaultBaseUrl: "https://api.together.xyz/v1",
-    authType: "api-key",
+    id: 'together',
+    name: 'Together AI',
+    defaultBaseUrl: 'https://api.together.xyz/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 60, tpm: 100_000 },
     models: [],
   },
   deepseek: {
-    id: "deepseek",
-    name: "DeepSeek",
-    defaultBaseUrl: "https://api.deepseek.com/v1",
-    authType: "api-key",
+    id: 'deepseek',
+    name: 'DeepSeek',
+    defaultBaseUrl: 'https://api.deepseek.com/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 100, tpm: 500_000 },
-    models: ["deepseek-chat", "deepseek-reasoner"],
+    models: ['deepseek-chat', 'deepseek-reasoner'],
   },
   mistral: {
-    id: "mistral",
-    name: "Mistral AI",
-    defaultBaseUrl: "https://api.mistral.ai/v1",
-    authType: "api-key",
+    id: 'mistral',
+    name: 'Mistral AI',
+    defaultBaseUrl: 'https://api.mistral.ai/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 50, tpm: 50_000 },
-    models: ["mistral-large-2503", "mistral-small-2503"],
+    models: ['mistral-large-2503', 'mistral-small-2503'],
   },
   xai: {
-    id: "xai",
-    name: "xAI",
-    defaultBaseUrl: "https://api.x.ai/v1",
-    authType: "api-key",
+    id: 'xai',
+    name: 'xAI',
+    defaultBaseUrl: 'https://api.x.ai/v1',
+    authType: 'api-key',
     rateLimits: { rpm: 60, tpm: 100_000 },
-    models: ["grok-3", "grok-3-mini"],
+    models: ['grok-3', 'grok-3-mini'],
   },
   custom: {
-    id: "custom",
-    name: "Custom Provider",
-    defaultBaseUrl: "",
-    authType: "api-key",
+    id: 'custom',
+    name: 'Custom Provider',
+    defaultBaseUrl: '',
+    authType: 'api-key',
     rateLimits: { rpm: 100, tpm: 100_000 },
     models: [],
   },
@@ -211,7 +211,7 @@ export interface ProviderConfig {
   /** Endpoint-level configs */
   endpoints?: Record<string, EndpointConfig>;
   /** Default model selection strategy */
-  selectionStrategy?: "priority" | "round-robin" | "latency" | "cost";
+  selectionStrategy?: 'priority' | 'round-robin' | 'latency' | 'cost';
 }
 
 export interface ModelOverride {
@@ -235,7 +235,7 @@ export interface WellKnownProvider {
   id: ProviderId;
   name: string;
   defaultBaseUrl: string;
-  authType: "api-key" | "oauth" | "none";
+  authType: 'api-key' | 'oauth' | 'none';
   rateLimits: RateLimitConfig;
   models: string[];
 }

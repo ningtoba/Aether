@@ -55,26 +55,37 @@ type MetricState = CounterState | GaugeState | HistogramState;
 
 export interface MetricsSnapshot {
   timestamp: number;
-  counters: Record<string, { value: number; labels: TelemetryAttributes; description: string; unit?: string }>;
-  gauges: Record<string, { value: number; labels: TelemetryAttributes; description: string; unit?: string }>;
-  histograms: Record<string, {
-    sum: number;
-    count: number;
-    avg: number;
-    min: number;
-    max: number;
-    p50: number;
-    p90: number;
-    p99: number;
-    labels: TelemetryAttributes;
-    description: string;
-    unit?: string;
-  }>;
+  counters: Record<
+    string,
+    { value: number; labels: TelemetryAttributes; description: string; unit?: string }
+  >;
+  gauges: Record<
+    string,
+    { value: number; labels: TelemetryAttributes; description: string; unit?: string }
+  >;
+  histograms: Record<
+    string,
+    {
+      sum: number;
+      count: number;
+      avg: number;
+      min: number;
+      max: number;
+      p50: number;
+      p90: number;
+      p99: number;
+      labels: TelemetryAttributes;
+      description: string;
+      unit?: string;
+    }
+  >;
 }
 
 // ─── Default histogram buckets (milliseconds) ─────────────────────────
 
-const DEFAULT_HISTOGRAM_BUCKETS_MS = [1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000];
+const DEFAULT_HISTOGRAM_BUCKETS_MS = [
+  1, 5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000,
+];
 
 // ─── Registry ─────────────────────────────────────────────────────────
 
@@ -107,7 +118,10 @@ class MetricsRegistry {
       return;
     }
     state.value += value;
-    log.trace({ metric: name, delta: value, ...extraLabels as Record<string, unknown> }, `Counter ${name} += ${value} = ${state.value}`);
+    log.trace(
+      { metric: name, delta: value, ...(extraLabels as Record<string, unknown>) },
+      `Counter ${name} += ${value} = ${state.value}`,
+    );
   }
 
   // ── Gauge ─────────────────────────────────────────────────────────
@@ -133,7 +147,11 @@ class MetricsRegistry {
 
   // ── Histogram ─────────────────────────────────────────────────────
 
-  histogram(name: string, buckets: number[] = DEFAULT_HISTOGRAM_BUCKETS_MS, opts: MetricOptions = {}): void {
+  histogram(
+    name: string,
+    buckets: number[] = DEFAULT_HISTOGRAM_BUCKETS_MS,
+    opts: MetricOptions = {},
+  ): void {
     if (this.histograms.has(name)) return;
     this.histograms.set(name, {
       sum: 0,
@@ -207,10 +225,10 @@ class MetricsRegistry {
         sum: state.sum,
         count: state.count,
         avg: state.count > 0 ? state.sum / state.count : 0,
-        min: state.count > 0 ? sorted.find((b) => b.count > 0)?.le ?? 0 : 0,
-        max: state.count > 0 ? sorted.filter((b) => b.count > 0).pop()?.le ?? 0 : 0,
-        p50: getPercentile(0.50),
-        p90: getPercentile(0.90),
+        min: state.count > 0 ? (sorted.find((b) => b.count > 0)?.le ?? 0) : 0,
+        max: state.count > 0 ? (sorted.filter((b) => b.count > 0).pop()?.le ?? 0) : 0,
+        p50: getPercentile(0.5),
+        p90: getPercentile(0.9),
         p99: getPercentile(0.99),
         labels: state.labels,
         description: state.def.description,
@@ -232,7 +250,10 @@ class MetricsRegistry {
 
 // ─── Singleton ────────────────────────────────────────────────────────
 
-const _defaultRegistry = new MetricsRegistry({ service: 'aether', host: process.env.HOSTNAME ?? 'localhost' });
+const _defaultRegistry = new MetricsRegistry({
+  service: 'aether',
+  host: process.env.HOSTNAME ?? 'localhost',
+});
 
 export function getMetrics(): MetricsRegistry {
   return _defaultRegistry;
@@ -242,11 +263,15 @@ export function getMetrics(): MetricsRegistry {
 
 export const metrics = {
   counter: (name: string, opts?: MetricOptions) => _defaultRegistry.counter(name, opts),
-  increment: (name: string, value?: number, labels?: TelemetryAttributes) => _defaultRegistry.increment(name, value, labels),
+  increment: (name: string, value?: number, labels?: TelemetryAttributes) =>
+    _defaultRegistry.increment(name, value, labels),
   gauge: (name: string, opts?: MetricOptions) => _defaultRegistry.gauge(name, opts),
-  setGauge: (name: string, value: number, labels?: TelemetryAttributes) => _defaultRegistry.setGauge(name, value, labels),
-  histogram: (name: string, buckets?: number[], opts?: MetricOptions) => _defaultRegistry.histogram(name, buckets, opts),
-  observe: (name: string, value: number, labels?: TelemetryAttributes) => _defaultRegistry.observe(name, value, labels),
+  setGauge: (name: string, value: number, labels?: TelemetryAttributes) =>
+    _defaultRegistry.setGauge(name, value, labels),
+  histogram: (name: string, buckets?: number[], opts?: MetricOptions) =>
+    _defaultRegistry.histogram(name, buckets, opts),
+  observe: (name: string, value: number, labels?: TelemetryAttributes) =>
+    _defaultRegistry.observe(name, value, labels),
   snapshot: () => _defaultRegistry.snapshot(),
   reset: () => _defaultRegistry.reset(),
 };

@@ -15,23 +15,23 @@ import {
   propagation,
   TextMapPropagator,
   ROOT_CONTEXT,
-} from "@opentelemetry/api";
-import { Resource } from "@opentelemetry/resources";
+} from '@opentelemetry/api';
+import { Resource } from '@opentelemetry/resources';
 import {
   BasicTracerProvider,
   BatchSpanProcessor,
   SimpleSpanProcessor,
   ConsoleSpanExporter,
-} from "@opentelemetry/sdk-trace-base";
-import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-proto";
+} from '@opentelemetry/sdk-trace-base';
+import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
   SEMRESATTRS_DEPLOYMENT_ENVIRONMENT,
-} from "@opentelemetry/semantic-conventions";
-import { W3CTraceContextPropagator } from "@opentelemetry/core";
+} from '@opentelemetry/semantic-conventions';
+import { W3CTraceContextPropagator } from '@opentelemetry/core';
 
-import type { TelemetryConfig, SpanLogContext } from "./types.js";
+import type { TelemetryConfig, SpanLogContext } from './types.js';
 
 let provider: BasicTracerProvider | null = null;
 let _shutdownHook: (() => Promise<void>) | null = null;
@@ -48,22 +48,29 @@ export function initTracer(config: TelemetryConfig): void {
 
   const resource = new Resource({
     [ATTR_SERVICE_NAME]: config.serviceName,
-    [ATTR_SERVICE_VERSION]: config.serviceVersion ?? "0.1.0",
-    [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: config.environment ?? "development",
+    [ATTR_SERVICE_VERSION]: config.serviceVersion ?? '0.1.0',
+    [SEMRESATTRS_DEPLOYMENT_ENVIRONMENT]: config.environment ?? 'development',
   });
 
   provider = new BasicTracerProvider({
     resource,
-    sampler: config.samplingRate !== undefined
-      ? { shouldSample: () => ({ decision: Math.random() < (config.samplingRate ?? 1.0) ? 1 /* IS_RECORDED */ : 0 /* NOT_RECORDED */, attributes: {} }) }
-      : undefined,
+    sampler:
+      config.samplingRate !== undefined
+        ? {
+            shouldSample: () => ({
+              decision:
+                Math.random() < (config.samplingRate ?? 1.0)
+                  ? 1 /* IS_RECORDED */
+                  : 0 /* NOT_RECORDED */,
+              attributes: {},
+            }),
+          }
+        : undefined,
   });
 
   // Console exporter (development default)
   if (config.consoleExporter !== false) {
-    provider.addSpanProcessor(
-      new SimpleSpanProcessor(new ConsoleSpanExporter())
-    );
+    provider.addSpanProcessor(new SimpleSpanProcessor(new ConsoleSpanExporter()));
   }
 
   // OTLP exporter (production / configured endpoint)
@@ -71,10 +78,12 @@ export function initTracer(config: TelemetryConfig): void {
     const otlpExporter = new OTLPTraceExporter({
       url: config.otlpEndpoint,
     });
-    provider.addSpanProcessor(new BatchSpanProcessor(otlpExporter, {
-      scheduledDelayMillis: 1000,
-      maxExportBatchSize: 100,
-    }));
+    provider.addSpanProcessor(
+      new BatchSpanProcessor(otlpExporter, {
+        scheduledDelayMillis: 1000,
+        maxExportBatchSize: 100,
+      }),
+    );
   }
 
   // Set W3C trace context propagator for distributed tracing
@@ -107,7 +116,7 @@ export async function shutdownTracer(): Promise<void> {
 /**
  * Get the global tracer instance for a given instrumentation scope.
  */
-export function getTracer(name = "@aether/telemetry", version = "0.1.0") {
+export function getTracer(name = '@aether/telemetry', version = '0.1.0') {
   return trace.getTracer(name, version);
 }
 
@@ -120,7 +129,7 @@ export function getTracer(name = "@aether/telemetry", version = "0.1.0") {
  */
 export function startSpan(
   name: string,
-  options?: SpanOptions & { tracerName?: string; tracerVersion?: string }
+  options?: SpanOptions & { tracerName?: string; tracerVersion?: string },
 ): Span {
   const tracer = getTracer(options?.tracerName, options?.tracerVersion);
   const { tracerName: _, tracerVersion: __, ...spanOpts } = options ?? {};
@@ -134,7 +143,7 @@ export function startSpan(
 export async function withSpan<T>(
   name: string,
   fn: (span: Span) => Promise<T>,
-  options?: SpanOptions & { tracerName?: string; tracerVersion?: string }
+  options?: SpanOptions & { tracerName?: string; tracerVersion?: string },
 ): Promise<T> {
   const span = startSpan(name, options);
   try {
@@ -156,13 +165,13 @@ export async function withSpan<T>(
 export function recordSpanError(span: Span, error: unknown): void {
   if (error instanceof Error) {
     span.recordException(error);
-    span.setAttribute("error.type", error.name);
-    span.setAttribute("error.message", error.message);
-    span.setAttribute("error.stack", error.stack ?? "");
+    span.setAttribute('error.type', error.name);
+    span.setAttribute('error.message', error.message);
+    span.setAttribute('error.stack', error.stack ?? '');
   } else {
     span.recordException(String(error));
-    span.setAttribute("error.type", typeof error);
-    span.setAttribute("error.message", String(error));
+    span.setAttribute('error.type', typeof error);
+    span.setAttribute('error.message', String(error));
   }
   span.setStatus({ code: SpanStatusCode.ERROR });
 }
@@ -170,10 +179,7 @@ export function recordSpanError(span: Span, error: unknown): void {
 /**
  * Set attributes in bulk on a span.
  */
-export function setSpanAttributes(
-  span: Span,
-  attrs: Record<string, unknown>
-): void {
+export function setSpanAttributes(span: Span, attrs: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(attrs)) {
     if (value !== undefined && value !== null) {
       span.setAttribute(key, String(value));
@@ -200,9 +206,7 @@ export function getSpanLogContext(): SpanLogContext | null {
 /**
  * Inject W3C trace context into a carrier object (e.g., HTTP headers).
  */
-export function injectTraceContext(
-  carrier: Record<string, string>
-): Record<string, string> {
+export function injectTraceContext(carrier: Record<string, string>): Record<string, string> {
   propagation.inject(ROOT_CONTEXT, carrier);
   return carrier;
 }
@@ -210,8 +214,6 @@ export function injectTraceContext(
 /**
  * Extract W3C trace context from a carrier object.
  */
-export function extractTraceContext(
-  carrier: Record<string, string>
-): Context {
+export function extractTraceContext(carrier: Record<string, string>): Context {
   return propagation.extract(ROOT_CONTEXT, carrier);
 }

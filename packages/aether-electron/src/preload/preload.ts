@@ -23,16 +23,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // ── Agents ──
   listAgents: () => ipcRenderer.invoke('agents:list'),
   getAgent: (id: string) => ipcRenderer.invoke('agents:get', id),
-  createAgent: (data: { name: string; model?: string; description?: string; config?: Record<string, unknown> }) =>
-    ipcRenderer.invoke('agents:create', data),
+  createAgent: (data: {
+    name: string;
+    model?: string;
+    description?: string;
+    config?: Record<string, unknown>;
+  }) => ipcRenderer.invoke('agents:create', data),
   updateAgent: (id: string, data: Record<string, unknown>) =>
     ipcRenderer.invoke('agents:update', id, data),
   deleteAgent: (id: string) => ipcRenderer.invoke('agents:delete', id),
 
   // ── Providers ──
   listProviders: () => ipcRenderer.invoke('providers:list'),
-  addProvider: (data: { name: string; type: string; endpoint?: string; apiKey?: string; defaultModel?: string; models?: unknown[] }) =>
-    ipcRenderer.invoke('providers:add', data),
+  addProvider: (data: {
+    name: string;
+    type: string;
+    endpoint?: string;
+    apiKey?: string;
+    defaultModel?: string;
+    models?: unknown[];
+  }) => ipcRenderer.invoke('providers:add', data),
   checkProviderHealth: (id: string) => ipcRenderer.invoke('providers:health', id),
   removeProvider: (id: string) => ipcRenderer.invoke('providers:remove', id),
 
@@ -45,17 +55,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
 
   // ── Plugins ──
   listPlugins: () => ipcRenderer.invoke('plugins:list'),
-  installPlugin: (data: { name: string; version?: string; description?: string; author?: string; type?: string }) =>
-    ipcRenderer.invoke('plugins:install', data),
+  installPlugin: (data: {
+    name: string;
+    version?: string;
+    description?: string;
+    author?: string;
+    type?: string;
+  }) => ipcRenderer.invoke('plugins:install', data),
   uninstallPlugin: (id: string) => ipcRenderer.invoke('plugins:uninstall', id),
 
   // ── Memory ──
   getMemoryStats: () => ipcRenderer.invoke('memory:stats'),
-  searchMemory: (query: string, scope?: string) => ipcRenderer.invoke('memory:search', query, scope),
+  searchMemory: (query: string, scope?: string) =>
+    ipcRenderer.invoke('memory:search', query, scope),
   clearMemory: (type?: string) => ipcRenderer.invoke('memory:clear', type),
 
   // ── Update events (main → renderer) ──
-  onUpdateAvailable: (cb: (status: { available: boolean; version?: string; releaseDate?: string; releaseNotes?: string; downloadProgress?: number; error?: string }) => void) => {
+  onUpdateAvailable: (
+    cb: (status: {
+      available: boolean;
+      version?: string;
+      releaseDate?: string;
+      releaseNotes?: string;
+      downloadProgress?: number;
+      error?: string;
+    }) => void,
+  ) => {
     const handler = (_event: Electron.IpcRendererEvent, status: any) => cb(status);
     ipcRenderer.on('update:available', handler);
     return () => ipcRenderer.removeListener('update:available', handler);
@@ -65,7 +90,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('update:downloading', handler);
     return () => ipcRenderer.removeListener('update:downloading', handler);
   },
-  onUpdateDownloaded: (cb: (status: { available: boolean; version?: string; releaseDate?: string; releaseNotes?: string; downloadProgress?: number; error?: string }) => void) => {
+  onUpdateDownloaded: (
+    cb: (status: {
+      available: boolean;
+      version?: string;
+      releaseDate?: string;
+      releaseNotes?: string;
+      downloadProgress?: number;
+      error?: string;
+    }) => void,
+  ) => {
     const handler = (_event: Electron.IpcRendererEvent, status: any) => cb(status);
     ipcRenderer.on('update:downloaded', handler);
     return () => ipcRenderer.removeListener('update:downloaded', handler);

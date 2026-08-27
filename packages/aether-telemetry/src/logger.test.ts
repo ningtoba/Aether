@@ -1,9 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { initLogger, getLogger, childLogger, moduleLogger, createLogger, shutdownLogger } from "./logger.js";
-import type { TelemetryConfig } from "./types.js";
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import {
+  initLogger,
+  getLogger,
+  childLogger,
+  moduleLogger,
+  createLogger,
+  shutdownLogger,
+} from './logger.js';
+import type { TelemetryConfig } from './types.js';
 
 // Track the mock logger state
-let mockLoggerLevel = "info";
+let mockLoggerLevel = 'info';
 
 const mockChildFn = vi.fn().mockImplementation((bindings: Record<string, unknown>) => ({
   level: mockLoggerLevel,
@@ -19,8 +26,12 @@ const mockChildFn = vi.fn().mockImplementation((bindings: Record<string, unknown
 }));
 
 const mockPinoLogger = {
-  get level() { return mockLoggerLevel; },
-  set level(v: string) { mockLoggerLevel = v; },
+  get level() {
+    return mockLoggerLevel;
+  },
+  set level(v: string) {
+    mockLoggerLevel = v;
+  },
   child: mockChildFn,
   flush: vi.fn(),
   trace: vi.fn(),
@@ -32,7 +43,7 @@ const mockPinoLogger = {
 };
 
 // Mock pino
-vi.mock("pino", () => {
+vi.mock('pino', () => {
   const pino = vi.fn((opts: any) => {
     if (opts && opts.level) {
       mockLoggerLevel = opts.level;
@@ -45,10 +56,10 @@ vi.mock("pino", () => {
 });
 
 // Mock @opentelemetry/api
-vi.mock("@opentelemetry/api", () => {
+vi.mock('@opentelemetry/api', () => {
   const mockSpanContext = {
-    traceId: "test-trace-id",
-    spanId: "test-span-id",
+    traceId: 'test-trace-id',
+    spanId: 'test-span-id',
     traceFlags: 1,
   };
   const mockSpan = {
@@ -74,15 +85,15 @@ vi.mock("@opentelemetry/api", () => {
   };
 });
 
-describe("Logger", () => {
+describe('Logger', () => {
   let config: TelemetryConfig;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockLoggerLevel = "info";
+    mockLoggerLevel = 'info';
     config = {
-      serviceName: "test-service",
-      logLevel: "info",
+      serviceName: 'test-service',
+      logLevel: 'info',
       prettyPrint: false,
       consoleExporter: false,
     };
@@ -92,66 +103,66 @@ describe("Logger", () => {
     await shutdownLogger();
   });
 
-  describe("initLogger", () => {
-    it("should create a root logger with the given config", () => {
+  describe('initLogger', () => {
+    it('should create a root logger with the given config', () => {
       const logger = initLogger(config);
       expect(logger).toBeDefined();
-      expect(logger.level).toBe("info");
+      expect(logger.level).toBe('info');
     });
 
-    it("should return the same root logger on subsequent calls", () => {
+    it('should return the same root logger on subsequent calls', () => {
       const logger1 = initLogger(config);
       const logger2 = initLogger(config);
       expect(logger1).toBe(logger2);
     });
 
-    it("should respect logLevel from config", () => {
-      mockLoggerLevel = "debug";
-      const debugConfig: TelemetryConfig = { ...config, logLevel: "debug" };
+    it('should respect logLevel from config', () => {
+      mockLoggerLevel = 'debug';
+      const debugConfig: TelemetryConfig = { ...config, logLevel: 'debug' };
       const logger = initLogger(debugConfig);
-      expect(logger.level).toBe("debug");
+      expect(logger.level).toBe('debug');
     });
   });
 
-  describe("getLogger", () => {
-    it("should return the initialized logger", () => {
+  describe('getLogger', () => {
+    it('should return the initialized logger', () => {
       initLogger(config);
       expect(getLogger()).toBeDefined();
     });
   });
 
-  describe("childLogger", () => {
-    it("should create a child logger with bound fields", () => {
+  describe('childLogger', () => {
+    it('should create a child logger with bound fields', () => {
       initLogger(config);
-      const child = childLogger({ module: "test", agentId: "agent-1" });
+      const child = childLogger({ module: 'test', agentId: 'agent-1' });
       expect(child).toBeDefined();
     });
   });
 
-  describe("moduleLogger", () => {
-    it("should create a child logger scoped to a module", () => {
+  describe('moduleLogger', () => {
+    it('should create a child logger scoped to a module', () => {
       initLogger(config);
-      const log = moduleLogger("orchestrator");
+      const log = moduleLogger('orchestrator');
       expect(log).toBeDefined();
     });
   });
 
-  describe("createLogger", () => {
-    it("should create a logger for a named module", () => {
+  describe('createLogger', () => {
+    it('should create a logger for a named module', () => {
       initLogger(config);
-      const log = createLogger({ module: "metrics", level: "info" });
+      const log = createLogger({ module: 'metrics', level: 'info' });
       expect(log).toBeDefined();
     });
   });
 
-  describe("shutdownLogger", () => {
-    it("should flush and shutdown gracefully", async () => {
+  describe('shutdownLogger', () => {
+    it('should flush and shutdown gracefully', async () => {
       initLogger(config);
       await shutdownLogger();
       // Should not throw
     });
 
-    it("should not throw if called before initialization", async () => {
+    it('should not throw if called before initialization', async () => {
       await expect(shutdownLogger()).resolves.toBeUndefined();
     });
   });

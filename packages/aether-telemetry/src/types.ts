@@ -2,11 +2,11 @@
  * Telemetry-specific types for Aether's observability system
  */
 
-import type { Span } from "@opentelemetry/api";
-import type { LevelWithSilent } from "pino";
+import type { Span } from '@opentelemetry/api';
+import type { LevelWithSilent } from 'pino';
 
 /** Severity levels for telemetry events */
-export type TelemetryLevel = "debug" | "info" | "warn" | "error" | "fatal";
+export type TelemetryLevel = 'debug' | 'info' | 'warn' | 'error' | 'fatal';
 
 /** Maps TelemetryLevel to Pino-compatible numeric level */
 export const levelMap: Record<TelemetryLevel, number> = {
@@ -20,71 +20,71 @@ export const levelMap: Record<TelemetryLevel, number> = {
 /** Semantic conventions for Aether span/attribute names */
 export const SemanticAttributes = {
   /** Agent/session identifiers */
-  AGENT_ID: "aether.agent.id",
-  AGENT_NAME: "aether.agent.name",
-  SESSION_ID: "aether.session.id",
-  EXECUTION_ID: "aether.execution.id",
+  AGENT_ID: 'aether.agent.id',
+  AGENT_NAME: 'aether.agent.name',
+  SESSION_ID: 'aether.session.id',
+  EXECUTION_ID: 'aether.execution.id',
 
   /** Step/task tracking */
-  STEP_ID: "aether.step.id",
-  STEP_TYPE: "aether.step.type",
-  STEP_INPUT: "aether.step.input",
-  STEP_OUTPUT_HASH: "aether.step.output.hash",
-  PARENT_STEP_ID: "aether.step.parent_id",
-  TOOL_NAME: "aether.tool.name",
-  TOOL_ARGS_HASH: "aether.tool.args.hash",
-  TOOL_RESULT: "aether.tool.result",
+  STEP_ID: 'aether.step.id',
+  STEP_TYPE: 'aether.step.type',
+  STEP_INPUT: 'aether.step.input',
+  STEP_OUTPUT_HASH: 'aether.step.output.hash',
+  PARENT_STEP_ID: 'aether.step.parent_id',
+  TOOL_NAME: 'aether.tool.name',
+  TOOL_ARGS_HASH: 'aether.tool.args.hash',
+  TOOL_RESULT: 'aether.tool.result',
 
   /** Provider/model tracking */
-  PROVIDER: "aether.provider",
-  MODEL: "aether.model",
-  MODEL_INPUT_TOKENS: "aether.model.input_tokens",
-  MODEL_OUTPUT_TOKENS: "aether.model.output_tokens",
-  MODEL_TOTAL_TOKENS: "aether.model.total_tokens",
-  MODEL_LATENCY_MS: "aether.model.latency_ms",
+  PROVIDER: 'aether.provider',
+  MODEL: 'aether.model',
+  MODEL_INPUT_TOKENS: 'aether.model.input_tokens',
+  MODEL_OUTPUT_TOKENS: 'aether.model.output_tokens',
+  MODEL_TOTAL_TOKENS: 'aether.model.total_tokens',
+  MODEL_LATENCY_MS: 'aether.model.latency_ms',
 
   /** Error context */
-  ERROR_TYPE: "aether.error.type",
-  ERROR_MESSAGE: "aether.error.message",
-  ERROR_CODE: "aether.error.code",
+  ERROR_TYPE: 'aether.error.type',
+  ERROR_MESSAGE: 'aether.error.message',
+  ERROR_CODE: 'aether.error.code',
 
   /** Performance */
-  DURATION_MS: "aether.duration_ms",
-  MEMORY_USAGE_MB: "aether.memory.mb",
-  CPU_USAGE_PERCENT: "aether.cpu.percent",
+  DURATION_MS: 'aether.duration_ms',
+  MEMORY_USAGE_MB: 'aether.memory.mb',
+  CPU_USAGE_PERCENT: 'aether.cpu.percent',
 } as const;
 
 /** Semantic span names for Aether */
 export const SemanticSpanNames = {
   /** Agent lifecycle */
-  AGENT_INIT: "aether.agent.init",
-  AGENT_RUN: "aether.agent.run",
-  AGENT_STEP: "aether.agent.step",
-  AGENT_COMPLETE: "aether.agent.complete",
+  AGENT_INIT: 'aether.agent.init',
+  AGENT_RUN: 'aether.agent.run',
+  AGENT_STEP: 'aether.agent.step',
+  AGENT_COMPLETE: 'aether.agent.complete',
 
   /** Tool execution */
-  TOOL_EXECUTE: "aether.tool.execute",
-  TOOL_LLM_CALL: "aether.tool.llm_call",
+  TOOL_EXECUTE: 'aether.tool.execute',
+  TOOL_LLM_CALL: 'aether.tool.llm_call',
 
   /** Provider */
-  PROVIDER_REQUEST: "aether.provider.request",
-  PROVIDER_RESPONSE: "aether.provider.response",
+  PROVIDER_REQUEST: 'aether.provider.request',
+  PROVIDER_RESPONSE: 'aether.provider.response',
 
   /** Memory operations */
-  MEMORY_READ: "aether.memory.read",
-  MEMORY_WRITE: "aether.memory.write",
-  MEMORY_SEARCH: "aether.memory.search",
-  MEMORY_DELETE: "aether.memory.delete",
+  MEMORY_READ: 'aether.memory.read',
+  MEMORY_WRITE: 'aether.memory.write',
+  MEMORY_SEARCH: 'aether.memory.search',
+  MEMORY_DELETE: 'aether.memory.delete',
 
   /** Orchestration */
-  ORCHESTRATOR_PLAN: "aether.orchestrator.plan",
-  ORCHESTRATOR_EXECUTE: "aether.orchestrator.execute",
-  ORCHESTRATOR_DELEGATE: "aether.orchestrator.delegate",
+  ORCHESTRATOR_PLAN: 'aether.orchestrator.plan',
+  ORCHESTRATOR_EXECUTE: 'aether.orchestrator.execute',
+  ORCHESTRATOR_DELEGATE: 'aether.orchestrator.delegate',
 
   /** System */
-  SYSTEM_STARTUP: "aether.system.startup",
-  SYSTEM_SHUTDOWN: "aether.system.shutdown",
-  SYSTEM_HEARTBEAT: "aether.system.heartbeat",
+  SYSTEM_STARTUP: 'aether.system.startup',
+  SYSTEM_SHUTDOWN: 'aether.system.shutdown',
+  SYSTEM_HEARTBEAT: 'aether.system.heartbeat',
 } as const;
 
 /** A serializable execution trace for replay/analysis */
@@ -102,7 +102,7 @@ export interface ExecutionTrace {
   /** Duration in milliseconds */
   durationMs?: number;
   /** Status of the execution */
-  status: "running" | "completed" | "failed" | "cancelled";
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
   /** Error information if failed */
   error?: {
     type: string;
@@ -130,7 +130,7 @@ export interface ExecutionStep {
   /** Duration in milliseconds */
   durationMs?: number;
   /** Step status */
-  status: "running" | "completed" | "failed" | "skipped";
+  status: 'running' | 'completed' | 'failed' | 'skipped';
   /** Input to this step */
   input?: unknown;
   /** Output/results from this step */
@@ -207,16 +207,16 @@ export interface MetricPoint {
 
 /** Replay-specific types for replaying execution traces */
 export type ReplayEventType =
-  | "agent_init"
-  | "agent_step_start"
-  | "agent_step_end"
-  | "tool_call_start"
-  | "tool_call_end"
-  | "llm_request_start"
-  | "llm_request_end"
-  | "memory_access"
-  | "agent_complete"
-  | "error";
+  | 'agent_init'
+  | 'agent_step_start'
+  | 'agent_step_end'
+  | 'tool_call_start'
+  | 'tool_call_end'
+  | 'llm_request_start'
+  | 'llm_request_end'
+  | 'memory_access'
+  | 'agent_complete'
+  | 'error';
 
 export interface ReplayEvent {
   timestamp: string;

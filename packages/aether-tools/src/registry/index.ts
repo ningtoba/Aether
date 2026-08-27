@@ -83,7 +83,7 @@ export class ToolRegistry {
 
   unregister(toolId: ToolId): void {
     const reg = this.tools.get(toolId);
-    if (!reg)    throw new ToolNotFoundError(toolId);
+    if (!reg) throw new ToolNotFoundError(toolId);
 
     this.tools.delete(toolId);
     this.eventBus.emit({
@@ -166,9 +166,7 @@ export class ToolRegistry {
     return result;
   }
 
-  private async defaultPermissionResolverImpl(
-    req: PermissionRequest,
-  ): Promise<PermissionResponse> {
+  private async defaultPermissionResolverImpl(req: PermissionRequest): Promise<PermissionResponse> {
     // By default, allow all
     return { granted: true, level: 'allow' as PermissionLevel };
   }

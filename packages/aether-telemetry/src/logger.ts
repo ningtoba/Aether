@@ -5,10 +5,10 @@
  * Supports level-based filtering, pretty-printing, and child loggers.
  */
 
-import pino, { Logger, LevelWithSilent } from "pino";
-import { context, trace } from "@opentelemetry/api";
-import type { TelemetryConfig, TelemetryLevel, SpanLogContext } from "./types.js";
-import { levelMap } from "./types.js";
+import pino, { Logger, LevelWithSilent } from 'pino';
+import { context, trace } from '@opentelemetry/api';
+import type { TelemetryConfig, TelemetryLevel, SpanLogContext } from './types.js';
+import { levelMap } from './types.js';
 
 let rootLogger: Logger | null = null;
 
@@ -20,7 +20,7 @@ export function initLogger(config: TelemetryConfig): Logger {
     return rootLogger;
   }
 
-  const level: LevelWithSilent = config.logLevel ?? "info";
+  const level: LevelWithSilent = config.logLevel ?? 'info';
 
   rootLogger = pino({
     level,
@@ -39,11 +39,11 @@ export function initLogger(config: TelemetryConfig): Logger {
     },
     transport: config.prettyPrint
       ? {
-          target: "pino-pretty",
+          target: 'pino-pretty',
           options: {
             colorize: true,
-            translateTime: "SYS:standard",
-            ignore: "pid,hostname",
+            translateTime: 'SYS:standard',
+            ignore: 'pid,hostname',
           },
         }
       : undefined,
@@ -61,9 +61,7 @@ export function initLogger(config: TelemetryConfig): Logger {
  */
 export function getLogger(): Logger {
   if (!rootLogger) {
-    throw new Error(
-      "Logger not initialized. Call initLogger(config) first."
-    );
+    throw new Error('Logger not initialized. Call initLogger(config) first.');
   }
   return rootLogger;
 }

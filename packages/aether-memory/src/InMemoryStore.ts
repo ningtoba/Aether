@@ -1,12 +1,12 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID } from 'node:crypto';
 import type {
   MemoryScope,
   MemoryStatus,
   ScopedMemoryEntry,
   ScopedMemoryQuery,
   ScopedMemoryQueryResult,
-} from "./scoped-types.js";
-import type { IMemoryStore } from "./IMemoryStore.js";
+} from './scoped-types.js';
+import type { IMemoryStore } from './IMemoryStore.js';
 
 /**
  * In-memory store backed by Maps, implementing IMemoryStore.
@@ -23,7 +23,9 @@ export class InMemoryStore implements IMemoryStore {
     this.scope = scope;
   }
 
-  async write(entry: Omit<ScopedMemoryEntry, "id" | "createdAt" | "updatedAt">): Promise<ScopedMemoryEntry> {
+  async write(
+    entry: Omit<ScopedMemoryEntry, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<ScopedMemoryEntry> {
     const now = new Date().toISOString();
     const full: ScopedMemoryEntry = {
       ...entry,
@@ -35,7 +37,9 @@ export class InMemoryStore implements IMemoryStore {
     return full;
   }
 
-  async writeMany(entries: Omit<ScopedMemoryEntry, "id" | "createdAt" | "updatedAt">[]): Promise<ScopedMemoryEntry[]> {
+  async writeMany(
+    entries: Omit<ScopedMemoryEntry, 'id' | 'createdAt' | 'updatedAt'>[],
+  ): Promise<ScopedMemoryEntry[]> {
     return Promise.all(entries.map((e) => this.write(e)));
   }
 
@@ -52,7 +56,7 @@ export class InMemoryStore implements IMemoryStore {
     }
 
     // Filter by status (default active)
-    const targetStatus: MemoryStatus = query.status ?? "active";
+    const targetStatus: MemoryStatus = query.status ?? 'active';
     results = results.filter((e) => e.status === targetStatus);
 
     // Filter by time
@@ -73,9 +77,7 @@ export class InMemoryStore implements IMemoryStore {
     // Text search (case-insensitive substring, fallback when no vector)
     if (query.text) {
       const terms = query.text.toLowerCase().split(/\s+/);
-      results = results.filter((e) =>
-        terms.some((t) => e.content.toLowerCase().includes(t))
-      );
+      results = results.filter((e) => terms.some((t) => e.content.toLowerCase().includes(t)));
     }
 
     // Sort — prefer entries with relevanceScore
@@ -90,7 +92,7 @@ export class InMemoryStore implements IMemoryStore {
 
   async update(
     id: string,
-    updates: Partial<Pick<ScopedMemoryEntry, "metadata" | "status" | "content">>
+    updates: Partial<Pick<ScopedMemoryEntry, 'metadata' | 'status' | 'content'>>,
   ): Promise<ScopedMemoryEntry | null> {
     const entry = this.entries.get(id);
     if (!entry) return null;
@@ -101,7 +103,7 @@ export class InMemoryStore implements IMemoryStore {
   async delete(id: string): Promise<boolean> {
     const entry = this.entries.get(id);
     if (!entry) return false;
-    entry.status = "deleted";
+    entry.status = 'deleted';
     entry.updatedAt = new Date().toISOString();
     return true;
   }
@@ -110,7 +112,7 @@ export class InMemoryStore implements IMemoryStore {
     return this.entries.delete(id);
   }
 
-  async count(filter?: Partial<Pick<ScopedMemoryEntry, "scope" | "status">>): Promise<number> {
+  async count(filter?: Partial<Pick<ScopedMemoryEntry, 'scope' | 'status'>>): Promise<number> {
     let entries = Array.from(this.entries.values());
     if (filter?.scope) entries = entries.filter((e) => e.scope === filter.scope!);
     if (filter?.status) entries = entries.filter((e) => e.status === filter.status!);
@@ -119,7 +121,7 @@ export class InMemoryStore implements IMemoryStore {
 
   async searchText(
     text: string,
-    options?: { limit?: number; scope?: MemoryScope; status?: MemoryStatus }
+    options?: { limit?: number; scope?: MemoryScope; status?: MemoryStatus },
   ): Promise<ScopedMemoryQueryResult[]> {
     return this.query({
       text,

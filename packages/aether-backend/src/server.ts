@@ -100,7 +100,7 @@ export class AetherServer {
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (this.handleCors(req, res)) return;
 
-        const url = req.url ?? '/';
+    const url = req.url ?? '/';
     const method = req.method ?? 'GET';
 
     // Carry the server's configured limit through to body parsing so no
@@ -139,7 +139,10 @@ export class AetherServer {
         resolve();
         return;
       }
-      if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
+      if (this.stopTimer) {
+        clearTimeout(this.stopTimer);
+        this.stopTimer = null;
+      }
 
       this.server = createServer((req, res) => {
         this.handleRequest(req, res).catch((err) => {
@@ -176,10 +179,16 @@ export class AetherServer {
       this.wsManager.detach();
 
       const server = this.server;
-      if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
+      if (this.stopTimer) {
+        clearTimeout(this.stopTimer);
+        this.stopTimer = null;
+      }
 
       server.close(() => {
-        if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
+        if (this.stopTimer) {
+          clearTimeout(this.stopTimer);
+          this.stopTimer = null;
+        }
         this.running = false;
         this.server = null;
         console.log('[AetherServer] Stopped');

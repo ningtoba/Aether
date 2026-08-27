@@ -7,7 +7,7 @@
  * @module @aether/orchestrator
  */
 
-import type { WorkflowDefinition, NodeDefinition, EdgeDefinition } from "./types.js";
+import type { WorkflowDefinition, NodeDefinition, EdgeDefinition } from './types.js';
 
 // ─── Mermaid.js ─────────────────────────────────────────────
 
@@ -18,9 +18,9 @@ import type { WorkflowDefinition, NodeDefinition, EdgeDefinition } from "./types
  */
 export function toMermaid(workflow: WorkflowDefinition): string {
   const lines: string[] = [];
-  lines.push("flowchart TD");
+  lines.push('flowchart TD');
   lines.push(`  %% Workflow: ${workflow.name} (v${workflow.version})`);
-  lines.push("");
+  lines.push('');
 
   // Add node definitions
   for (const node of workflow.nodes) {
@@ -29,7 +29,7 @@ export function toMermaid(workflow: WorkflowDefinition): string {
     lines.push(`  ${node.id}["${kindIcon} ${label}"]`);
   }
 
-  lines.push("");
+  lines.push('');
 
   // Style entry and terminal nodes
   const entryNode = workflow.entryNode;
@@ -42,29 +42,25 @@ export function toMermaid(workflow: WorkflowDefinition): string {
     }
   }
 
-  lines.push("");
+  lines.push('');
 
   // Add edges
   for (const edge of workflow.edges) {
     const label = edge.label ?? getEdgeLabel(edge);
-    if (edge.kind === "direct") {
+    if (edge.kind === 'direct') {
       lines.push(`  ${edge.from} -->|"${escapeMermaid(label)}"| ${edge.to};`);
-    } else if (edge.kind === "conditional") {
-      const condStr = edge.conditions
-        ?.map((c) => `${c.field} ${c.operator} ${c.value}`)
-        .join(", ");
-      lines.push(
-        `  ${edge.from} --o|"${escapeMermaid(label)}"| ${edge.to};`,
-      );
+    } else if (edge.kind === 'conditional') {
+      const condStr = edge.conditions?.map((c) => `${c.field} ${c.operator} ${c.value}`).join(', ');
+      lines.push(`  ${edge.from} --o|"${escapeMermaid(label)}"| ${edge.to};`);
       if (condStr) {
         lines.push(`  linkStyle default stroke:#f9a825,stroke-width:2px`);
       }
-    } else if (edge.kind === "llm-route") {
+    } else if (edge.kind === 'llm-route') {
       lines.push(`  ${edge.from} ==o|"${escapeMermaid(label)}"| ${edge.to};`);
     }
   }
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 /**
@@ -72,9 +68,9 @@ export function toMermaid(workflow: WorkflowDefinition): string {
  */
 export function toMermaidSequence(workflow: WorkflowDefinition): string {
   const lines: string[] = [];
-  lines.push("sequenceDiagram");
+  lines.push('sequenceDiagram');
   lines.push(`  %% Workflow: ${workflow.name}`);
-  lines.push("");
+  lines.push('');
 
   // Participants
   for (const node of workflow.nodes) {
@@ -82,7 +78,7 @@ export function toMermaidSequence(workflow: WorkflowDefinition): string {
     lines.push(`  participant "${label}" as ${node.id}`);
   }
 
-  lines.push("");
+  lines.push('');
 
   // Messages along edges
   for (const edge of workflow.edges) {
@@ -91,7 +87,7 @@ export function toMermaidSequence(workflow: WorkflowDefinition): string {
     lines.push(`  ${edge.to}-->>-${edge.from}: done`);
   }
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 // ─── Graphviz DOT ───────────────────────────────────────────
@@ -106,32 +102,38 @@ export function toDOT(workflow: WorkflowDefinition): string {
   lines.push(`  label="${escapeDOT(workflow.name)} v${workflow.version}";`);
   lines.push(`  fontsize=14;`);
   lines.push(`  node [fontsize=12, shape=box, style=rounded];`);
-  lines.push("");
+  lines.push('');
 
   // Entry node styling
   if (workflow.entryNode) {
-    lines.push(`  "${workflow.entryNode}" [shape=oval, style=filled, fillcolor="#1a73e8", fontcolor=white];`);
+    lines.push(
+      `  "${workflow.entryNode}" [shape=oval, style=filled, fillcolor="#1a73e8", fontcolor=white];`,
+    );
   }
 
   // Terminal node styling
   for (const terminalId of workflow.terminalNodes) {
-    lines.push(`  "${terminalId}" [shape=doublecircle, style=filled, fillcolor="#2e7d32", fontcolor=white];`);
+    lines.push(
+      `  "${terminalId}" [shape=doublecircle, style=filled, fillcolor="#2e7d32", fontcolor=white];`,
+    );
   }
 
-  lines.push("");
+  lines.push('');
 
   // Edges
   for (const edge of workflow.edges) {
     const label = edge.label ?? getEdgeLabel(edge);
-    if (edge.kind === "conditional") {
-      lines.push(`  "${edge.from}" -> "${edge.to}" [label="${escapeDOT(label)}", style=dashed, color="#f9a825"];`);
+    if (edge.kind === 'conditional') {
+      lines.push(
+        `  "${edge.from}" -> "${edge.to}" [label="${escapeDOT(label)}", style=dashed, color="#f9a825"];`,
+      );
     } else {
       lines.push(`  "${edge.from}" -> "${edge.to}" [label="${escapeDOT(label)}"];`);
     }
   }
 
-  lines.push("}");
-  return lines.join("\n");
+  lines.push('}');
+  return lines.join('\n');
 }
 
 // ─── Node-level breakdown ───────────────────────────────────
@@ -143,7 +145,7 @@ export function toTextTree(workflow: WorkflowDefinition): string {
   const lines: string[] = [];
   lines.push(`Workflow: ${workflow.name} (${workflow.id}) v${workflow.version}`);
   if (workflow.description) lines.push(`Description: ${workflow.description}`);
-  lines.push("");
+  lines.push('');
 
   // Build adjacency
   const adjacency = new Map<string, EdgeDefinition[]>();
@@ -163,11 +165,11 @@ export function toTextTree(workflow: WorkflowDefinition): string {
     visited.add(id);
 
     const node = workflow.nodes.find((n) => n.id === id);
-    const prefix = "  ".repeat(depth);
-    const kind = node ? `[${node.kind}]` : "[?]";
+    const prefix = '  '.repeat(depth);
+    const kind = node ? `[${node.kind}]` : '[?]';
     const label = node?.label ?? id;
-    const terminal = workflow.terminalNodes.includes(id) ? " (terminal)" : "";
-    lines.push(`${prefix}${depth > 0 ? "-> " : ""}${label} ${kind}${terminal}`);
+    const terminal = workflow.terminalNodes.includes(id) ? ' (terminal)' : '';
+    lines.push(`${prefix}${depth > 0 ? '-> ' : ''}${label} ${kind}${terminal}`);
 
     const edges = adjacency.get(id) ?? [];
     for (const edge of edges) {
@@ -177,41 +179,51 @@ export function toTextTree(workflow: WorkflowDefinition): string {
     }
   }
 
-  return lines.join("\n");
+  return lines.join('\n');
 }
 
 // ─── Helpers ────────────────────────────────────────────────
 
 function escapeMermaid(text: string): string {
-  return text.replace(/"/g, "#quot;").replace(/\n/g, "\\n");
+  return text.replace(/"/g, '#quot;').replace(/\n/g, '\\n');
 }
 
 function escapeDOT(text: string): string {
-  return text
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, "\\n")
-    .replace(/\\/g, "\\\\");
+  return text.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\\/g, '\\\\');
 }
 
 function getKindIcon(kind: string): string {
   switch (kind) {
-    case "agent": return "\u{1F916}"; // robot
-    case "tool": return "\u{1F527}"; // wrench
-    case "router": return "\u{1F9F0}"; // puzzle piece
-    case "map": return "\u{1F500}"; // repeat
-    case "reduce": return "\u{1F4CA}"; // bar chart
-    case "subgraph": return "\u{1F5C2}"; // folder
-    case "sleep": return "\u{23F0}"; // alarm clock
-    case "signal": return "\u{1F6AB}"; // no entry
-    default: return "\u{25CF}"; // circle
+    case 'agent':
+      return '\u{1F916}'; // robot
+    case 'tool':
+      return '\u{1F527}'; // wrench
+    case 'router':
+      return '\u{1F9F0}'; // puzzle piece
+    case 'map':
+      return '\u{1F500}'; // repeat
+    case 'reduce':
+      return '\u{1F4CA}'; // bar chart
+    case 'subgraph':
+      return '\u{1F5C2}'; // folder
+    case 'sleep':
+      return '\u{23F0}'; // alarm clock
+    case 'signal':
+      return '\u{1F6AB}'; // no entry
+    default:
+      return '\u{25CF}'; // circle
   }
 }
 
 function getEdgeLabel(edge: EdgeDefinition): string {
   switch (edge.kind) {
-    case "direct": return "pass";
-    case "conditional": return edge.conditions?.map((c) => `${c.field} ${c.operator} ${c.value}`).join(" & ") ?? "if";
-    case "llm-route": return "llm route";
-    default: return "edge";
+    case 'direct':
+      return 'pass';
+    case 'conditional':
+      return edge.conditions?.map((c) => `${c.field} ${c.operator} ${c.value}`).join(' & ') ?? 'if';
+    case 'llm-route':
+      return 'llm route';
+    default:
+      return 'edge';
   }
 }

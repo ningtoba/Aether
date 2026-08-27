@@ -1,4 +1,4 @@
-import { ProviderInterface } from "../provider-interface.js";
+import { ProviderInterface } from '../provider-interface.js';
 import {
   CompletionRequest,
   CompletionResponse,
@@ -8,8 +8,8 @@ import {
   ProviderError,
   ProviderErrorCode,
   StreamEvent,
-} from "../types.js";
-import { ModelCapabilityRegistry } from "../model-capabilities.js";
+} from '../types.js';
+import { ModelCapabilityRegistry } from '../model-capabilities.js';
 
 /**
  * Ollama provider.
@@ -33,14 +33,11 @@ export class OllamaProvider extends ProviderInterface {
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
     return this.withRetry(async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.config.timeout ?? 120_000,
-      );
+      const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 120_000);
 
       try {
-        const res = await fetch(this.resolveUrl("chat/completions"), {
-          method: "POST",
+        const res = await fetch(this.resolveUrl('chat/completions'), {
+          method: 'POST',
           headers: this.buildHeaders(),
           body: JSON.stringify(this.buildPayload(request)),
           signal: controller.signal,
@@ -58,21 +55,16 @@ export class OllamaProvider extends ProviderInterface {
     });
   }
 
-  async *completeStream(
-    request: CompletionRequest,
-  ): AsyncIterableIterator<StreamEvent> {
+  async *completeStream(request: CompletionRequest): AsyncIterableIterator<StreamEvent> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.config.timeout ?? 120_000,
-    );
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 120_000);
 
     try {
-      const res = await fetch(this.resolveUrl("chat/completions"), {
-        method: "POST",
+      const res = await fetch(this.resolveUrl('chat/completions'), {
+        method: 'POST',
         headers: {
           ...this.buildHeaders(),
-          Accept: "text/event-stream",
+          Accept: 'text/event-stream',
         },
         body: JSON.stringify({ ...this.buildPayload(request), stream: true }),
         signal: controller.signal,
@@ -86,30 +78,30 @@ export class OllamaProvider extends ProviderInterface {
       if (!reader) {
         throw new ProviderError(
           ProviderErrorCode.Internal,
-          "Response body is null",
+          'Response body is null',
           undefined,
           false,
         );
       }
 
       const decoder = new TextDecoder();
-      let buffer = "";
+      let buffer = '';
 
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
         for (const line of lines) {
           const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith(":")) continue;
+          if (!trimmed || trimmed.startsWith(':')) continue;
 
-          if (trimmed === "data: [DONE]") return;
+          if (trimmed === 'data: [DONE]') return;
 
-          if (trimmed.startsWith("data: ")) {
+          if (trimmed.startsWith('data: ')) {
             try {
               const data = JSON.parse(trimmed.slice(6));
               const parsed = this.parseStreamChunk(data);
@@ -121,7 +113,7 @@ export class OllamaProvider extends ProviderInterface {
         }
       }
 
-      yield { type: "done", response: await this.buildEmptyResponse(request.model) };
+      yield { type: 'done', response: await this.buildEmptyResponse(request.model) };
     } finally {
       clearTimeout(timeout);
     }
@@ -132,19 +124,16 @@ export class OllamaProvider extends ProviderInterface {
   async embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
     return this.withRetry(async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.config.timeout ?? 120_000,
-      );
+      const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 120_000);
 
       try {
         // Ollama uses /api/embed for embeddings (not the OpenAI-compatible /v1/embeddings)
-        const base = this.config.baseUrl ?? "http://localhost:11434";
-        const url = `${base.replace(/\/+$/, "")}/api/embed`;
+        const base = this.config.baseUrl ?? 'http://localhost:11434';
+        const url = `${base.replace(/\/+$/, '')}/api/embed`;
 
         const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             model: request.model,
             input: request.input,
@@ -183,7 +172,7 @@ export class OllamaProvider extends ProviderInterface {
 
     try {
       // Try the OpenAI-compatible /v1/models endpoint first
-      const res = await fetch(this.resolveUrl("models"), {
+      const res = await fetch(this.resolveUrl('models'), {
         headers: this.buildHeaders(),
         signal: AbortSignal.timeout(10_000),
       });
@@ -200,8 +189,8 @@ export class OllamaProvider extends ProviderInterface {
 
     // Fallback: try the Ollama-native /api/tags endpoint
     try {
-      const base = this.config.baseUrl ?? "http://localhost:11434";
-      const url = `${base.replace(/\/+$/, "")}/api/tags`;
+      const base = this.config.baseUrl ?? 'http://localhost:11434';
+      const url = `${base.replace(/\/+$/, '')}/api/tags`;
       const res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
 
       if (res.ok) {
@@ -235,11 +224,11 @@ export class OllamaProvider extends ProviderInterface {
     if (request.topP !== undefined) payload.top_p = request.topP;
     if (request.stop !== undefined) payload.stop = request.stop;
     if (request.stream !== undefined) payload.stream = request.stream;
-    if (request.jsonMode) payload.response_format = { type: "json_object" };
+    if (request.jsonMode) payload.response_format = { type: 'json_object' };
 
     if (request.tools && request.tools.length > 0) {
       payload.tools = request.tools.map((t) => ({
-        type: "function",
+        type: 'function',
         function: {
           name: t.name,
           description: t.description,
@@ -268,7 +257,7 @@ export class OllamaProvider extends ProviderInterface {
         request.extra.seed
       ) {
         const options: Record<string, unknown> = {};
-        for (const key of ["num_ctx", "num_predict", "repeat_penalty", "top_k", "seed"]) {
+        for (const key of ['num_ctx', 'num_predict', 'repeat_penalty', 'top_k', 'seed']) {
           if (key in request.extra) {
             options[key] = request.extra[key];
           }
@@ -286,32 +275,32 @@ export class OllamaProvider extends ProviderInterface {
     return messages.map((msg) => {
       const base: Record<string, unknown> = { role: msg.role };
 
-      if (typeof msg.content === "string") {
+      if (typeof msg.content === 'string') {
         base.content = msg.content;
       } else if (Array.isArray(msg.content)) {
         base.content = msg.content.map((block: any) => {
           switch (block.type) {
-            case "text":
-              return { type: "text", text: block.text };
-            case "image_url":
+            case 'text':
+              return { type: 'text', text: block.text };
+            case 'image_url':
               return {
-                type: "image_url",
-                image_url: { url: block.imageUrl, detail: block.detail ?? "auto" },
+                type: 'image_url',
+                image_url: { url: block.imageUrl, detail: block.detail ?? 'auto' },
               };
-            case "tool_use":
+            case 'tool_use':
               return {
-                type: "tool_use",
+                type: 'tool_use',
                 id: block.id,
                 function: { name: block.name, arguments: JSON.stringify(block.input) },
               };
-            case "tool_result":
+            case 'tool_result':
               return {
-                type: "tool_result",
+                type: 'tool_result',
                 tool_call_id: block.toolUseId,
                 content: block.content,
               };
             default:
-              return { type: "text", text: JSON.stringify(block) };
+              return { type: 'text', text: JSON.stringify(block) };
           }
         });
       }
@@ -326,8 +315,8 @@ export class OllamaProvider extends ProviderInterface {
     const message = choice?.message ?? {};
 
     return {
-      id: json.id ?? "",
-      model: json.model ?? "",
+      id: json.id ?? '',
+      model: json.model ?? '',
       content: message.content ?? null,
       toolCalls: this.parseToolCalls(message.tool_calls),
       usage: {
@@ -345,10 +334,10 @@ export class OllamaProvider extends ProviderInterface {
 
     if (choice?.finish_reason) {
       return {
-        type: "done",
+        type: 'done',
         response: {
-          id: data.id ?? "",
-          model: data.model ?? "",
+          id: data.id ?? '',
+          model: data.model ?? '',
           content: null,
           usage: {
             promptTokens: data.usage?.prompt_tokens ?? 0,
@@ -367,16 +356,16 @@ export class OllamaProvider extends ProviderInterface {
       const tc = delta.tool_calls[0];
       if (tc?.function?.name) {
         return {
-          type: "tool_call_delta",
-          id: tc.id ?? "",
+          type: 'tool_call_delta',
+          id: tc.id ?? '',
           name: tc.function.name,
-          input: tc.function.arguments ?? "",
+          input: tc.function.arguments ?? '',
         };
       }
     }
 
     if (delta.content) {
-      return { type: "delta", content: delta.content };
+      return { type: 'delta', content: delta.content };
     }
 
     return null;
@@ -384,11 +373,11 @@ export class OllamaProvider extends ProviderInterface {
 
   protected async buildEmptyResponse(model: string): Promise<CompletionResponse> {
     return {
-      id: "",
+      id: '',
       model,
       content: null,
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-      finishReason: "stop",
+      finishReason: 'stop',
     };
   }
 
@@ -396,10 +385,10 @@ export class OllamaProvider extends ProviderInterface {
     if (!toolCalls || toolCalls.length === 0) return undefined;
     return toolCalls.map((tc: any) => ({
       id: tc.id,
-      name: tc.function?.name ?? "unknown",
+      name: tc.function?.name ?? 'unknown',
       input: (() => {
         try {
-          return JSON.parse(tc.function?.arguments ?? "{}");
+          return JSON.parse(tc.function?.arguments ?? '{}');
         } catch {
           return {};
         }
@@ -407,13 +396,18 @@ export class OllamaProvider extends ProviderInterface {
     }));
   }
 
-  protected mapFinishReason(reason?: string): CompletionResponse["finishReason"] {
+  protected mapFinishReason(reason?: string): CompletionResponse['finishReason'] {
     switch (reason) {
-      case "stop": return "stop";
-      case "length": return "length";
-      case "tool_calls": return "tool_calls";
-      case "content_filter": return "content_filter";
-      default: return "stop";
+      case 'stop':
+        return 'stop';
+      case 'length':
+        return 'length';
+      case 'tool_calls':
+        return 'tool_calls';
+      case 'content_filter':
+        return 'content_filter';
+      default:
+        return 'stop';
     }
   }
 
@@ -430,7 +424,7 @@ export class OllamaProvider extends ProviderInterface {
 
     return new ProviderError(
       code,
-      typeof message === "string" ? message : JSON.stringify(message),
+      typeof message === 'string' ? message : JSON.stringify(message),
       res.status,
       code === ProviderErrorCode.RateLimited ||
         code === ProviderErrorCode.Timeout ||
@@ -447,7 +441,7 @@ export class OllamaProvider extends ProviderInterface {
     if (status >= 500) return ProviderErrorCode.Internal;
     if (status === 400) {
       const msg = String(message).toLowerCase();
-      if (msg.includes("context length") || msg.includes("maximum context"))
+      if (msg.includes('context length') || msg.includes('maximum context'))
         return ProviderErrorCode.ContextTooLong;
       return ProviderErrorCode.BadRequest;
     }

@@ -1,9 +1,9 @@
 /**
  * Abstract provider interface for LLM providers
  */
-export const VERSION = "0.1.0";
+export const VERSION = '0.1.0';
 
-export { ProviderInterface } from "./provider-interface.js";
+export { ProviderInterface } from './provider-interface.js';
 export type {
   CompletionRequest,
   CompletionResponse,
@@ -29,4 +29,4 @@ export type {
   EmbeddingResponse,
   FallbackConfig,
   RouteRule,
-} from "./types.js";
+} from './types.js';

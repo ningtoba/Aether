@@ -1,12 +1,12 @@
-import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 
 // ─── Type definitions for all settings categories ────────────────
 
 export interface GeneralSettings {
-  theme: "dark" | "light" | "system";
+  theme: 'dark' | 'light' | 'system';
   language: string;
-  startupBehavior: "restore" | "minimized" | "hidden";
+  startupBehavior: 'restore' | 'minimized' | 'hidden';
   minimizeToTray: boolean;
   dataDir: string;
   port: number;
@@ -14,10 +14,10 @@ export interface GeneralSettings {
 }
 
 export interface ProviderSettings {
-  apiKeys: Record<string, string>;          // provider_id -> masked key
+  apiKeys: Record<string, string>; // provider_id -> masked key
   defaultProvider: string;
   providerPriorities: Record<string, number>;
-  fallbackChains: string[];                 // ordered provider ids
+  fallbackChains: string[]; // ordered provider ids
   rateLimits: {
     requestsPerMinute: number;
     tokensPerMinute: number;
@@ -35,7 +35,7 @@ export interface OrchestrationSettings {
   maxParallelNodes: number;
   retryPolicy: {
     maxAttempts: number;
-    backoff: "fixed" | "exponential" | "linear";
+    backoff: 'fixed' | 'exponential' | 'linear';
     initialDelay: number;
     maxDelay: number;
   };
@@ -43,14 +43,14 @@ export interface OrchestrationSettings {
 
 export interface MemorySettings {
   memoryEnabled: boolean;
-  storageType: "sqlite" | "qdrant" | "postgres" | "memory";
+  storageType: 'sqlite' | 'qdrant' | 'postgres' | 'memory';
   vectorDbUrl: string;
   collectionName: string;
   embeddingProvider: string;
   embeddingModel: string;
   embeddingDimension: number;
   embeddingBatchSize: number;
-  chunkingStrategy: "fixed" | "sentence" | "paragraph" | "semantic";
+  chunkingStrategy: 'fixed' | 'sentence' | 'paragraph' | 'semantic';
   maxChunkSize: number;
   chunkOverlap: number;
   topK: number;
@@ -77,7 +77,7 @@ export interface DockerSettings {
   sandboxEnabled: boolean;
   dockerSocketPath: string;
   defaultImage: string;
-  networkMode: "bridge" | "host" | "none";
+  networkMode: 'bridge' | 'host' | 'none';
   memoryLimit: number;
   cpuLimit: number;
   timeout: number;
@@ -101,7 +101,7 @@ export interface BrowserSettings {
 }
 
 export interface LoggingSettings {
-  logLevel: "debug" | "info" | "warn" | "error";
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
   loggingVerbosity: number;
   tracingEnabled: boolean;
   telemetryEnabled: boolean;
@@ -122,15 +122,15 @@ export interface DeploymentSettings {
     commitMessagePrefix: string;
     signCommits: boolean;
   };
-  deploymentTarget: "local" | "docker" | "kubernetes" | "cloud";
+  deploymentTarget: 'local' | 'docker' | 'kubernetes' | 'cloud';
   deploymentUrl: string;
 }
 
 export interface EvaluationSettings {
   evalEnabled: boolean;
-  evalMetric: "accuracy" | "bleu" | "rouge" | "custom";
+  evalMetric: 'accuracy' | 'bleu' | 'rouge' | 'custom';
   evalDataset: string;
-  evalFrequency: "manual" | "per-commit" | "daily" | "weekly";
+  evalFrequency: 'manual' | 'per-commit' | 'daily' | 'weekly';
 }
 
 export interface GUISettings {
@@ -164,19 +164,19 @@ export interface AllAetherSettings {
 
 const DEFAULT_SETTINGS: AllAetherSettings = {
   general: {
-    theme: "dark",
-    language: "en",
-    startupBehavior: "restore",
+    theme: 'dark',
+    language: 'en',
+    startupBehavior: 'restore',
     minimizeToTray: true,
-    dataDir: "./data",
+    dataDir: './data',
     port: 8456,
-    host: "127.0.0.1",
+    host: '127.0.0.1',
   },
   providers: {
     apiKeys: {},
-    defaultProvider: "openai",
+    defaultProvider: 'openai',
     providerPriorities: { openai: 1, anthropic: 2, ollama: 3 },
-    fallbackChains: ["openai", "anthropic"],
+    fallbackChains: ['openai', 'anthropic'],
     rateLimits: {
       requestsPerMinute: 60,
       tokensPerMinute: 100000,
@@ -193,21 +193,21 @@ const DEFAULT_SETTINGS: AllAetherSettings = {
     maxParallelNodes: 4,
     retryPolicy: {
       maxAttempts: 3,
-      backoff: "exponential",
+      backoff: 'exponential',
       initialDelay: 1000,
       maxDelay: 30000,
     },
   },
   memory: {
     memoryEnabled: true,
-    storageType: "sqlite",
-    vectorDbUrl: "",
-    collectionName: "aether_memories",
-    embeddingProvider: "openai",
-    embeddingModel: "text-embedding-ada-002",
+    storageType: 'sqlite',
+    vectorDbUrl: '',
+    collectionName: 'aether_memories',
+    embeddingProvider: 'openai',
+    embeddingModel: 'text-embedding-ada-002',
     embeddingDimension: 1536,
     embeddingBatchSize: 20,
-    chunkingStrategy: "sentence",
+    chunkingStrategy: 'sentence',
     maxChunkSize: 1000,
     chunkOverlap: 200,
     topK: 10,
@@ -230,9 +230,9 @@ const DEFAULT_SETTINGS: AllAetherSettings = {
   },
   docker: {
     sandboxEnabled: false,
-    dockerSocketPath: "/var/run/docker.sock",
-    defaultImage: "aether-sandbox:latest",
-    networkMode: "bridge",
+    dockerSocketPath: '/var/run/docker.sock',
+    defaultImage: 'aether-sandbox:latest',
+    networkMode: 'bridge',
     memoryLimit: 512,
     cpuLimit: 2,
     timeout: 600,
@@ -241,8 +241,8 @@ const DEFAULT_SETTINGS: AllAetherSettings = {
     rbacEnabled: false,
     mcpServerEnabled: false,
     mcpServers: [],
-    allowedPaths: ["/home", "/tmp"],
-    deniedCommands: ["rm -rf", "shutdown", "reboot"],
+    allowedPaths: ['/home', '/tmp'],
+    deniedCommands: ['rm -rf', 'shutdown', 'reboot'],
     sandboxExecution: true,
   },
   browser: {
@@ -253,7 +253,7 @@ const DEFAULT_SETTINGS: AllAetherSettings = {
     screenshotEnabled: true,
   },
   logging: {
-    logLevel: "info",
+    logLevel: 'info',
     loggingVerbosity: 3,
     tracingEnabled: false,
     telemetryEnabled: false,
@@ -261,7 +261,7 @@ const DEFAULT_SETTINGS: AllAetherSettings = {
     logRetentionDays: 30,
   },
   plugins: {
-    pluginDir: "./plugins",
+    pluginDir: './plugins',
     autoLoadPlugins: true,
     enabledPlugins: [],
   },
@@ -269,17 +269,17 @@ const DEFAULT_SETTINGS: AllAetherSettings = {
     cicdEnabled: false,
     commitSettings: {
       autoCommit: false,
-      commitMessagePrefix: "aether:",
+      commitMessagePrefix: 'aether:',
       signCommits: false,
     },
-    deploymentTarget: "local",
-    deploymentUrl: "",
+    deploymentTarget: 'local',
+    deploymentUrl: '',
   },
   evaluation: {
     evalEnabled: false,
-    evalMetric: "accuracy",
-    evalDataset: "",
-    evalFrequency: "manual",
+    evalMetric: 'accuracy',
+    evalDataset: '',
+    evalFrequency: 'manual',
   },
   gui: {
     sidebarCollapsed: false,
@@ -334,7 +334,10 @@ export const useSettingsStore = create<SettingsStore>()(
 
       updateOrchestration: (patch) =>
         set((state) => ({
-          settings: { ...state.settings, orchestration: { ...state.settings.orchestration, ...patch } },
+          settings: {
+            ...state.settings,
+            orchestration: { ...state.settings.orchestration, ...patch },
+          },
           isDirty: true,
         })),
 
@@ -404,14 +407,12 @@ export const useSettingsStore = create<SettingsStore>()(
           isDirty: true,
         })),
 
-      resetAll: () =>
-        set({ settings: { ...DEFAULT_SETTINGS }, isDirty: true }),
+      resetAll: () => set({ settings: { ...DEFAULT_SETTINGS }, isDirty: true }),
 
-      saveSettings: () =>
-        set({ isDirty: false }),
+      saveSettings: () => set({ isDirty: false }),
     }),
     {
-      name: "aether-settings",
+      name: 'aether-settings',
       partialize: (state) => ({ settings: state.settings }),
       onRehydrateStorage: () => (state) => {
         if (state) state.isDirty = false;

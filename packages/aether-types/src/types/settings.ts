@@ -1,8 +1,8 @@
 /** Global application settings */
 export interface AppSettings {
-  theme: "light" | "dark" | "system";
+  theme: 'light' | 'dark' | 'system';
   language: string;
-  logLevel: "debug" | "info" | "warn" | "error";
+  logLevel: 'debug' | 'info' | 'warn' | 'error';
   autoUpdate: boolean;
   telemetry: boolean;
   dataDir: string;
@@ -24,6 +24,6 @@ export interface GUISettings {
 export interface AllSettings {
   app: AppSettings;
   gui: GUISettings;
-  execution: import("./execution").ExecutionConfig;
-  memory: import("./memory").RAGConfig;
+  execution: import('./execution').ExecutionConfig;
+  memory: import('./memory').RAGConfig;
 }

@@ -6,18 +6,18 @@
  * timeouts, and retries across all runtime backends.
  */
 
-import type { ChildProcess } from "node:child_process";
+import type { ChildProcess } from 'node:child_process';
 
 // ─── Permission model ───────────────────────────────────────────────────────
 
 /** Categories a tool may be gated on. */
 export type PermissionScope =
-  | "shell"       // arbitrary shell commands
-  | "filesystem"  // read/write files outside workspace
-  | "network"     // outbound HTTP / TCP
-  | "docker"      // Docker container mgmt
-  | "browser"     // headless browser automation
-  | "runtime"     // isolated code execution (Python / Node)
+  | 'shell' // arbitrary shell commands
+  | 'filesystem' // read/write files outside workspace
+  | 'network' // outbound HTTP / TCP
+  | 'docker' // Docker container mgmt
+  | 'browser' // headless browser automation
+  | 'runtime'; // isolated code execution (Python / Node)
 
 export interface ToolPermissions {
   /** Scopes the caller needs. */
@@ -31,11 +31,11 @@ export interface ToolPermissions {
 // ─── Tool definition ────────────────────────────────────────────────────────
 
 export type ToolKind =
-  | "shell"       // local or Docker shell
-  | "docker"      // Dockerode container lifecycle
-  | "playwright"  // Playwright browser automation
-  | "python"      // Python code execution
-  | "node"        // Node.js / TypeScript code execution
+  | 'shell' // local or Docker shell
+  | 'docker' // Dockerode container lifecycle
+  | 'playwright' // Playwright browser automation
+  | 'python' // Python code execution
+  | 'node'; // Node.js / TypeScript code execution
 
 /** Parameters a tool receives on invocation. */
 export interface ToolParams {
@@ -105,7 +105,7 @@ export interface ToolOutput {
 
 /** A single emitted chunk during streaming execution. */
 export interface ToolChunk {
-  kind: "stdout" | "stderr" | "error" | "exit";
+  kind: 'stdout' | 'stderr' | 'error' | 'exit';
   data: string;
   timestamp: number;
 }

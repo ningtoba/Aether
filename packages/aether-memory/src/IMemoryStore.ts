@@ -4,7 +4,7 @@ import type {
   ScopedMemoryEntry,
   ScopedMemoryQuery,
   ScopedMemoryQueryResult,
-} from "./scoped-types.js";
+} from './scoped-types.js';
 
 /**
  * Core memory store interface for scope-based memory stores.
@@ -14,10 +14,14 @@ export interface IMemoryStore {
   readonly scope: MemoryScope;
 
   /** Store a memory entry */
-  write(entry: Omit<ScopedMemoryEntry, "id" | "createdAt" | "updatedAt">): Promise<ScopedMemoryEntry>;
+  write(
+    entry: Omit<ScopedMemoryEntry, 'id' | 'createdAt' | 'updatedAt'>,
+  ): Promise<ScopedMemoryEntry>;
 
   /** Batch write */
-  writeMany(entries: Omit<ScopedMemoryEntry, "id" | "createdAt" | "updatedAt">[]): Promise<ScopedMemoryEntry[]>;
+  writeMany(
+    entries: Omit<ScopedMemoryEntry, 'id' | 'createdAt' | 'updatedAt'>[],
+  ): Promise<ScopedMemoryEntry[]>;
 
   /** Read by ID */
   read(id: string): Promise<ScopedMemoryEntry | null>;
@@ -26,7 +30,10 @@ export interface IMemoryStore {
   query(query: ScopedMemoryQuery): Promise<ScopedMemoryQueryResult[]>;
 
   /** Update metadata on an entry */
-  update(id: string, updates: Partial<Pick<ScopedMemoryEntry, "metadata" | "status" | "content">>): Promise<ScopedMemoryEntry | null>;
+  update(
+    id: string,
+    updates: Partial<Pick<ScopedMemoryEntry, 'metadata' | 'status' | 'content'>>,
+  ): Promise<ScopedMemoryEntry | null>;
 
   /** Soft delete (set status to deleted) */
   delete(id: string): Promise<boolean>;
@@ -35,8 +42,11 @@ export interface IMemoryStore {
   purge(id: string): Promise<boolean>;
 
   /** Count entries matching filter */
-  count(filter?: Partial<Pick<ScopedMemoryEntry, "scope" | "status">>): Promise<number>;
+  count(filter?: Partial<Pick<ScopedMemoryEntry, 'scope' | 'status'>>): Promise<number>;
 
   /** Search by text (non-vector fallback) */
-  searchText(text: string, options?: { limit?: number; scope?: MemoryScope; status?: MemoryStatus }): Promise<ScopedMemoryQueryResult[]>;
+  searchText(
+    text: string,
+    options?: { limit?: number; scope?: MemoryScope; status?: MemoryStatus },
+  ): Promise<ScopedMemoryQueryResult[]>;
 }

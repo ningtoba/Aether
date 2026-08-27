@@ -15,10 +15,10 @@ export function isValidPort(port: number): boolean {
 
 /** Type guard: checks if value is a non-empty string */
 export function isNonEmptyString(val: unknown): val is string {
-  return typeof val === "string" && val.length > 0;
+  return typeof val === 'string' && val.length > 0;
 }
 
 /** Type guard: checks if value is a plain object (not null, not array) */
 export function isPlainObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === "object" && val !== null && !Array.isArray(val);
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
 }

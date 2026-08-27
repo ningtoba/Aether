@@ -7,12 +7,7 @@
  * @module @aether/sdk
  */
 
-export { AetherAgent, AetherRunner } from "./agent.js";
-export { createTool, ToolRegistry } from "./tools.js";
+export { AetherAgent, AetherRunner } from './agent.js';
+export { createTool, ToolRegistry } from './tools.js';
 
-export type {
-  AgentConfig,
-  RunConfig,
-  RunResult,
-  ToolDefinition,
-} from "./types.js";
+export type { AgentConfig, RunConfig, RunResult, ToolDefinition } from './types.js';

@@ -10,7 +10,11 @@ export async function listAgents(req: IncomingMessage, res: ServerResponse): Pro
   jsonResponse(res, 200, { agents: store.listAgents() });
 }
 
-export async function createAgent(req: IncomingMessage, res: ServerResponse, _params: RouteParams): Promise<void> {
+export async function createAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+  _params: RouteParams,
+): Promise<void> {
   const parsed = await parseBody<{ name?: string; config?: Record<string, unknown> }>(req);
   if (!parsed.ok) {
     if (parsed.reason === 'too_large') return payloadTooLarge(res);
@@ -20,17 +24,28 @@ export async function createAgent(req: IncomingMessage, res: ServerResponse, _pa
   if (!body.name) {
     return badRequest(res, 'Agent name is required');
   }
-  const agent = store.createAgent({ name: body.name, config: body.config as Record<string, unknown> });
+  const agent = store.createAgent({
+    name: body.name,
+    config: body.config as Record<string, unknown>,
+  });
   jsonResponse(res, 201, { agent });
 }
 
-export async function getAgent(req: IncomingMessage, res: ServerResponse, params: RouteParams): Promise<void> {
+export async function getAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: RouteParams,
+): Promise<void> {
   const agent = store.getAgent(params.id as any);
   if (!agent) return notFound(res, 'Agent not found');
   jsonResponse(res, 200, { agent });
 }
 
-export async function updateAgent(req: IncomingMessage, res: ServerResponse, params: RouteParams): Promise<void> {
+export async function updateAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: RouteParams,
+): Promise<void> {
   const parsed = await parseBody<Record<string, unknown>>(req);
   if (!parsed.ok) {
     if (parsed.reason === 'too_large') return payloadTooLarge(res);
@@ -41,7 +56,11 @@ export async function updateAgent(req: IncomingMessage, res: ServerResponse, par
   jsonResponse(res, 200, { agent });
 }
 
-export async function deleteAgent(req: IncomingMessage, res: ServerResponse, params: RouteParams): Promise<void> {
+export async function deleteAgent(
+  req: IncomingMessage,
+  res: ServerResponse,
+  params: RouteParams,
+): Promise<void> {
   const deleted = store.deleteAgent(params.id as any);
   if (!deleted) return notFound(res, 'Agent not found');
   jsonResponse(res, 200, { success: true });

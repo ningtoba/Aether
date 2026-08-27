@@ -1,4 +1,4 @@
-import type { IndexedEntry } from "./scoped-types.js";
+import type { IndexedEntry } from './scoped-types.js';
 
 /**
  * Vector store abstraction for similarity search.
@@ -13,7 +13,10 @@ export interface IVectorStore {
   upsertMany(entries: IndexedEntry[]): Promise<void>;
 
   /** Search for nearest neighbors by vector */
-  search(vector: Float64Array, options?: { limit?: number; minScore?: number }): Promise<Array<{ id: string; score: number }>>;
+  search(
+    vector: Float64Array,
+    options?: { limit?: number; minScore?: number },
+  ): Promise<Array<{ id: string; score: number }>>;
 
   /** Delete by ID */
   delete(id: string): Promise<void>;

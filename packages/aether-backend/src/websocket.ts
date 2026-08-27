@@ -14,9 +14,9 @@
  *   the server buffer frames in memory without bound;
  * - optional Origin allow-list to mitigate cross-site WebSocket hijacking.
  */
-import { createHash } from "node:crypto";
-import type { Server, IncomingMessage } from "node:http";
-import type { Duplex } from "node:stream";
+import { createHash } from 'node:crypto';
+import type { Server, IncomingMessage } from 'node:http';
+import type { Duplex } from 'node:stream';
 
 /** Maximum accepted payload for a single WebSocket frame (bytes). */
 export const MAX_WS_FRAME_SIZE = 1_000_000;
@@ -64,7 +64,8 @@ const MAX_RX_CHUNKS = 64;
 export class WebSocketManager {
   private clients = new Map<string, WSClient>();
   private server: Server | null = null;
-  private upgradeHandler: ((req: IncomingMessage, socket: Duplex, head: Buffer) => void) | null = null;
+  private upgradeHandler: ((req: IncomingMessage, socket: Duplex, head: Buffer) => void) | null =
+    null;
   private allowedOrigins: string[] = [];
 
   /** Per-socket receive buffer for frame reassembly. */
@@ -90,7 +91,7 @@ export class WebSocketManager {
         return;
       }
 
-      const key = req.headers["sec-websocket-key"];
+      const key = req.headers['sec-websocket-key'];
       if (!key) {
         socket.destroy();
         return;
@@ -98,13 +99,13 @@ export class WebSocketManager {
 
       const acceptKey = this.generateAcceptValue(key);
       const responseHeaders = [
-        "HTTP/1.1 101 Switching Protocols",
-        "Upgrade: websocket",
-        "Connection: Upgrade",
+        'HTTP/1.1 101 Switching Protocols',
+        'Upgrade: websocket',
+        'Connection: Upgrade',
         `Sec-WebSocket-Accept: ${acceptKey}`,
-        "",
-        "",
-      ].join("\r\n");
+        '',
+        '',
+      ].join('\r\n');
 
       socket.write(responseHeaders);
       if (head.length > 0) {
@@ -120,12 +121,14 @@ export class WebSocketManager {
       const client: WSClient = {
         id: clientId,
         send: (data: string) => {
-                    this.writeFrame(socket, this.createTextFrame(data));
+          this.writeFrame(socket, this.createTextFrame(data));
         },
         close: () => {
           try {
             socket.destroy();
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
           this.clients.delete(clientId);
           this.rx.delete(socket);
         },
@@ -133,7 +136,7 @@ export class WebSocketManager {
 
       this.clients.set(clientId, client);
 
-      socket.on("data", (chunk: Buffer) => {
+      socket.on('data', (chunk: Buffer) => {
         try {
           this.pushRx(socket, chunk);
           this.processFrames(client, socket);
@@ -142,20 +145,24 @@ export class WebSocketManager {
           // A half-close (socket.end()) would leave the readable side open and
           // let the peer keep appending to the rx buffer forever.
           if (!(err instanceof WsProtocolError)) {
-            console.error("[WebSocket] frame decode error:", err);
+            console.error('[WebSocket] frame decode error:', err);
           }
           this.clients.delete(clientId);
           this.rx.delete(socket);
-          try { socket.destroy(); } catch { /* ignore */ }
+          try {
+            socket.destroy();
+          } catch {
+            /* ignore */
+          }
         }
       });
 
-      socket.on("close", () => {
+      socket.on('close', () => {
         this.clients.delete(clientId);
         this.rx.delete(socket);
       });
 
-      socket.on("error", () => {
+      socket.on('error', () => {
         this.clients.delete(clientId);
         this.rx.delete(socket);
       });
@@ -167,21 +174,25 @@ export class WebSocketManager {
           this.processFrames(client, socket);
         } catch (err) {
           if (!(err instanceof WsProtocolError)) {
-            console.error("[WebSocket] frame decode error:", err);
+            console.error('[WebSocket] frame decode error:', err);
           }
           this.clients.delete(clientId);
           this.rx.delete(socket);
-          try { socket.destroy(); } catch { /* ignore */ }
+          try {
+            socket.destroy();
+          } catch {
+            /* ignore */
+          }
         }
       }
     };
 
-    server.on("upgrade", this.upgradeHandler);
+    server.on('upgrade', this.upgradeHandler);
   }
 
   detach(): void {
     if (this.server && this.upgradeHandler) {
-      this.server.removeListener("upgrade", this.upgradeHandler);
+      this.server.removeListener('upgrade', this.upgradeHandler);
       this.upgradeHandler = null;
     }
     const entries = Array.from(this.clients.entries());
@@ -241,7 +252,7 @@ export class WebSocketManager {
     // the whole prefix, and cap the total to bound memory. Two complete frames
     // may legitimately arrive coalesced in one chunk, hence the 2x allowance.
     if (buf.length + chunk.length > MAX_WS_FRAME_SIZE * 2 + 64) {
-      throw new WsProtocolError("Receive buffer exceeds frame size limit");
+      throw new WsProtocolError('Receive buffer exceeds frame size limit');
     }
     buf.chunks.push(chunk);
     buf.length += chunk.length;
@@ -266,21 +277,27 @@ export class WebSocketManager {
       if (frame.opcode === 0x01) {
         // Text frame — expects a JSON control message (optional filter).
         try {
-          const parsed = JSON.parse(frame.payload.toString("utf-8"));
+          const parsed = JSON.parse(frame.payload.toString('utf-8'));
           if (parsed.filter && Array.isArray(parsed.filter)) {
             client.filter = new Set<string>(parsed.filter);
           }
-        } catch { /* ignore non-JSON control messages */ }
+        } catch {
+          /* ignore non-JSON control messages */
+        }
       } else if (frame.opcode === 0x08) {
         // Close frame — full teardown (destroy, not a half-close) so no FD or
         // buffered rx lingers on a peer that stops talking.
         this.clients.delete(client.id);
         this.rx.delete(socket);
-        try { socket.destroy(); } catch { /* ignore */ }
+        try {
+          socket.destroy();
+        } catch {
+          /* ignore */
+        }
         return;
       } else if (frame.opcode === 0x09) {
         // Ping — answer with a pong carrying the same payload.
-                this.writeFrame(socket, this.createFrame(0x0a, frame.payload));
+        this.writeFrame(socket, this.createFrame(0x0a, frame.payload));
       }
       // Other opcodes (continuation, binary) are ignored.
     }
@@ -313,7 +330,7 @@ export class WebSocketManager {
 
     const masked = (first[1] & 0x80) !== 0;
     // RFC 6455 §5.1: client-to-server frames MUST be masked.
-    if (!masked) throw new WsProtocolError("Client frames must be masked");
+    if (!masked) throw new WsProtocolError('Client frames must be masked');
 
     let length = first[1] & 0x7f;
     let headerLen = 2;
@@ -329,7 +346,7 @@ export class WebSocketManager {
       const bigLength = ext.readBigUInt64BE(0);
       // Reject absurd lengths before allocating a mask buffer.
       if (bigLength > BigInt(MAX_WS_FRAME_SIZE)) {
-        throw new WsProtocolError("Frame payload exceeds size limit");
+        throw new WsProtocolError('Frame payload exceeds size limit');
       }
       length = Number(bigLength);
       headerLen = 10;
@@ -338,11 +355,11 @@ export class WebSocketManager {
     if (opcode === 0x08 || opcode === 0x09) {
       // RFC 6455 §5.5: control frame payloads MUST be 125 bytes or fewer.
       if (length > 125) {
-        throw new WsProtocolError("Control frame payload exceeds 125 bytes");
+        throw new WsProtocolError('Control frame payload exceeds 125 bytes');
       }
     }
     if (length > MAX_WS_FRAME_SIZE) {
-      throw new WsProtocolError("Frame payload exceeds size limit");
+      throw new WsProtocolError('Frame payload exceeds size limit');
     }
 
     const mask = this.readBytesAt(list, offset + headerLen, 4);
@@ -357,7 +374,7 @@ export class WebSocketManager {
     return { opcode, payload: unmasked, consumed: headerLen + 4 + length };
   }
 
-    /**
+  /**
    * Write one frame to a client socket under an outbound backlog cap. If the
    * peer stops reading (TCP window full), socket.write() buffers bytes in
    * memory without limit; past the cap the connection is dropped instead.
@@ -369,7 +386,11 @@ export class WebSocketManager {
       this.tx.set(socket, state);
     }
     if (state.buffered > MAX_WS_OUTBOUND_BACKLOG) {
-      try { socket.destroy(); } catch { /* ignore */ }
+      try {
+        socket.destroy();
+      } catch {
+        /* ignore */
+      }
       return;
     }
     try {
@@ -378,7 +399,7 @@ export class WebSocketManager {
         state.buffered += frame.length;
         if (!state.drainBound) {
           state.drainBound = true;
-          socket.once("drain", () => {
+          socket.once('drain', () => {
             const s = this.tx.get(socket);
             if (s) {
               s.buffered = 0;
@@ -387,7 +408,9 @@ export class WebSocketManager {
           });
         }
       }
-    } catch { /* client disconnected */ }
+    } catch {
+      /* client disconnected */
+    }
   }
 
   /**
@@ -445,12 +468,14 @@ export class WebSocketManager {
   }
 
   private generateAcceptValue(key: string): string {
-    const GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    return createHash("sha1").update(key + GUID, "utf-8").digest("base64");
+    const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
+    return createHash('sha1')
+      .update(key + GUID, 'utf-8')
+      .digest('base64');
   }
 
   private createTextFrame(data: string): Buffer {
-    return this.createFrame(0x01, Buffer.from(data, "utf-8"));
+    return this.createFrame(0x01, Buffer.from(data, 'utf-8'));
   }
 
   private createFrame(opcode: number, payload: Buffer): Buffer {

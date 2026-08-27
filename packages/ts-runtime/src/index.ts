@@ -5,13 +5,13 @@
  * Supports timeouts, output size limits, and basic resource constraints.
  */
 
-import { execFile } from "node:child_process";
-import { writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { join, dirname } from "node:path";
-import { tmpdir } from "node:os";
+import { execFile } from 'node:child_process';
+import { writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 
-export const VERSION = "0.1.0";
+export const VERSION = '0.1.0';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -51,7 +51,7 @@ export interface EvalResult<T = unknown> {
  * `tsx.cmd` (plain `tsx` has no executable on Windows).
  */
 export function tsxBinaryName(platform: NodeJS.Platform = process.platform): string {
-  return platform === "win32" ? "tsx.cmd" : "tsx";
+  return platform === 'win32' ? 'tsx.cmd' : 'tsx';
 }
 
 /**
@@ -72,8 +72,8 @@ export function tsxBinaryName(platform: NodeJS.Platform = process.platform): str
 export function getTsxEntryPath(platform: NodeJS.Platform = process.platform): string {
   const moduleDir = dirname(fileURLToPath(import.meta.url));
   for (const candidate of [
-    join(moduleDir, "..", "node_modules", "tsx", "dist", "cli.mjs"),
-    join(moduleDir, "..", "..", "..", "node_modules", "tsx", "dist", "cli.mjs"),
+    join(moduleDir, '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'),
+    join(moduleDir, '..', '..', '..', 'node_modules', 'tsx', 'dist', 'cli.mjs'),
   ]) {
     if (existsSync(candidate)) return candidate;
   }
@@ -82,9 +82,9 @@ export function getTsxEntryPath(platform: NodeJS.Platform = process.platform): s
 
 /** Write code to a temp file and return the file path. */
 function writeTempFile(code: string): { filePath: string; cleanup: () => void } {
-  const tmpDir = mkdtempSync(join(tmpdir(), "ts-runtime-"));
-  const filePath = join(tmpDir, "script.ts");
-  writeFileSync(filePath, code, "utf-8");
+  const tmpDir = mkdtempSync(join(tmpdir(), 'ts-runtime-'));
+  const filePath = join(tmpDir, 'script.ts');
+  writeFileSync(filePath, code, 'utf-8');
   return {
     filePath,
     cleanup: () => {
@@ -116,9 +116,9 @@ export function execTypeScript(
 
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
-      NODE_ENV: "sandbox",
-      NODE_NO_WARNINGS: "1",
-      NODE_OPTIONS: "--max-old-space-size=256",
+      NODE_ENV: 'sandbox',
+      NODE_NO_WARNINGS: '1',
+      NODE_OPTIONS: '--max-old-space-size=256',
       ...options.env,
     };
 
@@ -130,8 +130,8 @@ export function execTypeScript(
     // Launch the tsx entry module with the Node executable itself so the same
     // code path works on Windows (where .cmd/.tsx shims cannot be execFile'd).
     const tsxEntry = getTsxEntryPath();
-    const executable = tsxEntry.endsWith(".mjs") ? process.execPath : tsxEntry;
-    const tsxArgs = tsxEntry.endsWith(".mjs") ? [tsxEntry, filePath] : [filePath];
+    const executable = tsxEntry.endsWith('.mjs') ? process.execPath : tsxEntry;
+    const tsxArgs = tsxEntry.endsWith('.mjs') ? [tsxEntry, filePath] : [filePath];
 
     const child = execFile(
       executable,
@@ -144,13 +144,14 @@ export function execTypeScript(
       },
       (error, stdout, stderr) => {
         cleanup();
-        const timedOut = error?.killed === true ||
-          (error?.message != null && error.message.includes("timed out")) ||
+        const timedOut =
+          error?.killed === true ||
+          (error?.message != null && error.message.includes('timed out')) ||
           false;
         resolve({
-          stdout: stdout ?? "",
-          stderr: stderr ?? "",
-          exitCode: (error != null ? (typeof error.code === "number" ? error.code : 1) : 0),
+          stdout: stdout ?? '',
+          stderr: stderr ?? '',
+          exitCode: error != null ? (typeof error.code === 'number' ? error.code : 1) : 0,
           timedOut,
         });
       },
@@ -160,10 +161,10 @@ export function execTypeScript(
     if (child.exitCode === null) {
       setTimeout(() => {
         if (child.exitCode === null) {
-          child.kill("SIGTERM");
+          child.kill('SIGTERM');
           setTimeout(() => {
             if (child.exitCode === null) {
-              child.kill("SIGKILL");
+              child.kill('SIGKILL');
             }
           }, 2_000);
         }
@@ -182,7 +183,7 @@ export async function evalTypeScript<T = unknown>(
   context?: Record<string, unknown>,
   options: ExecTypeScriptOptions = {},
 ): Promise<EvalResult<T>> {
-  const contextJson = context ? JSON.stringify(context) : "{}";
+  const contextJson = context ? JSON.stringify(context) : '{}';
 
   const wrapperCode = `
 const __context = ${contextJson};
@@ -238,5 +239,5 @@ export function readOutputFile(filePath: string): string {
   if (!existsSync(filePath)) {
     throw new Error(`Output file not found: ${filePath}`);
   }
-  return readFileSync(filePath, "utf-8");
+  return readFileSync(filePath, 'utf-8');
 }

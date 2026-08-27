@@ -16,7 +16,13 @@ export type SemVer = string & { __brand: 'SemVer' };
 export type Timestamp = string & { __brand: 'Timestamp' };
 
 /** Arbitrary JSON-serialisable value */
-export type JSONValue = string | number | boolean | null | JSONValue[] | { [key: string]: JSONValue };
+export type JSONValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JSONValue[]
+  | { [key: string]: JSONValue };
 
 /** A JSON-serialisable record */
 export type JSONObject = Record<string, JSONValue>;

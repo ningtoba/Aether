@@ -4,8 +4,8 @@
  * scoped implementations (EpisodicStore, SemanticStore, TaskStore, ConversationStore).
  */
 
-export type MemoryScope = "episodic" | "semantic" | "task" | "conversation";
-export type MemoryStatus = "active" | "archived" | "deleted";
+export type MemoryScope = 'episodic' | 'semantic' | 'task' | 'conversation';
+export type MemoryStatus = 'active' | 'archived' | 'deleted';
 
 export interface ScopedMemoryEntry {
   id: string;

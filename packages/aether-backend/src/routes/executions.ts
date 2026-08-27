@@ -32,19 +32,13 @@ interface ExecutionRecord {
 
 const executions = new Map<ExecutionId, ExecutionRecord>();
 
-export async function listExecutions(
-  _req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
+export async function listExecutions(_req: IncomingMessage, res: ServerResponse): Promise<void> {
   jsonResponse(res, 200, {
     executions: Array.from(executions.values()),
   });
 }
 
-export async function startExecution(
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
+export async function startExecution(req: IncomingMessage, res: ServerResponse): Promise<void> {
   const parsed = await parseBody<{
     agentId?: string;
     plan?: ExecutionPlan;

@@ -37,12 +37,7 @@ export interface MemoryEntry {
 /**
  * Supported memory type / bucket categories.
  */
-export type MemoryType =
-  | "episodic"
-  | "semantic"
-  | "task"
-  | "conversation"
-  | "graph";
+export type MemoryType = 'episodic' | 'semantic' | 'task' | 'conversation' | 'graph';
 
 /**
  * Query parameters for memory retrieval.
@@ -75,7 +70,7 @@ export interface MemorySearchResult {
  */
 export interface VectorStoreConfig {
   /** Backend type */
-  type: "memory" | "sqlite" | "qdrant";
+  type: 'memory' | 'sqlite' | 'qdrant';
   /** Optional connection URL for remote stores */
   url?: string;
   /** Collection / table name */
@@ -83,7 +78,7 @@ export interface VectorStoreConfig {
   /** Embedding vector dimension */
   embeddingDimension: number;
   /** Index type */
-  indexType?: "hnsw" | "flat";
+  indexType?: 'hnsw' | 'flat';
 }
 
 /**
@@ -113,5 +108,5 @@ export interface ChunkingConfig {
   /** Delimiter for splitting */
   separator: string;
   /** Chunking strategy */
-  strategy: "fixed" | "sentence" | "paragraph" | "semantic";
+  strategy: 'fixed' | 'sentence' | 'paragraph' | 'semantic';
 }

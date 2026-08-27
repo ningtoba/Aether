@@ -8,17 +8,22 @@
  * @module @aether/tools
  */
 
-export const VERSION = "0.1.0";
+export const VERSION = '0.1.0';
 
 // ── Shell executors ───────────────────────────────────────────────────────────
-export { execShell, execShellDocker } from "./shell.js";
-export type { ShellResult } from "./shell.js";
+export { execShell, execShellDocker } from './shell.js';
+export type { ShellResult } from './shell.js';
 
 // ── Tool Registry ─────────────────────────────────────────────────────────────
-export { ToolRegistry, ToolRegistryError, ToolNotFoundError, ToolAlreadyRegisteredError } from "./registry/index.js";
+export {
+  ToolRegistry,
+  ToolRegistryError,
+  ToolNotFoundError,
+  ToolAlreadyRegisteredError,
+} from './registry/index.js';
 
 // ── Streaming / Event Bus ─────────────────────────────────────────────────────
-export { EventBus, StreamChannel } from "./streaming/event-bus.js";
+export { EventBus, StreamChannel } from './streaming/event-bus.js';
 
 // ── Types (flat) ──────────────────────────────────────────────────────────────
 export type {
@@ -37,7 +42,7 @@ export type {
   // Internal helpers
   SpawnedProcess,
   ToolExecution,
-} from "./types.js";
+} from './types.js';
 
 // ── Types (index) ─────────────────────────────────────────────────────────────
 export type {
@@ -80,10 +85,10 @@ export type {
   ToolParameterType,
   ToolParameter,
   ToolParameterSchema,
-} from "./types/index.js";
+} from './types/index.js';
 
 export {
   DEFAULT_RUNTIME_CONFIG,
   DEFAULT_DOCKER_SANDBOX,
   DEFAULT_BROWSER_SANDBOX,
-} from "./types/index.js";
+} from './types/index.js';

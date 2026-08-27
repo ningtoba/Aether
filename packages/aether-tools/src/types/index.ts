@@ -103,7 +103,7 @@ export interface DockerSandboxConfig {
   tag?: string;
   containerName?: string;
   memoryLimit?: string; // e.g. "512m"
-  cpuLimit?: number;    // e.g. 1.0 = 1 core
+  cpuLimit?: number; // e.g. 1.0 = 1 core
   networkEnabled?: boolean;
   readOnly?: boolean;
   volumes?: Array<{ host: string; container: string; mode?: 'ro' | 'rw' }>;
@@ -136,23 +136,26 @@ export const DEFAULT_BROWSER_SANDBOX: BrowserSandboxConfig = {
 };
 
 export interface PythonSandboxConfig {
-  pythonPath?: string;     // default "python3"
-  venvPath?: string;       // path to existing venv
-  installDeps?: boolean;   // auto pip install before execution
+  pythonPath?: string; // default "python3"
+  venvPath?: string; // path to existing venv
+  installDeps?: boolean; // auto pip install before execution
   requirements?: string[]; // pip packages
 }
 
 export interface NodeSandboxConfig {
-  nodePath?: string;       // default "node"
+  nodePath?: string; // default "node"
   installDeps?: boolean;
-  packages?: string[];     // npm packages to install
+  packages?: string[]; // npm packages to install
 }
 
 // ─── Tool Definition ────────────────────────────────────────────────────────
 
 export type RuntimeKind = 'shell' | 'docker' | 'browser' | 'python' | 'node';
 
-export type ToolHandler = (params: Record<string, unknown>, context: ToolExecutionContext) => Promise<ToolResult>;
+export type ToolHandler = (
+  params: Record<string, unknown>,
+  context: ToolExecutionContext,
+) => Promise<ToolResult>;
 
 export interface ToolExecutionContext {
   config: ToolRuntimeConfig;

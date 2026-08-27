@@ -5,9 +5,9 @@
  * @module @aether/sdk
  */
 
-import { ToolRegistry } from "./tools.js";
-import type { AgentConfig, RunConfig, RunResult, OutputSchema } from "./types.js";
-import type { ProviderInterface } from "@aether/providers";
+import { ToolRegistry } from './tools.js';
+import type { AgentConfig, RunConfig, RunResult, OutputSchema } from './types.js';
+import type { ProviderInterface } from '@aether/providers';
 
 /** Minimal provider registry interface */
 export interface ProviderRegistry {
@@ -22,8 +22,8 @@ import {
   handoff,
   sdkTool,
   type Tool,
-} from "./internal-types.js";
-import { AetherModelProvider } from "./model-provider.js";
+} from './internal-types.js';
+import { AetherModelProvider } from './model-provider.js';
 
 // ── AetherAgent ───────────────────────────────────────────────────────
 
@@ -54,9 +54,7 @@ export class AetherAgent {
     this.context = config.context ?? {};
   }
 
-  toSdkAgent(
-    handoffAgents?: Map<string, AetherAgent>,
-  ): InstanceType<typeof SdkAgent> {
+  toSdkAgent(handoffAgents?: Map<string, AetherAgent>): InstanceType<typeof SdkAgent> {
     const tools = this.buildTools();
 
     const config: Record<string, unknown> = {
@@ -79,9 +77,7 @@ export class AetherAgent {
       for (const targetName of this.handoffs) {
         const target = handoffAgents.get(targetName);
         if (target) {
-          handoffs.push(
-            handoff(target.toSdkAgent(handoffAgents)),
-          );
+          handoffs.push(handoff(target.toSdkAgent(handoffAgents)));
         }
       }
       if (handoffs.length > 0) {
@@ -104,7 +100,7 @@ export class AetherAgent {
           }
           try {
             const result = await toolDef.handler(args);
-            return typeof result === "string" ? result : JSON.stringify(result);
+            return typeof result === 'string' ? result : JSON.stringify(result);
           } catch (err) {
             return `[tool: ${toolDef.name}] error: ${err instanceof Error ? err.message : String(err)}`;
           }
@@ -159,8 +155,8 @@ export class AetherRunner {
     this.options = {
       maxTurns: 10,
       tracingDisabled: true,
-      providerName: "default",
-      defaultModel: "gpt-4o",
+      providerName: 'default',
+      defaultModel: 'gpt-4o',
       ...options,
     };
 
@@ -176,20 +172,12 @@ export class AetherRunner {
     } as ConstructorParameters<typeof SdkRunner>[0]);
   }
 
-  async run(
-    agent: AetherAgent,
-    input: string,
-    config?: Partial<RunConfig>,
-  ): Promise<RunResult> {
+  async run(agent: AetherAgent, input: string, config?: Partial<RunConfig>): Promise<RunResult> {
     const sdkAgent = agent.toSdkAgent();
 
-    const result = await this.runner.run(
-      sdkAgent as any,
-      input,
-      {
-        maxTurns: config?.maxTurns ?? agent.maxTurns,
-      },
-    );
+    const result = await this.runner.run(sdkAgent as any, input, {
+      maxTurns: config?.maxTurns ?? agent.maxTurns,
+    });
 
     return this.toRunResult(result);
   }
@@ -207,13 +195,9 @@ export class AetherRunner {
 
     const sdkAgent = primaryAgent.toSdkAgent(agentMap);
 
-    const result = await this.runner.run(
-      sdkAgent as any,
-      input,
-      {
-        maxTurns: config?.maxTurns ?? primaryAgent.maxTurns,
-      },
-    );
+    const result = await this.runner.run(sdkAgent as any, input, {
+      maxTurns: config?.maxTurns ?? primaryAgent.maxTurns,
+    });
 
     return this.toRunResult(result);
   }
@@ -221,7 +205,7 @@ export class AetherRunner {
   private toRunResult(result: unknown): RunResult {
     const r = result as Record<string, unknown>;
     return {
-      output: String(r.finalOutput ?? r.output ?? ""),
+      output: String(r.finalOutput ?? r.output ?? ''),
       turns: (r.turns as number) ?? 0,
       tokenUsage: {
         prompt: ((r.usage as Record<string, unknown>)?.inputTokens as number) ?? 0,

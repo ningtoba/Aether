@@ -1,4 +1,4 @@
-import { ProviderInterface } from "../provider-interface.js";
+import { ProviderInterface } from '../provider-interface.js';
 import {
   CompletionRequest,
   CompletionResponse,
@@ -10,8 +10,8 @@ import {
   StreamEvent,
   ToolCall,
   TokenUsage,
-} from "../types.js";
-import { ModelCapabilityRegistry } from "../model-capabilities.js";
+} from '../types.js';
+import { ModelCapabilityRegistry } from '../model-capabilities.js';
 
 /**
  * Anthropic provider.
@@ -39,11 +39,11 @@ export class AnthropicProvider extends ProviderInterface {
 
   protected buildHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      "anthropic-version": "2023-06-01",
+      'Content-Type': 'application/json',
+      'anthropic-version': '2023-06-01',
     };
     if (this.config.apiKey) {
-      headers["x-api-key"] = this.config.apiKey;
+      headers['x-api-key'] = this.config.apiKey;
     }
     return headers;
   }
@@ -53,14 +53,11 @@ export class AnthropicProvider extends ProviderInterface {
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
     return this.withRetry(async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.config.timeout ?? 60_000,
-      );
+      const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 60_000);
 
       try {
-        const res = await fetch(this.resolveUrl("messages"), {
-          method: "POST",
+        const res = await fetch(this.resolveUrl('messages'), {
+          method: 'POST',
           headers: this.buildHeaders(),
           body: JSON.stringify(this.buildPayload(request)),
           signal: controller.signal,
@@ -78,21 +75,16 @@ export class AnthropicProvider extends ProviderInterface {
     });
   }
 
-  async *completeStream(
-    request: CompletionRequest,
-  ): AsyncIterableIterator<StreamEvent> {
+  async *completeStream(request: CompletionRequest): AsyncIterableIterator<StreamEvent> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.config.timeout ?? 60_000,
-    );
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 60_000);
 
     try {
-      const res = await fetch(this.resolveUrl("messages"), {
-        method: "POST",
+      const res = await fetch(this.resolveUrl('messages'), {
+        method: 'POST',
         headers: {
           ...this.buildHeaders(),
-          Accept: "text/event-stream",
+          Accept: 'text/event-stream',
         },
         body: JSON.stringify({ ...this.buildPayload(request), stream: true }),
         signal: controller.signal,
@@ -106,18 +98,18 @@ export class AnthropicProvider extends ProviderInterface {
       if (!reader) {
         throw new ProviderError(
           ProviderErrorCode.Internal,
-          "Response body is null",
+          'Response body is null',
           undefined,
           false,
         );
       }
 
       const decoder = new TextDecoder();
-      let buffer = "";
+      let buffer = '';
       // Accumulate content deltas for building the final response
-      let accumulatedContent = "";
+      let accumulatedContent = '';
       let accumulatedToolCalls: { id: string; name: string; input: string }[] = [];
-      let responseId = "";
+      let responseId = '';
       let responseModel = request.model;
 
       for (;;) {
@@ -125,20 +117,20 @@ export class AnthropicProvider extends ProviderInterface {
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
 
           // Anthropic sends SSE events in the format: event: <type>\ndata: <json>
-          if (trimmed.startsWith("event: ")) {
+          if (trimmed.startsWith('event: ')) {
             // Event type line — consume but don't process directly
             continue;
           }
 
-          if (trimmed.startsWith("data: ")) {
+          if (trimmed.startsWith('data: ')) {
             try {
               const data = JSON.parse(trimmed.slice(6));
               const event = this.parseStreamEvent(data);
@@ -146,12 +138,10 @@ export class AnthropicProvider extends ProviderInterface {
                 yield event;
 
                 // Accumulate for potential done event
-                if (event.type === "delta") {
+                if (event.type === 'delta') {
                   accumulatedContent += event.content;
-                } else if (event.type === "tool_call_delta") {
-                  const existing = accumulatedToolCalls.find(
-                    (tc) => tc.id === event.id,
-                  );
+                } else if (event.type === 'tool_call_delta') {
+                  const existing = accumulatedToolCalls.find((tc) => tc.id === event.id);
                   if (existing) {
                     existing.input += event.input;
                   } else {
@@ -161,7 +151,7 @@ export class AnthropicProvider extends ProviderInterface {
                       input: event.input,
                     });
                   }
-                } else if (event.type === "done") {
+                } else if (event.type === 'done') {
                   return; // Stream complete
                 }
               }
@@ -174,26 +164,27 @@ export class AnthropicProvider extends ProviderInterface {
 
       // If we never got a done event, send one
       yield {
-        type: "done",
+        type: 'done',
         response: {
           id: responseId,
           model: responseModel,
           content: accumulatedContent || null,
-          toolCalls: accumulatedToolCalls.length > 0
-            ? accumulatedToolCalls.map((tc) => ({
-                id: tc.id,
-                name: tc.name,
-                input: (() => {
-                  try {
-                    return JSON.parse(tc.input);
-                  } catch {
-                    return {};
-                  }
-                })(),
-              }))
-            : undefined,
+          toolCalls:
+            accumulatedToolCalls.length > 0
+              ? accumulatedToolCalls.map((tc) => ({
+                  id: tc.id,
+                  name: tc.name,
+                  input: (() => {
+                    try {
+                      return JSON.parse(tc.input);
+                    } catch {
+                      return {};
+                    }
+                  })(),
+                }))
+              : undefined,
           usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          finishReason: "stop",
+          finishReason: 'stop',
         },
       };
     } finally {
@@ -207,7 +198,7 @@ export class AnthropicProvider extends ProviderInterface {
     // Anthropic does not have an embeddings API currently
     throw new ProviderError(
       ProviderErrorCode.BadRequest,
-      "Anthropic does not support embeddings",
+      'Anthropic does not support embeddings',
       undefined,
       false,
     );
@@ -222,9 +213,7 @@ export class AnthropicProvider extends ProviderInterface {
 
     // Anthropic doesn't have a public /models endpoint like OpenAI
     // Use the known models from the registry
-    return this.registry.listModels().filter((m) =>
-      m.startsWith("claude"),
-    );
+    return this.registry.listModels().filter((m) => m.startsWith('claude'));
   }
 
   async getModelCapabilities(model: string) {
@@ -244,14 +233,12 @@ export class AnthropicProvider extends ProviderInterface {
     };
 
     // System message is a top-level field in Anthropic's API
-    const systemMessages = request.messages.filter(
-      (m) => m.role === "system",
-    );
+    const systemMessages = request.messages.filter((m) => m.role === 'system');
     if (systemMessages.length > 0) {
       const systemContent = systemMessages
-        .map((m) => (typeof m.content === "string" ? m.content : ""))
+        .map((m) => (typeof m.content === 'string' ? m.content : ''))
         .filter(Boolean)
-        .join("\n");
+        .join('\n');
       if (systemContent) {
         payload.system = systemContent;
       }
@@ -272,16 +259,16 @@ export class AnthropicProvider extends ProviderInterface {
     }
 
     if (request.toolChoice) {
-      if (request.toolChoice === "any") {
-        payload.tool_choice = { type: "any" };
-      } else if (request.toolChoice === "auto") {
-        payload.tool_choice = { type: "auto" };
-      } else if (request.toolChoice === "none") {
-        payload.tool_choice = { type: "none" };
-      } else if (typeof request.toolChoice === "object") {
+      if (request.toolChoice === 'any') {
+        payload.tool_choice = { type: 'any' };
+      } else if (request.toolChoice === 'auto') {
+        payload.tool_choice = { type: 'auto' };
+      } else if (request.toolChoice === 'none') {
+        payload.tool_choice = { type: 'none' };
+      } else if (typeof request.toolChoice === 'object') {
         payload.tool_choice = {
-          type: "tool",
-          name: request.toolChoice.function?.name ?? "",
+          type: 'tool',
+          name: request.toolChoice.function?.name ?? '',
         };
       }
     }
@@ -292,9 +279,7 @@ export class AnthropicProvider extends ProviderInterface {
     }
 
     // Remove system messages from messages array since they're handled above
-    payload.messages = (payload.messages as any[]).filter(
-      (m: any) => m.role !== "system",
-    );
+    payload.messages = (payload.messages as any[]).filter((m: any) => m.role !== 'system');
 
     return payload;
   }
@@ -304,54 +289,52 @@ export class AnthropicProvider extends ProviderInterface {
    * System messages are excluded — they are handled separately as
    * a top-level field.
    */
-  protected serializeMessages(
-    messages: any[],
-  ): Record<string, unknown>[] {
+  protected serializeMessages(messages: any[]): Record<string, unknown>[] {
     const result: Record<string, unknown>[] = [];
 
     for (const msg of messages) {
       // Skip system messages (handled separately in buildPayload)
-      if (msg.role === "system") continue;
+      if (msg.role === 'system') continue;
 
-      const role = msg.role === "tool" ? "user" : msg.role;
+      const role = msg.role === 'tool' ? 'user' : msg.role;
 
-      if (typeof msg.content === "string") {
+      if (typeof msg.content === 'string') {
         // Single text content block
         result.push({
           role,
-          content: [{ type: "text", text: msg.content }],
+          content: [{ type: 'text', text: msg.content }],
         });
       } else if (Array.isArray(msg.content)) {
         // Content blocks array
         const blocks = msg.content.map((block: any) => {
           switch (block.type) {
-            case "text":
-              return { type: "text", text: block.text };
-            case "image_url":
+            case 'text':
+              return { type: 'text', text: block.text };
+            case 'image_url':
               // Anthropic uses "image" with a "source" object
               return {
-                type: "image",
+                type: 'image',
                 source: {
-                  type: "base64",
+                  type: 'base64',
                   media_type: this.guessMediaType(block.imageUrl),
                   data: this.extractBase64Data(block.imageUrl),
                 },
               };
-            case "tool_use":
+            case 'tool_use':
               return {
-                type: "tool_use",
+                type: 'tool_use',
                 id: block.id,
                 name: block.name,
                 input: block.input,
               };
-            case "tool_result":
+            case 'tool_result':
               return {
-                type: "tool_result",
+                type: 'tool_result',
                 tool_use_id: block.toolUseId,
                 content: block.content,
               };
             default:
-              return { type: "text", text: JSON.stringify(block) };
+              return { type: 'text', text: JSON.stringify(block) };
           }
         });
 
@@ -367,25 +350,25 @@ export class AnthropicProvider extends ProviderInterface {
    */
   protected parseResponse(json: any): CompletionResponse {
     const content = json.content ?? [];
-    const textBlocks = content.filter((b: any) => b.type === "text");
-    const toolUseBlocks = content.filter((b: any) => b.type === "tool_use");
+    const textBlocks = content.filter((b: any) => b.type === 'text');
+    const toolUseBlocks = content.filter((b: any) => b.type === 'tool_use');
 
     return {
-      id: json.id ?? "",
-      model: json.model ?? "",
-      content: textBlocks.map((b: any) => b.text).join("") || null,
-      toolCalls: toolUseBlocks.length > 0
-        ? toolUseBlocks.map((b: any) => ({
-            id: b.id,
-            name: b.name,
-            input: b.input as Record<string, unknown>,
-          }))
-        : undefined,
+      id: json.id ?? '',
+      model: json.model ?? '',
+      content: textBlocks.map((b: any) => b.text).join('') || null,
+      toolCalls:
+        toolUseBlocks.length > 0
+          ? toolUseBlocks.map((b: any) => ({
+              id: b.id,
+              name: b.name,
+              input: b.input as Record<string, unknown>,
+            }))
+          : undefined,
       usage: {
         promptTokens: json.usage?.input_tokens ?? 0,
         completionTokens: json.usage?.output_tokens ?? 0,
-        totalTokens:
-          (json.usage?.input_tokens ?? 0) + (json.usage?.output_tokens ?? 0),
+        totalTokens: (json.usage?.input_tokens ?? 0) + (json.usage?.output_tokens ?? 0),
       },
       finishReason: this.mapFinishReason(json.stop_reason ?? json.stop_sequence),
       raw: json,
@@ -418,7 +401,7 @@ export class AnthropicProvider extends ProviderInterface {
     if (!data || !data.type) return null;
 
     switch (data.type) {
-      case "message_start": {
+      case 'message_start': {
         // Capture the message ID and model from the start event
         if (data.message) {
           // We handle the accumulation in completeStream, so just return null
@@ -427,49 +410,49 @@ export class AnthropicProvider extends ProviderInterface {
         return null;
       }
 
-      case "content_block_start": {
+      case 'content_block_start': {
         const block = data.content_block;
-        if (block?.type === "tool_use") {
+        if (block?.type === 'tool_use') {
           return {
-            type: "tool_call_delta",
+            type: 'tool_call_delta',
             id: block.id,
             name: block.name,
-            input: block.input ? JSON.stringify(block.input) : "",
+            input: block.input ? JSON.stringify(block.input) : '',
           };
         }
         return null;
       }
 
-      case "content_block_delta": {
+      case 'content_block_delta': {
         const delta = data.delta;
-        if (delta?.type === "text_delta") {
+        if (delta?.type === 'text_delta') {
           return {
-            type: "delta",
-            content: delta.text ?? "",
+            type: 'delta',
+            content: delta.text ?? '',
           };
         }
-        if (delta?.type === "input_json_delta") {
+        if (delta?.type === 'input_json_delta') {
           // Tool call partial JSON delta — we need to find the tool use block
           // Since Anthropic sends tool_use start with complete name but partial input,
           // we just accumulate the partial JSON here
           return {
-            type: "tool_call_delta",
-            id: "",  // Will be filled by content_block_start
-            name: "",
-            input: delta.partial_json ?? "",
+            type: 'tool_call_delta',
+            id: '', // Will be filled by content_block_start
+            name: '',
+            input: delta.partial_json ?? '',
           };
         }
         return null;
       }
 
-      case "message_delta": {
+      case 'message_delta': {
         const stopReason = data.delta?.stop_reason;
         const usage = data.usage;
         return {
-          type: "done",
+          type: 'done',
           response: {
-            id: "",
-            model: "",
+            id: '',
+            model: '',
             content: null,
             usage: {
               promptTokens: 0,
@@ -482,16 +465,16 @@ export class AnthropicProvider extends ProviderInterface {
         };
       }
 
-      case "message_stop":
-      case "content_block_stop":
+      case 'message_stop':
+      case 'content_block_stop':
         return null;
 
-      case "error": {
+      case 'error': {
         return {
-          type: "error",
+          type: 'error',
           error: new ProviderError(
             ProviderErrorCode.Internal,
-            data.error?.message ?? "Unknown Anthropic error",
+            data.error?.message ?? 'Unknown Anthropic error',
             0,
             false,
           ),
@@ -503,22 +486,20 @@ export class AnthropicProvider extends ProviderInterface {
     }
   }
 
-  protected mapFinishReason(
-    reason?: string,
-  ): CompletionResponse["finishReason"] {
+  protected mapFinishReason(reason?: string): CompletionResponse['finishReason'] {
     switch (reason) {
-      case "end_turn":
-        return "stop";
-      case "max_tokens":
-        return "length";
-      case "tool_use":
-        return "tool_calls";
-      case "stop_sequence":
-        return "stop";
-      case "content_filtered":
-        return "content_filter";
+      case 'end_turn':
+        return 'stop';
+      case 'max_tokens':
+        return 'length';
+      case 'tool_use':
+        return 'tool_calls';
+      case 'stop_sequence':
+        return 'stop';
+      case 'content_filtered':
+        return 'content_filter';
       default:
-        return "stop";
+        return 'stop';
     }
   }
 
@@ -537,7 +518,7 @@ export class AnthropicProvider extends ProviderInterface {
 
     return new ProviderError(
       code,
-      typeof message === "string" ? message : JSON.stringify(message),
+      typeof message === 'string' ? message : JSON.stringify(message),
       res.status,
       code === ProviderErrorCode.RateLimited ||
         code === ProviderErrorCode.Timeout ||
@@ -545,10 +526,7 @@ export class AnthropicProvider extends ProviderInterface {
     );
   }
 
-  protected mapErrorCode(
-    status: number,
-    message: unknown,
-  ): ProviderErrorCode {
+  protected mapErrorCode(status: number, message: unknown): ProviderErrorCode {
     if (status === 401) return ProviderErrorCode.Authentication;
     if (status === 429) return ProviderErrorCode.RateLimited;
     if (status === 402) return ProviderErrorCode.QuotaExceeded;
@@ -558,11 +536,15 @@ export class AnthropicProvider extends ProviderInterface {
 
     if (status === 400) {
       const msg = String(message).toLowerCase();
-      if (msg.includes("context length") || msg.includes("too long") || msg.includes("too many tokens"))
+      if (
+        msg.includes('context length') ||
+        msg.includes('too long') ||
+        msg.includes('too many tokens')
+      )
         return ProviderErrorCode.ContextTooLong;
 
       // Anthropic-specific: "invalid_api_key" or "authentication_error"
-      if (msg.includes("invalid") && (msg.includes("api") || msg.includes("key")))
+      if (msg.includes('invalid') && (msg.includes('api') || msg.includes('key')))
         return ProviderErrorCode.Authentication;
 
       return ProviderErrorCode.BadRequest;
@@ -578,18 +560,23 @@ export class AnthropicProvider extends ProviderInterface {
    * Guess media type from a data URI or image URL.
    */
   private guessMediaType(url: string): string {
-    if (url.startsWith("data:")) {
+    if (url.startsWith('data:')) {
       const match = url.match(/^data:([^;]+);/);
       if (match) return match[1];
     }
-    const ext = url.split(".").pop()?.toLowerCase();
+    const ext = url.split('.').pop()?.toLowerCase();
     switch (ext) {
-      case "png": return "image/png";
-      case "jpg":
-      case "jpeg": return "image/jpeg";
-      case "gif": return "image/gif";
-      case "webp": return "image/webp";
-      default: return "image/png";
+      case 'png':
+        return 'image/png';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/png';
     }
   }
 
@@ -597,8 +584,8 @@ export class AnthropicProvider extends ProviderInterface {
    * Extract base64 data from a data URI.
    */
   private extractBase64Data(url: string): string {
-    if (url.startsWith("data:")) {
-      const commaIdx = url.indexOf(",");
+    if (url.startsWith('data:')) {
+      const commaIdx = url.indexOf(',');
       if (commaIdx !== -1) return url.slice(commaIdx + 1);
     }
     return url;

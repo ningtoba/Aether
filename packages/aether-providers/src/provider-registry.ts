@@ -1,16 +1,13 @@
-import { ProviderInterface } from "./provider-interface.js";
-import {
-  ProviderConfig,
-  ProviderName,
-} from "./types.js";
-import { OpenAICompatibleProvider } from "./providers/openai-compatible.js";
-import { AnthropicProvider } from "./providers/anthropic.js";
-import { GeminiProvider } from "./providers/gemini.js";
-import { OllamaProvider } from "./providers/ollama.js";
-import { VLLMProvider } from "./providers/vllm.js";
-import { LlamaCppProvider } from "./providers/llamacpp.js";
-import { OpenRouterProvider } from "./providers/openrouter.js";
-import { ModelCapabilityRegistry } from "./model-capabilities.js";
+import { ProviderInterface } from './provider-interface.js';
+import { ProviderConfig, ProviderName } from './types.js';
+import { OpenAICompatibleProvider } from './providers/openai-compatible.js';
+import { AnthropicProvider } from './providers/anthropic.js';
+import { GeminiProvider } from './providers/gemini.js';
+import { OllamaProvider } from './providers/ollama.js';
+import { VLLMProvider } from './providers/vllm.js';
+import { LlamaCppProvider } from './providers/llamacpp.js';
+import { OpenRouterProvider } from './providers/openrouter.js';
+import { ModelCapabilityRegistry } from './model-capabilities.js';
 
 /**
  * Type for a provider constructor — allows dynamic registration of
@@ -47,10 +44,7 @@ export class ProviderRegistry {
   private providers = new Map<string, RegisteredProvider>();
 
   /** Built-in provider type → constructor mapping */
-  private static readonly BUILTIN_PROVIDERS: Record<
-    string,
-    ProviderConstructor
-  > = {
+  private static readonly BUILTIN_PROVIDERS: Record<string, ProviderConstructor> = {
     openai: OpenAICompatibleProvider,
     openai_compatible: OpenAICompatibleProvider,
     anthropic: AnthropicProvider,
@@ -69,9 +63,7 @@ export class ProviderRegistry {
     Object.entries(ProviderRegistry.BUILTIN_PROVIDERS),
   );
 
-  constructor(
-    protected registry: ModelCapabilityRegistry,
-  ) {}
+  constructor(protected registry: ModelCapabilityRegistry) {}
 
   // ── Static registration (type-level) ──────────────────────────────
 
@@ -114,7 +106,7 @@ export class ProviderRegistry {
     const type = config.provider;
     const ctor =
       ProviderRegistry.customConstructors.get(type) ??
-      ProviderRegistry.customConstructors.get("openai_compatible")!;
+      ProviderRegistry.customConstructors.get('openai_compatible')!;
 
     this.providers.set(config.name, {
       instance: null,
@@ -247,7 +239,7 @@ export class ProviderRegistry {
     }
 
     if (errors.length > 0) {
-      const messages = errors.map((e) => `${e.name}: ${e.error.message}`).join("; ");
+      const messages = errors.map((e) => `${e.name}: ${e.error.message}`).join('; ');
       throw new Error(`Failed to initialize providers: ${messages}`);
     }
   }
@@ -282,7 +274,7 @@ export class ProviderRegistry {
     const type = config.provider;
     const ctor =
       ProviderRegistry.customConstructors.get(type) ??
-      ProviderRegistry.customConstructors.get("openai_compatible")!;
+      ProviderRegistry.customConstructors.get('openai_compatible')!;
     return new ctor(config, registry, ...args);
   }
 }

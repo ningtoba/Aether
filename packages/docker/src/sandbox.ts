@@ -1,5 +1,5 @@
-import Dockerode from "dockerode";
-import { Writable } from "node:stream";
+import Dockerode from 'dockerode';
+import { Writable } from 'node:stream';
 
 // ---------------------------------------------------------------------------
 // Local type definitions (replaces @aether/types dependency)
@@ -36,7 +36,7 @@ export interface SandboxLimits {
   writeAccess: boolean;
 }
 
-export type SandboxProfile = "minimal" | "standard" | "high" | "unrestricted";
+export type SandboxProfile = 'minimal' | 'standard' | 'high' | 'unrestricted';
 
 export interface EnvStatus {
   ready: boolean;
@@ -50,10 +50,22 @@ export const SANDBOX_PROFILES: Record<SandboxProfile, SandboxLimits> = {
   minimal: { memoryMb: 128, cpuSeconds: 10, processes: 20, network: false, writeAccess: false },
   standard: { memoryMb: 512, cpuSeconds: 30, processes: 50, network: false, writeAccess: false },
   high: { memoryMb: 2048, cpuSeconds: 120, processes: 100, network: true, writeAccess: true },
-  unrestricted: { memoryMb: 8192, cpuSeconds: 600, processes: 500, network: true, writeAccess: true },
+  unrestricted: {
+    memoryMb: 8192,
+    cpuSeconds: 600,
+    processes: 500,
+    network: true,
+    writeAccess: true,
+  },
 };
 
-export const DEFAULT_LIMITS: SandboxLimits = { memoryMb: 512, cpuSeconds: 30, processes: 50, network: false, writeAccess: false };
+export const DEFAULT_LIMITS: SandboxLimits = {
+  memoryMb: 512,
+  cpuSeconds: 30,
+  processes: 50,
+  network: false,
+  writeAccess: false,
+};
 /**
  * Validate a sandbox-relative destination path and return it normalized to
  * forward slashes. Absolute paths and `..` traversal segments are rejected so
@@ -61,14 +73,14 @@ export const DEFAULT_LIMITS: SandboxLimits = { memoryMb: 512, cpuSeconds: 30, pr
  */
 export function assertSafeSandboxPath(relPath: string): string {
   if (!relPath || relPath.length === 0) {
-    throw new Error("Empty sandbox file path");
+    throw new Error('Empty sandbox file path');
   }
-  if (relPath.startsWith("/") || /^[a-zA-Z]:/.test(relPath)) {
+  if (relPath.startsWith('/') || /^[a-zA-Z]:/.test(relPath)) {
     throw new Error(`Absolute paths are not allowed in sandbox files: "${relPath}"`);
   }
-  const normalized = relPath.replace(/\\/g, "/");
-  const segments = normalized.split("/");
-  if (segments.includes("..")) {
+  const normalized = relPath.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  if (segments.includes('..')) {
     throw new Error(`Path traversal is not allowed in sandbox files: "${relPath}"`);
   }
   return normalized;
@@ -99,11 +111,11 @@ export interface DockerSandboxOptions {
 }
 
 const DEFAULT_OPTIONS: Required<DockerSandboxOptions> = {
-  image: "node:22-alpine",
-  limits: "standard",
+  image: 'node:22-alpine',
+  limits: 'standard',
   volumes: {},
-  workdir: "/workspace",
-  namePrefix: "aether-sandbox",
+  workdir: '/workspace',
+  namePrefix: 'aether-sandbox',
   operationTimeout: 30_000,
 };
 
@@ -117,10 +129,10 @@ function getDocker(): Dockerode {
 }
 
 function resolveLimits(limits?: SandboxProfile | Partial<SandboxLimits>): SandboxLimits {
-  if (!limits || (typeof limits === "string" && limits in SANDBOX_PROFILES)) {
-    return SANDBOX_PROFILES[(limits as SandboxProfile) ?? "standard"];
+  if (!limits || (typeof limits === 'string' && limits in SANDBOX_PROFILES)) {
+    return SANDBOX_PROFILES[(limits as SandboxProfile) ?? 'standard'];
   }
-  if (typeof limits === "object") {
+  if (typeof limits === 'object') {
     return { ...DEFAULT_LIMITS, ...limits };
   }
   return DEFAULT_LIMITS;
@@ -138,7 +150,7 @@ function limitsToDockerHostConfig(limits: SandboxLimits): Dockerode.HostConfig {
   };
 
   if (!limits.network) {
-    hostConfig.NetworkMode = "none";
+    hostConfig.NetworkMode = 'none';
   }
 
   return hostConfig;
@@ -190,16 +202,20 @@ function demuxStream(
     });
 
     // modem.demuxStream is untyped on the Dockerode types but exists at runtime
-    const modem = (container as unknown as { modem: { demuxStream: (s: NodeJS.ReadableStream, o: Writable, e: Writable) => void } }).modem;
+    const modem = (
+      container as unknown as {
+        modem: { demuxStream: (s: NodeJS.ReadableStream, o: Writable, e: Writable) => void };
+      }
+    ).modem;
     modem.demuxStream(stream, outStream, errStream);
 
-    stream.on("end", () => {
+    stream.on('end', () => {
       resolve({
-        stdout: Buffer.concat(outChunks).toString("utf-8").trimEnd(),
-        stderr: Buffer.concat(errChunks).toString("utf-8").trimEnd(),
+        stdout: Buffer.concat(outChunks).toString('utf-8').trimEnd(),
+        stderr: Buffer.concat(errChunks).toString('utf-8').trimEnd(),
       });
     });
-    stream.on("error", reject);
+    stream.on('error', reject);
   });
 }
 
@@ -207,9 +223,9 @@ function demuxStream(
 function streamToString(stream: NodeJS.ReadableStream): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    stream.on("data", (chunk: Buffer) => chunks.push(chunk));
-    stream.on("error", reject);
-    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf-8").trimEnd()));
+    stream.on('data', (chunk: Buffer) => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8').trimEnd()));
   });
 }
 
@@ -224,7 +240,7 @@ async function waitForContainerRunning(
     if (info.State.Running) return;
     await new Promise((r) => setTimeout(r, 200));
   }
-  throw new Error("Container did not reach running status within timeout");
+  throw new Error('Container did not reach running status within timeout');
 }
 
 // ─── Container lifecycle ───────────────────────────────────────────────────
@@ -249,16 +265,14 @@ export async function createSandbox(
     await docker.ping();
   } catch {
     throw new Error(
-      "Docker is not available. Make sure Docker is installed and the daemon is running.",
+      'Docker is not available. Make sure Docker is installed and the daemon is running.',
     );
   }
 
   const hostConfig = limitsToDockerHostConfig(limits);
 
   // Build volume binds
-  const binds: string[] = Object.entries(config.volumes).map(
-    ([host, cont]) => `${host}:${cont}`,
-  );
+  const binds: string[] = Object.entries(config.volumes).map(([host, cont]) => `${host}:${cont}`);
   if (binds.length > 0) {
     hostConfig.Binds = binds;
   }
@@ -268,7 +282,7 @@ export async function createSandbox(
     name,
     WorkingDir: config.workdir,
     HostConfig: hostConfig,
-    Cmd: ["sleep", "infinity"],
+    Cmd: ['sleep', 'infinity'],
     AttachStdin: false,
     AttachStdout: false,
     AttachStderr: false,
@@ -305,42 +319,38 @@ export async function destroySandbox(containerId: string): Promise<void> {
 export async function copyFilesToSandbox(
   containerId: string,
   files: SandboxFile[],
-  destDir: string = "/workspace",
+  destDir: string = '/workspace',
 ): Promise<void> {
   const docker = getDocker();
   const container = docker.getContainer(containerId);
 
   for (const file of files) {
     const safePath = assertSafeSandboxPath(file.path);
-    const parentDir = safePath.includes("/")
-      ? safePath.substring(0, safePath.lastIndexOf("/"))
-      : "";
+    const parentDir = safePath.includes('/')
+      ? safePath.substring(0, safePath.lastIndexOf('/'))
+      : '';
     const dirTarget = parentDir ? `${destDir}/${parentDir}` : destDir;
 
-    await execInContainer(container, ["sh", "-c", `mkdir -p ${shQuote(dirTarget)}`]);
+    await execInContainer(container, ['sh', '-c', `mkdir -p ${shQuote(dirTarget)}`]);
 
     // Send content as base64 so no byte sequence in the payload can break out
     // of a shell string or terminate a heredoc early.
-    const base64 = Buffer.from(file.content, "utf-8").toString("base64");
+    const base64 = Buffer.from(file.content, 'utf-8').toString('base64');
     await execInContainer(container, [
-      "sh", "-c",
+      'sh',
+      '-c',
       `printf %s ${shQuote(base64)} | base64 -d > ${shQuote(`${destDir}/${safePath}`)}`,
     ]);
 
     // Set mode after writing
     if (file.mode) {
-      await execInContainer(container, [
-        "chmod", file.mode.toString(8), `${destDir}/${safePath}`,
-      ]);
+      await execInContainer(container, ['chmod', file.mode.toString(8), `${destDir}/${safePath}`]);
     }
   }
 }
 
 /** Low-level exec helper that throws on non-zero exit. */
-async function execInContainer(
-  container: Dockerode.Container,
-  cmd: string[],
-): Promise<string> {
+async function execInContainer(container: Dockerode.Container, cmd: string[]): Promise<string> {
   const exec = await container.exec({
     Cmd: cmd,
     AttachStdout: true,
@@ -378,7 +388,7 @@ export async function execInSandbox(
 
   // 1. Copy files in
   if (opts?.files && opts.files.length > 0) {
-    await copyFilesToSandbox(containerId, opts.files, opts?.cwd ?? "/workspace");
+    await copyFilesToSandbox(containerId, opts.files, opts?.cwd ?? '/workspace');
   }
 
   // 2. Build docker exec command
@@ -392,14 +402,11 @@ export async function execInSandbox(
     }
   }
 
-  const workdir = opts?.cwd ?? "/workspace";
-  const shell = opts?.shell ?? "/bin/sh";
+  const workdir = opts?.cwd ?? '/workspace';
+  const shell = opts?.shell ?? '/bin/sh';
 
   // Use timeout command inside container
-  const execCmd = [
-    shell, "-c",
-    `timeout ${Math.ceil(limits.cpuSeconds)} ${command}`,
-  ];
+  const execCmd = [shell, '-c', `timeout ${Math.ceil(limits.cpuSeconds)} ${command}`];
 
   const exec = await container.exec({
     Cmd: execCmd,
@@ -445,15 +452,15 @@ export async function checkDockerEnv(): Promise<EnvStatus> {
     const version = await docker.version();
     return {
       ready: true,
-      type: "docker",
+      type: 'docker',
       version: version.Version,
       info: { serverVersion: version.Version, apiVersion: version.ApiVersion },
     };
   } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : "Docker daemon not reachable";
+    const message = err instanceof Error ? err.message : 'Docker daemon not reachable';
     return {
       ready: false,
-      type: "docker",
+      type: 'docker',
       error: message,
     };
   }

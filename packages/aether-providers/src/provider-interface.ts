@@ -7,7 +7,7 @@ import {
   ModelCapabilities,
   Capability,
   StreamEvent,
-} from "./types.js";
+} from './types.js';
 
 /**
  * Abstract provider interface that all AI model providers must implement.
@@ -71,17 +71,17 @@ export abstract class ProviderInterface {
 
   /** Build the base URL from config, resolving relative paths */
   protected resolveUrl(path: string): string {
-    const base = this.config.baseUrl ?? "https://api.openai.com/v1";
-    return `${base.replace(/\/+$/, "")}/${path.replace(/^\/+/, "")}`;
+    const base = this.config.baseUrl ?? 'https://api.openai.com/v1';
+    return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
   }
 
   /** Build common fetch headers */
   protected buildHeaders(): Record<string, string> {
     const headers: Record<string, string> = {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     };
     if (this.config.apiKey) {
-      headers["Authorization"] = `Bearer ${this.config.apiKey}`;
+      headers['Authorization'] = `Bearer ${this.config.apiKey}`;
     }
     return headers;
   }

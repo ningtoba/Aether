@@ -1,12 +1,7 @@
-import type {
-  MemoryEntry,
-  MemoryQuery,
-  MemorySearchResult,
-  ChunkingConfig,
-} from "./types.js";
-import { MemoryStore } from "./store.js";
-import { InMemoryVectorStore, cosineSimilarity } from "./vector.js";
-import type { VectorStoreConfig } from "./types.js";
+import type { MemoryEntry, MemoryQuery, MemorySearchResult, ChunkingConfig } from './types.js';
+import { MemoryStore } from './store.js';
+import { InMemoryVectorStore, cosineSimilarity } from './vector.js';
+import type { VectorStoreConfig } from './types.js';
 
 /**
  * RAGEngine provides retrieval-augmented generation primitives:
@@ -31,8 +26,8 @@ export class RAGEngine {
     this.chunking = {
       maxChunkSize,
       overlap: Math.min(Math.max(0, Math.floor(chunking?.overlap ?? 64)), maxChunkSize - 1),
-      separator: chunking?.separator ?? "\n",
-      strategy: chunking?.strategy ?? "fixed",
+      separator: chunking?.separator ?? '\n',
+      strategy: chunking?.strategy ?? 'fixed',
     };
   }
 
@@ -48,7 +43,7 @@ export class RAGEngine {
   async index(
     content: string,
     metadata: Record<string, unknown> = {},
-    type: MemoryEntry["type"] = "semantic",
+    type: MemoryEntry['type'] = 'semantic',
   ): Promise<string[]> {
     const chunks = this.chunkDocument(content);
     const ids: string[] = [];
@@ -129,9 +124,7 @@ export class RAGEngine {
     results: MemorySearchResult[];
   }> {
     const results = await this.retrieve(query);
-    const context = results
-      .map((r) => r.entry.content)
-      .join("\n---\n");
+    const context = results.map((r) => r.entry.content).join('\n---\n');
 
     return {
       query: query.query,
@@ -144,13 +137,13 @@ export class RAGEngine {
    * Split a document into chunks according to the configured strategy.
    */
   private chunkDocument(text: string): string[] {
-    if (this.chunking.strategy === "fixed") {
+    if (this.chunking.strategy === 'fixed') {
       return this.chunkFixed(text);
     }
-    if (this.chunking.strategy === "sentence") {
+    if (this.chunking.strategy === 'sentence') {
       return this.chunkBySeparator(text, /[.!?]\s+/);
     }
-    if (this.chunking.strategy === "paragraph") {
+    if (this.chunking.strategy === 'paragraph') {
       return this.chunkBySeparator(text, /\n\s*\n/);
     }
     // fallback
@@ -196,11 +189,11 @@ export class RAGEngine {
     const { maxChunkSize } = this.chunking;
     const parts = text.split(regex).filter(Boolean);
     const chunks: string[] = [];
-    let current = "";
+    let current = '';
 
     for (const part of parts) {
       if ((current + part).length <= maxChunkSize) {
-        current += (current ? " " : "") + part;
+        current += (current ? ' ' : '') + part;
       } else {
         if (current) chunks.push(current.trim());
         current = part;

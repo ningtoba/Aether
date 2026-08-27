@@ -1,10 +1,4 @@
-import {
-  app,
-  BrowserWindow,
-  ipcMain,
-  screen,
-  nativeImage,
-} from 'electron';
+import { app, BrowserWindow, ipcMain, screen, nativeImage } from 'electron';
 import path from 'node:path';
 import { registerAutoUpdater } from './auto-updater';
 import { registerCrashReporter } from './crash-reporter';
@@ -21,8 +15,7 @@ let mainWindow: BrowserWindow | null = null;
 /* ─── Window creation ────────────────────────────────────────────────── */
 
 function createMainWindow(): BrowserWindow {
-  const { width: screenWidth, height: screenHeight } =
-    screen.getPrimaryDisplay().workAreaSize;
+  const { width: screenWidth, height: screenHeight } = screen.getPrimaryDisplay().workAreaSize;
 
   const win = new BrowserWindow({
     width: Math.min(1400, Math.round(screenWidth * 0.8)),

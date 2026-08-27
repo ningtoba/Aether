@@ -1,15 +1,8 @@
 /** Tool identification */
-export type ToolId = string & { readonly __brand: "ToolId" };
+export type ToolId = string & { readonly __brand: 'ToolId' };
 
 /** Supported types of execution tools */
-export type ToolType =
-  | "shell"
-  | "docker"
-  | "python"
-  | "typescript"
-  | "browser"
-  | "mcp"
-  | "custom";
+export type ToolType = 'shell' | 'docker' | 'python' | 'typescript' | 'browser' | 'mcp' | 'custom';
 
 /** Full definition of a tool available to agents */
 export interface ToolDefinition {
@@ -47,7 +40,7 @@ export interface ToolResult {
 /** Tool input parameter schema (JSON Schema subset) */
 export interface ToolParameter {
   name: string;
-  type: "string" | "number" | "boolean" | "array" | "object";
+  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
   description: string;
   required: boolean;
   default?: unknown;

@@ -1,5 +1,5 @@
 /** Execution identification */
-export type ExecutionId = string & { readonly __brand: "ExecutionId" };
+export type ExecutionId = string & { readonly __brand: 'ExecutionId' };
 
 /** An execution plan consisting of ordered steps */
 export interface ExecutionPlan {
@@ -19,13 +19,13 @@ export interface ExecutionStep {
   toolId?: string;
   dependsOn: string[];
   timeout: number;
-  retryPolicy?: import("./graph").RetryPolicy;
+  retryPolicy?: import('./graph').RetryPolicy;
 }
 
 /** Overall execution result */
 export interface ExecutionResult {
   id: ExecutionId;
-  status: "idle" | "running" | "completed" | "failed" | "cancelled";
+  status: 'idle' | 'running' | 'completed' | 'failed' | 'cancelled';
   steps: StepResult[];
   summary?: string;
   error?: string;
@@ -36,7 +36,7 @@ export interface ExecutionResult {
 /** Result of a single step within an execution */
 export interface StepResult {
   id: string;
-  status: "pending" | "running" | "completed" | "failed";
+  status: 'pending' | 'running' | 'completed' | 'failed';
   output?: string;
   error?: string;
   duration: number;
@@ -49,7 +49,7 @@ export interface ExecutionQueueItem {
   plan: ExecutionPlan;
   enqueuedAt: number;
   startedAt?: number;
-  status: "queued" | "running" | "completed" | "failed";
+  status: 'queued' | 'running' | 'completed' | 'failed';
   priority: number;
 }
 

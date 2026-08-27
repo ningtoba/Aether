@@ -1,14 +1,14 @@
 /** Deeply merges a source object into a target without mutating either */
-export function deepMerge<T extends Record<string, unknown>>(
-  target: T,
-  source: Partial<T>,
-): T {
+export function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
   const result = { ...target };
   for (const key of Object.keys(source) as (keyof T)[]) {
     const srcVal = source[key];
     const tgtVal = target[key];
     if (isPlainObject(srcVal) && isPlainObject(tgtVal)) {
-      result[key] = deepMerge(tgtVal as Record<string, unknown>, srcVal as Record<string, unknown>) as T[keyof T];
+      result[key] = deepMerge(
+        tgtVal as Record<string, unknown>,
+        srcVal as Record<string, unknown>,
+      ) as T[keyof T];
     } else if (srcVal !== undefined) {
       result[key] = srcVal as T[keyof T];
     }
@@ -56,5 +56,5 @@ export function isEqual(a: unknown, b: unknown): boolean {
 }
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === "object" && val !== null && !Array.isArray(val);
+  return typeof val === 'object' && val !== null && !Array.isArray(val);
 }

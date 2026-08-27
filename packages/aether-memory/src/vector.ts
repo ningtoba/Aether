@@ -1,4 +1,4 @@
-import type { VectorStoreConfig, MemoryEntry, MemorySearchResult } from "./types.js";
+import type { VectorStoreConfig, MemoryEntry, MemorySearchResult } from './types.js';
 
 /**
  * VectorStore interface for embedding-based similarity search.
@@ -42,11 +42,7 @@ export class InMemoryVectorStore implements VectorStore {
     this.dimension = config.embeddingDimension;
   }
 
-  async insert(
-    id: string,
-    vector: number[],
-    metadata: Record<string, unknown>,
-  ): Promise<void> {
+  async insert(id: string, vector: number[], metadata: Record<string, unknown>): Promise<void> {
     if (vector.length !== this.dimension) {
       throw new Error(
         `Vector dimension ${vector.length} does not match store dimension ${this.dimension}`,
@@ -75,8 +71,8 @@ export class InMemoryVectorStore implements VectorStore {
     return topResults.map((r) => ({
       entry: {
         id: r.id,
-        type: "semantic" as const,
-        content: "",
+        type: 'semantic' as const,
+        content: '',
         metadata: this.vectors.get(r.id)?.metadata ?? {},
         timestamp: Date.now(),
       },
@@ -101,9 +97,7 @@ export class InMemoryVectorStore implements VectorStore {
  */
 export function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length) {
-    throw new Error(
-      `Vector dimension mismatch: ${a.length} vs ${b.length}`,
-    );
+    throw new Error(`Vector dimension mismatch: ${a.length} vs ${b.length}`);
   }
 
   let dot = 0;

@@ -1,4 +1,4 @@
-import { ProviderInterface } from "../provider-interface.js";
+import { ProviderInterface } from '../provider-interface.js';
 import {
   CompletionRequest,
   CompletionResponse,
@@ -9,8 +9,8 @@ import {
   ProviderErrorCode,
   StreamEvent,
   ToolCall,
-} from "../types.js";
-import { ModelCapabilityRegistry } from "../model-capabilities.js";
+} from '../types.js';
+import { ModelCapabilityRegistry } from '../model-capabilities.js';
 
 /**
  * Gemini provider.
@@ -39,7 +39,7 @@ export class GeminiProvider extends ProviderInterface {
 
   protected buildHeaders(): Record<string, string> {
     return {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     };
   }
 
@@ -47,17 +47,10 @@ export class GeminiProvider extends ProviderInterface {
    * Build URL with API key as query parameter.
    * Gemini uses: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key=...
    */
-  protected resolveGeminiUrl(
-    model: string,
-    action: string = "generateContent",
-  ): string {
-    const base =
-      this.config.baseUrl ??
-      "https://generativelanguage.googleapis.com/v1beta";
-    const cleanBase = base.replace(/\/+$/, "");
-    const key = this.config.apiKey
-      ? `?key=${encodeURIComponent(this.config.apiKey)}`
-      : "";
+  protected resolveGeminiUrl(model: string, action: string = 'generateContent'): string {
+    const base = this.config.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
+    const cleanBase = base.replace(/\/+$/, '');
+    const key = this.config.apiKey ? `?key=${encodeURIComponent(this.config.apiKey)}` : '';
     return `${cleanBase}/models/${encodeURIComponent(model)}:${action}${key}`;
   }
 
@@ -66,15 +59,12 @@ export class GeminiProvider extends ProviderInterface {
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
     return this.withRetry(async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.config.timeout ?? 60_000,
-      );
+      const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 60_000);
 
       try {
-        const url = this.resolveGeminiUrl(request.model, "generateContent");
+        const url = this.resolveGeminiUrl(request.model, 'generateContent');
         const res = await fetch(url, {
-          method: "POST",
+          method: 'POST',
           headers: this.buildHeaders(),
           body: JSON.stringify(this.buildPayload(request)),
           signal: controller.signal,
@@ -92,20 +82,15 @@ export class GeminiProvider extends ProviderInterface {
     });
   }
 
-  async *completeStream(
-    request: CompletionRequest,
-  ): AsyncIterableIterator<StreamEvent> {
+  async *completeStream(request: CompletionRequest): AsyncIterableIterator<StreamEvent> {
     const controller = new AbortController();
-    const timeout = setTimeout(
-      () => controller.abort(),
-      this.config.timeout ?? 60_000,
-    );
+    const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 60_000);
 
     try {
       // Gemini streaming uses SSE via the same endpoint with alt=sse
-      const url = this.resolveGeminiUrl(request.model, "streamGenerateContent?alt=sse");
+      const url = this.resolveGeminiUrl(request.model, 'streamGenerateContent?alt=sse');
       const res = await fetch(url, {
-        method: "POST",
+        method: 'POST',
         headers: this.buildHeaders(),
         body: JSON.stringify(this.buildPayload(request)),
         signal: controller.signal,
@@ -119,28 +104,28 @@ export class GeminiProvider extends ProviderInterface {
       if (!reader) {
         throw new ProviderError(
           ProviderErrorCode.Internal,
-          "Response body is null",
+          'Response body is null',
           undefined,
           false,
         );
       }
 
       const decoder = new TextDecoder();
-      let buffer = "";
+      let buffer = '';
 
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
 
         buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() ?? "";
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
 
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed) continue;
 
-          if (trimmed.startsWith("data: ")) {
+          if (trimmed.startsWith('data: ')) {
             try {
               const data = JSON.parse(trimmed.slice(6));
               const parsed = this.parseStreamChunk(data, request.model);
@@ -152,7 +137,7 @@ export class GeminiProvider extends ProviderInterface {
         }
       }
 
-      yield { type: "done", response: await this.buildEmptyResponse(request.model) };
+      yield { type: 'done', response: await this.buildEmptyResponse(request.model) };
     } finally {
       clearTimeout(timeout);
     }
@@ -163,16 +148,13 @@ export class GeminiProvider extends ProviderInterface {
   async embed(request: EmbeddingRequest): Promise<EmbeddingResponse> {
     return this.withRetry(async () => {
       const controller = new AbortController();
-      const timeout = setTimeout(
-        () => controller.abort(),
-        this.config.timeout ?? 60_000,
-      );
+      const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 60_000);
 
       try {
-        const input = Array.isArray(request.input) ? request.input.join("\n") : request.input;
-        const url = this.resolveGeminiUrl(request.model, "embedContent");
+        const input = Array.isArray(request.input) ? request.input.join('\n') : request.input;
+        const url = this.resolveGeminiUrl(request.model, 'embedContent');
         const res = await fetch(url, {
-          method: "POST",
+          method: 'POST',
           headers: this.buildHeaders(),
           body: JSON.stringify({
             model: `models/${request.model}`,
@@ -193,9 +175,7 @@ export class GeminiProvider extends ProviderInterface {
         // For batch, Gemini uses batchEmbedContents
         return {
           model: request.model,
-          embeddings: json.embedding?.values
-            ? [json.embedding.values]
-            : [],
+          embeddings: json.embedding?.values ? [json.embedding.values] : [],
           usage: {
             promptTokens: 0,
             completionTokens: 0,
@@ -217,13 +197,9 @@ export class GeminiProvider extends ProviderInterface {
 
     try {
       // Gemini models endpoint: GET /v1beta/models?key=...
-      const base =
-        this.config.baseUrl ??
-        "https://generativelanguage.googleapis.com/v1beta";
-      const cleanBase = base.replace(/\/+$/, "");
-      const key = this.config.apiKey
-        ? `?key=${encodeURIComponent(this.config.apiKey)}`
-        : "";
+      const base = this.config.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
+      const cleanBase = base.replace(/\/+$/, '');
+      const key = this.config.apiKey ? `?key=${encodeURIComponent(this.config.apiKey)}` : '';
       const url = `${cleanBase}/models${key}`;
 
       const res = await fetch(url, {
@@ -235,7 +211,7 @@ export class GeminiProvider extends ProviderInterface {
         // Gemini returns: { models: [{ name: "models/gemini-pro", ... }] }
         if (Array.isArray(json.models)) {
           return json.models
-            .map((m: any) => m.name?.replace(/^models\//, "") ?? "")
+            .map((m: any) => m.name?.replace(/^models\//, '') ?? '')
             .filter(Boolean);
         }
       }
@@ -259,9 +235,7 @@ export class GeminiProvider extends ProviderInterface {
     const payload: Record<string, unknown> = {};
 
     // Convert messages to Gemini contents
-    const { contents, systemInstruction } = this.serializeContents(
-      request.messages,
-    );
+    const { contents, systemInstruction } = this.serializeContents(request.messages);
     payload.contents = contents;
 
     if (systemInstruction) {
@@ -272,25 +246,25 @@ export class GeminiProvider extends ProviderInterface {
 
     if (request.maxTokens !== undefined) {
       payload.generationConfig = {
-        ...(payload.generationConfig as Record<string, unknown> ?? {}),
+        ...((payload.generationConfig as Record<string, unknown>) ?? {}),
         maxOutputTokens: request.maxTokens,
       };
     }
     if (request.temperature !== undefined) {
       payload.generationConfig = {
-        ...(payload.generationConfig as Record<string, unknown> ?? {}),
+        ...((payload.generationConfig as Record<string, unknown>) ?? {}),
         temperature: request.temperature,
       };
     }
     if (request.topP !== undefined) {
       payload.generationConfig = {
-        ...(payload.generationConfig as Record<string, unknown> ?? {}),
+        ...((payload.generationConfig as Record<string, unknown>) ?? {}),
         topP: request.topP,
       };
     }
     if (request.stop !== undefined) {
       payload.generationConfig = {
-        ...(payload.generationConfig as Record<string, unknown> ?? {}),
+        ...((payload.generationConfig as Record<string, unknown>) ?? {}),
         stopSequences: request.stop,
       };
     }
@@ -309,16 +283,16 @@ export class GeminiProvider extends ProviderInterface {
     }
 
     if (request.toolChoice) {
-      if (request.toolChoice === "none") {
-        payload.tool_config = { function_calling_config: { mode: "NONE" } };
-      } else if (request.toolChoice === "auto") {
-        payload.tool_config = { function_calling_config: { mode: "AUTO" } };
-      } else if (request.toolChoice === "any") {
-        payload.tool_config = { function_calling_config: { mode: "ANY" } };
-      } else if (typeof request.toolChoice === "object" && request.toolChoice.function) {
+      if (request.toolChoice === 'none') {
+        payload.tool_config = { function_calling_config: { mode: 'NONE' } };
+      } else if (request.toolChoice === 'auto') {
+        payload.tool_config = { function_calling_config: { mode: 'AUTO' } };
+      } else if (request.toolChoice === 'any') {
+        payload.tool_config = { function_calling_config: { mode: 'ANY' } };
+      } else if (typeof request.toolChoice === 'object' && request.toolChoice.function) {
         payload.tool_config = {
           function_calling_config: {
-            mode: "ANY",
+            mode: 'ANY',
             allowed_function_names: [request.toolChoice.function.name],
           },
         };
@@ -349,34 +323,33 @@ export class GeminiProvider extends ProviderInterface {
    * Roles are "user" or "model" (not "assistant").
    * System messages are extracted and returned separately.
    */
-  protected serializeContents(
-    messages: any[],
-  ): { contents: Record<string, unknown>[]; systemInstruction: string | null } {
+  protected serializeContents(messages: any[]): {
+    contents: Record<string, unknown>[];
+    systemInstruction: string | null;
+  } {
     const contents: Record<string, unknown>[] = [];
     let systemInstruction: string | null = null;
 
     for (const msg of messages) {
-      if (msg.role === "system") {
+      if (msg.role === 'system') {
         // Accumulate system messages
-        const text = typeof msg.content === "string" ? msg.content : "";
-        systemInstruction = systemInstruction
-          ? `${systemInstruction}\n${text}`
-          : text;
+        const text = typeof msg.content === 'string' ? msg.content : '';
+        systemInstruction = systemInstruction ? `${systemInstruction}\n${text}` : text;
         continue;
       }
 
       // Map internal roles to Gemini roles
       let role: string;
       switch (msg.role) {
-        case "assistant":
-          role = "model";
+        case 'assistant':
+          role = 'model';
           break;
-        case "tool":
+        case 'tool':
           // Tool results are sent as "function" role in Gemini or as user with functionResponse
-          role = "function";
+          role = 'function';
           break;
         default:
-          role = "user";
+          role = 'user';
       }
 
       const parts = this.serializeParts(msg.content);
@@ -392,7 +365,7 @@ export class GeminiProvider extends ProviderInterface {
    * Convert content blocks to Gemini parts.
    */
   protected serializeParts(content: any): Record<string, unknown>[] {
-    if (typeof content === "string") {
+    if (typeof content === 'string') {
       return [{ text: content }];
     }
 
@@ -402,9 +375,9 @@ export class GeminiProvider extends ProviderInterface {
 
     return content.map((block: any) => {
       switch (block.type) {
-        case "text":
+        case 'text':
           return { text: block.text };
-        case "image_url":
+        case 'image_url':
           // Gemini supports inline_data with base64
           return {
             inline_data: {
@@ -412,17 +385,17 @@ export class GeminiProvider extends ProviderInterface {
               data: this.extractBase64(block.imageUrl),
             },
           };
-        case "tool_use":
+        case 'tool_use':
           return {
             functionCall: {
               name: block.name,
               args: block.input as Record<string, unknown>,
             },
           };
-        case "tool_result":
+        case 'tool_result':
           return {
             functionResponse: {
-              name: block.name ?? "unknown",
+              name: block.name ?? 'unknown',
               response: { content: block.content },
             },
           };
@@ -441,22 +414,23 @@ export class GeminiProvider extends ProviderInterface {
     const parts = content?.parts ?? [];
 
     const textParts = parts.filter((p: any) => p.text);
-    const text = textParts.map((p: any) => p.text).join("") || null;
+    const text = textParts.map((p: any) => p.text).join('') || null;
 
     const functionCallParts = parts.filter((p: any) => p.functionCall);
-    const toolCalls: ToolCall[] | undefined = functionCallParts.length > 0
-      ? functionCallParts.map((p: any, i: number) => ({
-          id: p.functionCall.name ?? `fc_${i}`,
-          name: p.functionCall.name ?? "unknown",
-          input: (p.functionCall.args ?? {}) as Record<string, unknown>,
-        }))
-      : undefined;
+    const toolCalls: ToolCall[] | undefined =
+      functionCallParts.length > 0
+        ? functionCallParts.map((p: any, i: number) => ({
+            id: p.functionCall.name ?? `fc_${i}`,
+            name: p.functionCall.name ?? 'unknown',
+            input: (p.functionCall.args ?? {}) as Record<string, unknown>,
+          }))
+        : undefined;
 
     const usage = json.usageMetadata ?? {};
     const finishReason = candidate?.finishReason ?? candidate?.finish_reason;
 
     return {
-      id: "",
+      id: '',
       model,
       content: text,
       toolCalls,
@@ -485,9 +459,9 @@ export class GeminiProvider extends ProviderInterface {
     // Check for finish reason
     if (candidate.finishReason) {
       return {
-        type: "done",
+        type: 'done',
         response: {
-          id: "",
+          id: '',
           model,
           content: null,
           usage: {
@@ -506,9 +480,9 @@ export class GeminiProvider extends ProviderInterface {
     if (functionCallPart) {
       const fc = functionCallPart.functionCall;
       return {
-        type: "tool_call_delta",
-        id: fc.name ?? "",
-        name: fc.name ?? "",
+        type: 'tool_call_delta',
+        id: fc.name ?? '',
+        name: fc.name ?? '',
         input: JSON.stringify(fc.args ?? {}),
       };
     }
@@ -516,45 +490,43 @@ export class GeminiProvider extends ProviderInterface {
     // Text delta
     const textPart = parts.find((p: any) => p.text);
     if (textPart?.text) {
-      return { type: "delta", content: textPart.text };
+      return { type: 'delta', content: textPart.text };
     }
 
     return null;
   }
 
-  protected mapFinishReason(
-    reason?: string,
-  ): CompletionResponse["finishReason"] {
-    if (!reason) return "stop";
+  protected mapFinishReason(reason?: string): CompletionResponse['finishReason'] {
+    if (!reason) return 'stop';
 
     switch (reason) {
-      case "STOP":
-        return "stop";
-      case "MAX_TOKENS":
-        return "length";
-      case "SAFETY":
-      case "BLOCKLIST":
-      case "PROHIBITED_CONTENT":
-      case "SPII":
-        return "content_filter";
-      case "RECITATION":
-      case "OTHER":
-        return "error";
-      case "TOOL_CALLS":
-      case "FUNCTION_CALL":
-        return "tool_calls";
+      case 'STOP':
+        return 'stop';
+      case 'MAX_TOKENS':
+        return 'length';
+      case 'SAFETY':
+      case 'BLOCKLIST':
+      case 'PROHIBITED_CONTENT':
+      case 'SPII':
+        return 'content_filter';
+      case 'RECITATION':
+      case 'OTHER':
+        return 'error';
+      case 'TOOL_CALLS':
+      case 'FUNCTION_CALL':
+        return 'tool_calls';
       default:
-        return "stop";
+        return 'stop';
     }
   }
 
   protected async buildEmptyResponse(model: string): Promise<CompletionResponse> {
     return {
-      id: "",
+      id: '',
       model,
       content: null,
       usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-      finishReason: "stop",
+      finishReason: 'stop',
     };
   }
 
@@ -573,7 +545,7 @@ export class GeminiProvider extends ProviderInterface {
 
     return new ProviderError(
       code,
-      typeof message === "string" ? message : JSON.stringify(message),
+      typeof message === 'string' ? message : JSON.stringify(message),
       res.status,
       code === ProviderErrorCode.RateLimited ||
         code === ProviderErrorCode.Timeout ||
@@ -581,10 +553,7 @@ export class GeminiProvider extends ProviderInterface {
     );
   }
 
-  protected mapErrorCode(
-    status: number,
-    message: unknown,
-  ): ProviderErrorCode {
+  protected mapErrorCode(status: number, message: unknown): ProviderErrorCode {
     if (status === 401 || status === 403) return ProviderErrorCode.Authentication;
     if (status === 429) return ProviderErrorCode.RateLimited;
     if (status === 402) return ProviderErrorCode.QuotaExceeded;
@@ -595,9 +564,9 @@ export class GeminiProvider extends ProviderInterface {
     if (status === 400) {
       const msg = String(message).toLowerCase();
       if (
-        msg.includes("context length") ||
-        msg.includes("maximum context") ||
-        msg.includes("too many tokens")
+        msg.includes('context length') ||
+        msg.includes('maximum context') ||
+        msg.includes('too many tokens')
       )
         return ProviderErrorCode.ContextTooLong;
       return ProviderErrorCode.BadRequest;
@@ -610,24 +579,29 @@ export class GeminiProvider extends ProviderInterface {
   // ── Utility helpers ─────────────────────────────────────────────────
 
   private guessMimeType(url: string): string {
-    if (url.startsWith("data:")) {
+    if (url.startsWith('data:')) {
       const match = url.match(/^data:([^;]+);/);
       if (match) return match[1];
     }
-    const ext = url.split(".").pop()?.toLowerCase();
+    const ext = url.split('.').pop()?.toLowerCase();
     switch (ext) {
-      case "png": return "image/png";
-      case "jpg":
-      case "jpeg": return "image/jpeg";
-      case "gif": return "image/gif";
-      case "webp": return "image/webp";
-      default: return "image/png";
+      case 'png':
+        return 'image/png';
+      case 'jpg':
+      case 'jpeg':
+        return 'image/jpeg';
+      case 'gif':
+        return 'image/gif';
+      case 'webp':
+        return 'image/webp';
+      default:
+        return 'image/png';
     }
   }
 
   private extractBase64(url: string): string {
-    if (url.startsWith("data:")) {
-      const commaIdx = url.indexOf(",");
+    if (url.startsWith('data:')) {
+      const commaIdx = url.indexOf(',');
       if (commaIdx !== -1) return url.slice(commaIdx + 1);
     }
     return url;

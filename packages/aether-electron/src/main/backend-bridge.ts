@@ -62,10 +62,7 @@ export function createAgent(data: {
   return record;
 }
 
-export function updateAgent(
-  id: string,
-  data: Partial<AgentRecord>,
-): AgentRecord | undefined {
+export function updateAgent(id: string, data: Partial<AgentRecord>): AgentRecord | undefined {
   const existing = agents.get(id);
   if (!existing) return undefined;
   const updated: AgentRecord = {

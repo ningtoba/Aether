@@ -1,4 +1,4 @@
-import { Capability, ModelCapabilities } from "./types.js";
+import { Capability, ModelCapabilities } from './types.js';
 
 /**
  * Central registry for model capabilities.
@@ -88,52 +88,52 @@ export class ModelCapabilityRegistry {
 
     // ── OpenAI ────────────────────────────────────────────────
     const openai: Record<string, ModelCapabilities> = {
-      "gpt-4.1": {
+      'gpt-4.1': {
         contextWindow: 1_000_000,
         maxOutputTokens: 16_384,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
         pricing: { input: 2, output: 8 },
       },
-      "gpt-4o": {
+      'gpt-4o': {
         contextWindow: 128_000,
         maxOutputTokens: 16_384,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
         pricing: { input: 2.5, output: 10 },
       },
-      "gpt-4o-mini": {
+      'gpt-4o-mini': {
         contextWindow: 128_000,
         maxOutputTokens: 16_384,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
         pricing: { input: 0.15, output: 0.6 },
       },
-      "gpt-4-turbo": {
+      'gpt-4-turbo': {
         contextWindow: 128_000,
         maxOutputTokens: 4_096,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
         pricing: { input: 10, output: 30 },
       },
-      "o3-mini": {
+      'o3-mini': {
         contextWindow: 200_000,
         maxOutputTokens: 100_000,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "reasoning"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'reasoning'),
         pricing: { input: 1.1, output: 4.4 },
       },
-      "o4-mini": {
+      'o4-mini': {
         contextWindow: 200_000,
         maxOutputTokens: 100_000,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "reasoning"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'reasoning'),
         pricing: { input: 1.1, output: 4.4 },
       },
-      "text-embedding-3-small": {
+      'text-embedding-3-small': {
         contextWindow: 8_191,
         maxOutputTokens: 0,
-        supported: cap("embeddings"),
+        supported: cap('embeddings'),
         pricing: { input: 0.02, output: 0 },
       },
-      "text-embedding-3-large": {
+      'text-embedding-3-large': {
         contextWindow: 8_191,
         maxOutputTokens: 0,
-        supported: cap("embeddings"),
+        supported: cap('embeddings'),
         pricing: { input: 0.13, output: 0 },
       },
     };
@@ -141,22 +141,30 @@ export class ModelCapabilityRegistry {
 
     // ── Anthropic ─────────────────────────────────────────────
     const anthropic: Record<string, ModelCapabilities> = {
-      "claude-sonnet-4": {
+      'claude-sonnet-4': {
         contextWindow: 200_000,
         maxOutputTokens: 8_192,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
         pricing: { input: 3, output: 15 },
       },
-      "claude-haiku-3-5": {
+      'claude-haiku-3-5': {
         contextWindow: 200_000,
         maxOutputTokens: 8_192,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
         pricing: { input: 0.8, output: 4 },
       },
-      "claude-opus-4": {
+      'claude-opus-4': {
         contextWindow: 200_000,
         maxOutputTokens: 8_192,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision", "reasoning"),
+        supported: cap(
+          'chat',
+          'streaming',
+          'function_calling',
+          'tool_use',
+          'json_mode',
+          'vision',
+          'reasoning',
+        ),
         pricing: { input: 15, output: 75 },
       },
     };
@@ -164,28 +172,44 @@ export class ModelCapabilityRegistry {
 
     // ── Gemini ────────────────────────────────────────────────
     const gemini: Record<string, ModelCapabilities> = {
-      "gemini-2.5-pro": {
+      'gemini-2.5-pro': {
         contextWindow: 1_000_000,
         maxOutputTokens: 8_192,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision", "audio"),
+        supported: cap(
+          'chat',
+          'streaming',
+          'function_calling',
+          'tool_use',
+          'json_mode',
+          'vision',
+          'audio',
+        ),
         pricing: { input: 1.25, output: 10 },
       },
-      "gemini-2.5-flash": {
+      'gemini-2.5-flash': {
         contextWindow: 1_000_000,
         maxOutputTokens: 8_192,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision", "audio"),
+        supported: cap(
+          'chat',
+          'streaming',
+          'function_calling',
+          'tool_use',
+          'json_mode',
+          'vision',
+          'audio',
+        ),
         pricing: { input: 0.15, output: 0.6 },
       },
-      "gemini-2.0-flash": {
+      'gemini-2.0-flash': {
         contextWindow: 1_000_000,
         maxOutputTokens: 8_192,
-        supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+        supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
         pricing: { input: 0.1, output: 0.4 },
       },
-      "text-embedding-004": {
+      'text-embedding-004': {
         contextWindow: 2_048,
         maxOutputTokens: 0,
-        supported: cap("embeddings"),
+        supported: cap('embeddings'),
         pricing: { input: 0.1, output: 0 },
       },
     };
@@ -193,30 +217,44 @@ export class ModelCapabilityRegistry {
 
     // ── OpenRouter ────────────────────────────────────────────
     // OpenRouter mirrors provider model capabilities; set a generous default.
-    this.setProviderDefaults("openrouter", {
+    this.setProviderDefaults('openrouter', {
       contextWindow: 128_000,
       maxOutputTokens: 16_384,
-      supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "vision"),
+      supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
       pricing: { input: 1, output: 5 },
     });
 
     // ── Local providers ───────────────────────────────────────
-    this.setProviderDefaults("ollama", {
+    this.setProviderDefaults('ollama', {
       contextWindow: 32_768,
       maxOutputTokens: 4_096,
-      supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "embeddings"),
+      supported: cap(
+        'chat',
+        'streaming',
+        'function_calling',
+        'tool_use',
+        'json_mode',
+        'embeddings',
+      ),
     });
 
-    this.setProviderDefaults("vllm", {
+    this.setProviderDefaults('vllm', {
       contextWindow: 32_768,
       maxOutputTokens: 4_096,
-      supported: cap("chat", "streaming", "function_calling", "tool_use", "json_mode", "embeddings"),
+      supported: cap(
+        'chat',
+        'streaming',
+        'function_calling',
+        'tool_use',
+        'json_mode',
+        'embeddings',
+      ),
     });
 
-    this.setProviderDefaults("llamacpp", {
+    this.setProviderDefaults('llamacpp', {
       contextWindow: 32_768,
       maxOutputTokens: 4_096,
-      supported: cap("chat", "streaming", "completion", "embeddings"),
+      supported: cap('chat', 'streaming', 'completion', 'embeddings'),
     });
   }
 }

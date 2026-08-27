@@ -5,11 +5,11 @@
  * via child_process operations.
  */
 
-import { execSync, execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { execSync, execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
-export const VERSION = "0.1.0";
+export const VERSION = '0.1.0';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -36,7 +36,7 @@ export interface PythonResult {
 // ---------------------------------------------------------------------------
 
 /** Default directory name for venvs created without an explicit path. */
-const DEFAULT_VENV_DIR = ".aether-venv";
+const DEFAULT_VENV_DIR = '.aether-venv';
 
 /** Resolve venv path: if relative, resolve relative to cwd. */
 function resolveVenvPath(venvPath?: string): string {
@@ -55,15 +55,15 @@ function findPython(pythonPath?: string): string {
     return pythonPath;
   }
 
-  const candidates = ["python3", "python"];
+  const candidates = ['python3', 'python'];
   for (const cmd of candidates) {
     try {
       const result = execSync(`${cmd} --version`, {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "pipe"],
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'pipe'],
         timeout: 5_000,
       }) as string;
-      if (result.startsWith("Python 3")) {
+      if (result.startsWith('Python 3')) {
         return cmd;
       }
     } catch {
@@ -71,9 +71,7 @@ function findPython(pythonPath?: string): string {
     }
   }
 
-  throw new Error(
-    "Python 3 not found. Please install Python 3 and ensure it's available in PATH.",
-  );
+  throw new Error("Python 3 not found. Please install Python 3 and ensure it's available in PATH.");
 }
 
 /**
@@ -81,20 +79,16 @@ function findPython(pythonPath?: string): string {
  */
 function getVenvPython(venvPath: string): string {
   // Windows vs Unix
-  const isWin = process.platform === "win32";
-  return isWin
-    ? join(venvPath, "Scripts", "python.exe")
-    : join(venvPath, "bin", "python");
+  const isWin = process.platform === 'win32';
+  return isWin ? join(venvPath, 'Scripts', 'python.exe') : join(venvPath, 'bin', 'python');
 }
 
 /**
  * Get the path to pip inside a venv.
  */
 function getVenvPip(venvPath: string): string {
-  const isWin = process.platform === "win32";
-  return isWin
-    ? join(venvPath, "Scripts", "pip.exe")
-    : join(venvPath, "bin", "pip");
+  const isWin = process.platform === 'win32';
+  return isWin ? join(venvPath, 'Scripts', 'pip.exe') : join(venvPath, 'bin', 'pip');
 }
 
 // ---------------------------------------------------------------------------
@@ -123,9 +117,7 @@ export function getPipPath(venvPath?: string): string {
   const resolved = resolveVenvPath(venvPath);
   const pipPath = getVenvPip(resolved);
   if (!existsSync(pipPath)) {
-    throw new Error(
-      `pip not found in virtual environment at "${resolved}".`,
-    );
+    throw new Error(`pip not found in virtual environment at "${resolved}".`);
   }
   return pipPath;
 }
@@ -149,11 +141,11 @@ export function createVenv(venvPath?: string, options: VenvOptions = {}): string
   }
 
   // Ensure parent directory exists
-  mkdirSync(resolve(resolved, ".."), { recursive: true });
+  mkdirSync(resolve(resolved, '..'), { recursive: true });
 
   try {
-    execFileSync(python, ["-m", "venv", resolved], {
-      stdio: "pipe",
+    execFileSync(python, ['-m', 'venv', resolved], {
+      stdio: 'pipe',
       timeout: 30_000,
     });
   } catch (err) {
@@ -168,23 +160,18 @@ export function createVenv(venvPath?: string, options: VenvOptions = {}): string
 /**
  * Install packages into a virtual environment via pip.
  */
-export function installPackages(
-  packages: string | string[],
-  venvPath?: string,
-): void {
+export function installPackages(packages: string | string[], venvPath?: string): void {
   const resolved = resolveVenvPath(venvPath);
   const pip = getPipPath(resolved);
   const pkgList = Array.isArray(packages) ? packages : [packages];
 
   try {
-    execFileSync(pip, ["install", ...pkgList], {
-      stdio: "pipe",
+    execFileSync(pip, ['install', ...pkgList], {
+      stdio: 'pipe',
       timeout: 120_000,
     });
   } catch (err) {
-    throw new Error(
-      `Failed to install packages: ${(err as Error).message}`,
-    );
+    throw new Error(`Failed to install packages: ${(err as Error).message}`);
   }
 }
 
@@ -202,18 +189,18 @@ export function runPython(
 
   try {
     const result = spawnSync(python, [scriptPath, ...args], {
-      encoding: "utf-8",
-      stdio: "pipe",
+      encoding: 'utf-8',
+      stdio: 'pipe',
       timeout: 60_000,
     });
     return {
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
       exitCode: result.status ?? 1,
     };
   } catch (err) {
     return {
-      stdout: "",
+      stdout: '',
       stderr: `Failed to run script: ${(err as Error).message}`,
       exitCode: 1,
     };
@@ -229,19 +216,19 @@ export function runPythonCode(code: string, venvPath?: string): PythonResult {
   const python = getPythonPath(resolved);
 
   try {
-    const result = spawnSync(python, ["-c", code], {
-      encoding: "utf-8",
-      stdio: "pipe",
+    const result = spawnSync(python, ['-c', code], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
       timeout: 60_000,
     });
     return {
-      stdout: result.stdout ?? "",
-      stderr: result.stderr ?? "",
+      stdout: result.stdout ?? '',
+      stderr: result.stderr ?? '',
       exitCode: result.status ?? 1,
     };
   } catch (err) {
     return {
-      stdout: "",
+      stdout: '',
       stderr: `Failed to run Python code: ${(err as Error).message}`,
       exitCode: 1,
     };
@@ -257,9 +244,9 @@ export function getInstalledPackages(venvPath?: string): InstalledPackage[] {
   const pip = getPipPath(resolved);
 
   try {
-    const result = execFileSync(pip, ["list", "--format=json"], {
-      encoding: "utf-8",
-      stdio: "pipe",
+    const result = execFileSync(pip, ['list', '--format=json'], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
       timeout: 30_000,
     });
 
@@ -269,9 +256,7 @@ export function getInstalledPackages(venvPath?: string): InstalledPackage[] {
       version: pkg.version,
     }));
   } catch (err) {
-    throw new Error(
-      `Failed to list installed packages: ${(err as Error).message}`,
-    );
+    throw new Error(`Failed to list installed packages: ${(err as Error).message}`);
   }
 }
 

@@ -8,18 +8,18 @@
 // ─── Provider identification ───────────────────────────────
 
 /** Provider identification string (for LLM API layer) */
-export type LLMProviderId = string & { readonly __brand: "LLMProviderId" };
+export type LLMProviderId = string & { readonly __brand: 'LLMProviderId' };
 
 /** Supported LLM provider types */
 export type ProviderType =
-  | "openai-compatible"
-  | "anthropic"
-  | "gemini"
-  | "ollama"
-  | "vllm"
-  | "llamacpp"
-  | "openrouter"
-  | "custom";
+  | 'openai-compatible'
+  | 'anthropic'
+  | 'gemini'
+  | 'ollama'
+  | 'vllm'
+  | 'llamacpp'
+  | 'openrouter'
+  | 'custom';
 
 // ─── API rate limiting ─────────────────────────────────────
 
@@ -32,15 +32,15 @@ export interface LLMRateLimitConfig {
 
 /** Named capabilities a model or provider can support */
 export type ModelCapability =
-  | "chat"
-  | "completion"
-  | "embedding"
-  | "function-calling"
-  | "streaming"
-  | "structured-output"
-  | "vision"
-  | "audio"
-  | "rerank";
+  | 'chat'
+  | 'completion'
+  | 'embedding'
+  | 'function-calling'
+  | 'streaming'
+  | 'structured-output'
+  | 'vision'
+  | 'audio'
+  | 'rerank';
 
 // ─── Model definitions ─────────────────────────────────────
 
@@ -92,7 +92,7 @@ export interface ChatCompletionRequest {
   maxTokens?: number;
   stream?: boolean;
   tools?: ToolDefinition[];
-  toolChoice?: "auto" | "none" | { type: "function"; function: { name: string } };
+  toolChoice?: 'auto' | 'none' | { type: 'function'; function: { name: string } };
   stop?: string[];
   frequencyPenalty?: number;
   presencePenalty?: number;
@@ -101,7 +101,7 @@ export interface ChatCompletionRequest {
 
 /** A single message in a chat conversation */
 export interface ChatMessage {
-  role: "system" | "user" | "assistant" | "tool";
+  role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   name?: string;
   toolCallId?: string;
@@ -110,7 +110,7 @@ export interface ChatMessage {
 
 /** Tool definition for function calling */
 export interface ToolDefinition {
-  type: "function";
+  type: 'function';
   function: {
     name: string;
     description: string;
@@ -121,7 +121,7 @@ export interface ToolDefinition {
 /** A tool call from the model */
 export interface ToolCallDefinition {
   id: string;
-  type: "function";
+  type: 'function';
   function: {
     name: string;
     arguments: string;
@@ -165,7 +165,7 @@ export interface EmbeddingResponse {
 /** Provider health check result */
 export interface ProviderHealth {
   providerId: LLMProviderId;
-  status: "ok" | "degraded" | "down";
+  status: 'ok' | 'degraded' | 'down';
   latency: number;
   error?: string;
   modelsAvailable: number;

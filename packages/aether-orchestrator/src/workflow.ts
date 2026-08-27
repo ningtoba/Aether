@@ -5,7 +5,7 @@ import type {
   NodeId,
   NodeKind,
   Condition,
-} from "./types.js";
+} from './types.js';
 
 /**
  * Fluent builder for constructing WorkflowDefinition graphs.
@@ -29,7 +29,7 @@ export class WorkflowBuilder {
   private edges: EdgeDefinition[] = [];
   private entryNode: NodeId | null = null;
   private terminalNodes: Set<NodeId> = new Set();
-  private initialState: WorkflowDefinition["initialState"] = {};
+  private initialState: WorkflowDefinition['initialState'] = {};
   private version: string;
 
   constructor(
@@ -38,7 +38,7 @@ export class WorkflowBuilder {
     public readonly name?: string,
     public readonly description?: string,
   ) {
-    this.version = version ?? "0.1.0";
+    this.version = version ?? '0.1.0';
   }
 
   // ─── Node Operations ─────────────────────────────────────
@@ -66,19 +66,19 @@ export class WorkflowBuilder {
 
   /** Quick helper: add a single linear agent node */
   agentNode(id: NodeId, agentName: string, description?: string): this {
-    return this.addNode({ id, kind: "agent", agentName, description });
+    return this.addNode({ id, kind: 'agent', agentName, description });
   }
 
   /** Quick helper: add a tool node */
   toolNode(id: NodeId, toolName: string, description?: string): this {
-    return this.addNode({ id, kind: "tool", toolName, description });
+    return this.addNode({ id, kind: 'tool', toolName, description });
   }
 
   /** Quick helper: add a router (LLM-as-router) node */
   routerNode(id: NodeId, label: string, routePrompt: string): this {
     return this.addNode({
       id,
-      kind: "router",
+      kind: 'router',
       label,
       description: `LLM router: ${label}`,
     });
@@ -86,22 +86,22 @@ export class WorkflowBuilder {
 
   /** Quick helper: add a map (parallel fan-out) node */
   mapNode(id: NodeId, label: string): this {
-    return this.addNode({ id, kind: "map", label });
+    return this.addNode({ id, kind: 'map', label });
   }
 
   /** Quick helper: add a reduce (fan-in) node */
   reduceNode(id: NodeId, label: string): this {
-    return this.addNode({ id, kind: "reduce", label });
+    return this.addNode({ id, kind: 'reduce', label });
   }
 
   /** Quick helper: add a subgraph node */
   subgraphNode(id: NodeId, subgraphId: string, label?: string): this {
-    return this.addNode({ id, kind: "subgraph", subgraphId, label });
+    return this.addNode({ id, kind: 'subgraph', subgraphId, label });
   }
 
   /** Quick helper: add a sleep / delay node */
   sleepNode(id: NodeId, timeout?: number): this {
-    return this.addNode({ id, kind: "sleep", timeout });
+    return this.addNode({ id, kind: 'sleep', timeout });
   }
 
   // ─── Edge Operations ─────────────────────────────────────
@@ -115,29 +115,19 @@ export class WorkflowBuilder {
   /** Quick helper: add a direct edge between two nodes */
   connect(from: NodeId, to: NodeId, label?: string): this {
     const id = `e-${from}-${to}`;
-    return this.addEdge({ id, from, to, kind: "direct", label });
+    return this.addEdge({ id, from, to, kind: 'direct', label });
   }
 
   /** Quick helper: add a conditional edge with conditions */
-  connectIf(
-    from: NodeId,
-    to: NodeId,
-    conditions: Condition[],
-    label?: string,
-  ): this {
-    const id = `e-${from}-${to}-${conditions.map((c) => `${c.field}${c.operator}`).join("_")}`;
-    return this.addEdge({ id, from, to, kind: "conditional", label, conditions });
+  connectIf(from: NodeId, to: NodeId, conditions: Condition[], label?: string): this {
+    const id = `e-${from}-${to}-${conditions.map((c) => `${c.field}${c.operator}`).join('_')}`;
+    return this.addEdge({ id, from, to, kind: 'conditional', label, conditions });
   }
 
   /** Quick helper: add an LLM-routed edge */
-  connectViaLLM(
-    from: NodeId,
-    to: NodeId,
-    routePrompt: string,
-    label?: string,
-  ): this {
+  connectViaLLM(from: NodeId, to: NodeId, routePrompt: string, label?: string): this {
     const id = `e-${from}-${to}-llm`;
-    return this.addEdge({ id, from, to, kind: "llm-route", label, routePrompt });
+    return this.addEdge({ id, from, to, kind: 'llm-route', label, routePrompt });
   }
 
   /** Remove an edge by id */
@@ -173,12 +163,7 @@ export class WorkflowBuilder {
   }
 
   /** Declare an initial state field */
-  withInitialStateField(
-    key: string,
-    type: string,
-    required?: boolean,
-    defaultVal?: unknown,
-  ): this {
+  withInitialStateField(key: string, type: string, required?: boolean, defaultVal?: unknown): this {
     this.initialState[key] = { type, required, default: defaultVal };
     return this;
   }
@@ -221,15 +206,11 @@ export class WorkflowBuilder {
       );
     }
     if (this.terminalNodes.size === 0) {
-      throw new Error(
-        `Workflow "${this.id}": no terminal nodes set. Call .withTerminal().`,
-      );
+      throw new Error(`Workflow "${this.id}": no terminal nodes set. Call .withTerminal().`);
     }
     for (const node of this.terminalNodes) {
       if (!this.nodes.has(node)) {
-        throw new Error(
-          `Workflow "${this.id}": terminal node "${node}" is not a registered node.`,
-        );
+        throw new Error(`Workflow "${this.id}": terminal node "${node}" is not a registered node.`);
       }
     }
     for (const edge of this.edges) {
@@ -261,9 +242,7 @@ export class WorkflowBuilder {
 
     // Check if any terminal is reachable
     const terminalArr = Array.from(this.terminalNodes);
-    const reachableTerminals = terminalArr.filter((t) =>
-      visited.has(t),
-    );
+    const reachableTerminals = terminalArr.filter((t) => visited.has(t));
     if (reachableTerminals.length === 0) {
       throw new Error(
         `Workflow "${this.id}": no terminal nodes are reachable from the entry node.`,

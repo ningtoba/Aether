@@ -1,12 +1,12 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { AetherModel, AetherModelProvider } from "./model-provider.js";
-import type { CompletionResponse, ProviderInterface } from "@aether/providers";
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { AetherModel, AetherModelProvider } from './model-provider.js';
+import type { CompletionResponse, ProviderInterface } from '@aether/providers';
 
 // Mock @aether/providers
-vi.mock("@aether/providers", () => ({}));
+vi.mock('@aether/providers', () => ({}));
 
 // Mock internal-types
-vi.mock("./internal-types.js", () => ({
+vi.mock('./internal-types.js', () => ({
   Usage: class {
     inputTokens: number;
     outputTokens: number;
@@ -19,11 +19,11 @@ vi.mock("./internal-types.js", () => ({
   },
 }));
 
-describe("AetherModelProvider", () => {
+describe('AetherModelProvider', () => {
   const mockProvider: ProviderInterface = {
     complete: vi.fn().mockResolvedValue({
-      id: "resp-1",
-      content: "Hello from mock",
+      id: 'resp-1',
+      content: 'Hello from mock',
       usage: { promptTokens: 10, completionTokens: 20, totalTokens: 30 },
       toolCalls: [],
     }),
@@ -33,37 +33,37 @@ describe("AetherModelProvider", () => {
   const mockProviderRegistry = {
     get: vi.fn().mockResolvedValue(mockProvider),
     has: vi.fn().mockReturnValue(true),
-    list: vi.fn().mockReturnValue(["default"]),
+    list: vi.fn().mockReturnValue(['default']),
   };
 
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("should create with default model name", () => {
+  it('should create with default model name', () => {
     const provider = new AetherModelProvider(mockProviderRegistry);
-    expect(provider.defaultModel).toBe("gpt-4o");
+    expect(provider.defaultModel).toBe('gpt-4o');
   });
 
-  it("should create with custom default model", () => {
-    const provider = new AetherModelProvider(mockProviderRegistry, "default", "claude-3-5-sonnet");
-    expect(provider.defaultModel).toBe("claude-3-5-sonnet");
+  it('should create with custom default model', () => {
+    const provider = new AetherModelProvider(mockProviderRegistry, 'default', 'claude-3-5-sonnet');
+    expect(provider.defaultModel).toBe('claude-3-5-sonnet');
   });
 
-  it("should get a model by name", async () => {
+  it('should get a model by name', async () => {
     const provider = new AetherModelProvider(mockProviderRegistry);
-    const model = await provider.getModel("gpt-4o");
+    const model = await provider.getModel('gpt-4o');
     expect(model).toBeDefined();
-    expect(mockProviderRegistry.get).toHaveBeenCalledWith("default");
+    expect(mockProviderRegistry.get).toHaveBeenCalledWith('default');
   });
 
-  it("should use default model when no name given", async () => {
+  it('should use default model when no name given', async () => {
     const provider = new AetherModelProvider(mockProviderRegistry);
     const model = await provider.getModel();
     expect(model).toBeDefined();
   });
 
-  it("should throw when provider is not registered", async () => {
+  it('should throw when provider is not registered', async () => {
     const emptyRegistry = {
       get: vi.fn(),
       has: vi.fn().mockReturnValue(false),
@@ -71,25 +71,25 @@ describe("AetherModelProvider", () => {
     };
     const provider = new AetherModelProvider(emptyRegistry);
 
-    await expect(provider.getModel("test")).rejects.toThrow("not registered");
+    await expect(provider.getModel('test')).rejects.toThrow('not registered');
   });
 });
 
-describe("AetherModel", () => {
+describe('AetherModel', () => {
   const mockProvider: ProviderInterface = {
     complete: vi.fn().mockResolvedValue({
-      id: "resp-123",
-      content: "Mock response content",
+      id: 'resp-123',
+      content: 'Mock response content',
       usage: { promptTokens: 5, completionTokens: 15, totalTokens: 20 },
       toolCalls: [],
     }),
     completeStream: vi.fn(),
   } as any;
 
-  it("should get a response from the provider", async () => {
-    const model = new (AetherModel as any)(mockProvider, "gpt-4o");
+  it('should get a response from the provider', async () => {
+    const model = new (AetherModel as any)(mockProvider, 'gpt-4o');
     const request = {
-      input: "Hello",
+      input: 'Hello',
       tools: [],
       modelSettings: {},
     };
@@ -98,11 +98,11 @@ describe("AetherModel", () => {
     expect(mockProvider.complete).toHaveBeenCalled();
   });
 
-  it("should return retry advice for errors", () => {
-    const model = new (AetherModel as any)(mockProvider, "gpt-4o");
+  it('should return retry advice for errors', () => {
+    const model = new (AetherModel as any)(mockProvider, 'gpt-4o');
     const advice = model.getRetryAdvice({
-      request: { input: "test", tools: [] },
-      error: new Error("rate limit"),
+      request: { input: 'test', tools: [] },
+      error: new Error('rate limit'),
       stream: false,
       attempt: 1,
     });
@@ -111,11 +111,11 @@ describe("AetherModel", () => {
     expect(advice.retryAfterMs).toBeGreaterThan(0);
   });
 
-  it("should not retry after max attempts", () => {
-    const model = new (AetherModel as any)(mockProvider, "gpt-4o");
+  it('should not retry after max attempts', () => {
+    const model = new (AetherModel as any)(mockProvider, 'gpt-4o');
     const advice = model.getRetryAdvice({
-      request: { input: "test", tools: [] },
-      error: new Error("persistent error"),
+      request: { input: 'test', tools: [] },
+      error: new Error('persistent error'),
       stream: false,
       attempt: 3,
     });

@@ -15,7 +15,7 @@
 function getAutoUpdater(): any {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    return require("electron-updater");
+    return require('electron-updater');
   } catch {
     return null;
   }
@@ -32,7 +32,7 @@ const autoUpdater: any = updater?.autoUpdater ?? {
   checkForUpdates: () => Promise.resolve(),
 };
 
-import { BrowserWindow, dialog } from "electron";
+import { BrowserWindow, dialog } from 'electron';
 
 autoUpdater.autoDownload = false;
 autoUpdater.autoInstallOnAppQuit = true;
@@ -43,20 +43,20 @@ export interface AutoUpdaterDeps {
 
 export function registerAutoUpdater({ getMainWindow }: AutoUpdaterDeps): void {
   autoUpdater.setFeedURL({
-    provider: "github",
-    repo: "aether",
-    owner: "aether-org", // TODO: update to actual org
+    provider: 'github',
+    repo: 'aether',
+    owner: 'aether-org', // TODO: update to actual org
   });
 
-  autoUpdater.on("update-available", (info: any) => {
+  autoUpdater.on('update-available', (info: any) => {
     const win = getMainWindow();
     if (!win) return;
     void dialog
       .showMessageBox(win, {
-        type: "info",
-        title: "Update Available",
+        type: 'info',
+        title: 'Update Available',
         message: `Version ${info.version} is available. Download now?`,
-        buttons: ["Download", "Later"],
+        buttons: ['Download', 'Later'],
         defaultId: 0,
       })
       .then(({ response }) => {
@@ -66,15 +66,15 @@ export function registerAutoUpdater({ getMainWindow }: AutoUpdaterDeps): void {
       });
   });
 
-  autoUpdater.on("update-downloaded", () => {
+  autoUpdater.on('update-downloaded', () => {
     const win = getMainWindow();
     if (!win) return;
     void dialog
       .showMessageBox(win, {
-        type: "info",
-        title: "Update Ready",
-        message: "Update downloaded. Restart to install?",
-        buttons: ["Restart", "Later"],
+        type: 'info',
+        title: 'Update Ready',
+        message: 'Update downloaded. Restart to install?',
+        buttons: ['Restart', 'Later'],
         defaultId: 0,
       })
       .then(({ response }) => {
@@ -84,14 +84,14 @@ export function registerAutoUpdater({ getMainWindow }: AutoUpdaterDeps): void {
       });
   });
 
-  autoUpdater.on("error", (err: Error) => {
-    console.error("[auto-updater]", err.message);
+  autoUpdater.on('error', (err: Error) => {
+    console.error('[auto-updater]', err.message);
   });
 
   // Check on startup with a delay to let the UI settle
   setTimeout(() => {
     autoUpdater.checkForUpdates().catch((err: unknown) => {
-      console.error("[auto-updater] check failed", err);
+      console.error('[auto-updater] check failed', err);
     });
   }, 5_000);
 }

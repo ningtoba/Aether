@@ -11,14 +11,14 @@ export interface AppSettings extends Record<string, unknown> {
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
-  theme: "dark",
-  language: "en",
-  logLevel: "info",
+  theme: 'dark',
+  language: 'en',
+  logLevel: 'info',
   autoUpdate: true,
   telemetry: false,
-  dataDir: "./data",
+  dataDir: './data',
   port: 8456,
-  host: "127.0.0.1",
+  host: '127.0.0.1',
 };
 
 /** Type-safe configuration manager with defaults */

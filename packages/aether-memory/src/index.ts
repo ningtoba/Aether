@@ -11,10 +11,10 @@
  * @module @aether/memory
  */
 
-export { MemoryStore } from "./store.js";
-export { InMemoryVectorStore, cosineSimilarity } from "./vector.js";
-export type { VectorStore } from "./vector.js";
-export { RAGEngine } from "./rag.js";
+export { MemoryStore } from './store.js';
+export { InMemoryVectorStore, cosineSimilarity } from './vector.js';
+export type { VectorStore } from './vector.js';
+export { RAGEngine } from './rag.js';
 
 export type {
   MemoryConfig,
@@ -25,14 +25,14 @@ export type {
   VectorStoreConfig,
   EmbeddingConfig,
   ChunkingConfig,
-} from "./types.js";
+} from './types.js';
 
 // Scoped memory stores (ported from @aether/memory-old)
-export type { IMemoryStore } from "./IMemoryStore.js";
-export { InMemoryStore } from "./InMemoryStore.js";
-export { EpisodicStore, SemanticStore, TaskStore, ConversationStore } from "./scoped-stores.js";
-export type { IVectorStore } from "./IVectorStore.js";
-export { MemoryVectorStore } from "./MemoryVectorStore.js";
+export type { IMemoryStore } from './IMemoryStore.js';
+export { InMemoryStore } from './InMemoryStore.js';
+export { EpisodicStore, SemanticStore, TaskStore, ConversationStore } from './scoped-stores.js';
+export type { IVectorStore } from './IVectorStore.js';
+export { MemoryVectorStore } from './MemoryVectorStore.js';
 export type {
   MemoryScope,
   MemoryStatus,
@@ -40,4 +40,4 @@ export type {
   ScopedMemoryQuery,
   ScopedMemoryQueryResult,
   IndexedEntry,
-} from "./scoped-types.js";
+} from './scoped-types.js';

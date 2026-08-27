@@ -71,7 +71,12 @@ export class StreamChannel {
   private sequence = 0;
 
   constructor(
-    private onChunk: (chunk: { type: 'stdout' | 'stderr' | 'data' | 'error' | 'done'; data: string | Uint8Array; timestamp: number; sequence: number }) => void,
+    private onChunk: (chunk: {
+      type: 'stdout' | 'stderr' | 'data' | 'error' | 'done';
+      data: string | Uint8Array;
+      timestamp: number;
+      sequence: number;
+    }) => void,
   ) {}
 
   write(chunk: string | Uint8Array, type: 'stdout' | 'stderr' = 'stdout'): void {

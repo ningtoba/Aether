@@ -1,119 +1,119 @@
-import { describe, it, expect } from "vitest";
-import { isValidUrl, isValidPort, isNonEmptyString, isPlainObject } from "./validation.js";
+import { describe, it, expect } from 'vitest';
+import { isValidUrl, isValidPort, isNonEmptyString, isPlainObject } from './validation.js';
 
-describe("isValidUrl", () => {
-  it("should accept https URLs", () => {
-    expect(isValidUrl("https://example.com")).toBe(true);
+describe('isValidUrl', () => {
+  it('should accept https URLs', () => {
+    expect(isValidUrl('https://example.com')).toBe(true);
   });
 
-  it("should accept http URLs", () => {
-    expect(isValidUrl("http://example.com/path?q=1")).toBe(true);
+  it('should accept http URLs', () => {
+    expect(isValidUrl('http://example.com/path?q=1')).toBe(true);
   });
 
-  it("should accept URLs with ports", () => {
-    expect(isValidUrl("http://localhost:3000")).toBe(true);
+  it('should accept URLs with ports', () => {
+    expect(isValidUrl('http://localhost:3000')).toBe(true);
   });
 
-  it("should accept ws URLs", () => {
-    expect(isValidUrl("ws://localhost:8080/ws")).toBe(true);
+  it('should accept ws URLs', () => {
+    expect(isValidUrl('ws://localhost:8080/ws')).toBe(true);
   });
 
-  it("should reject random strings", () => {
-    expect(isValidUrl("not-a-url")).toBe(false);
+  it('should reject random strings', () => {
+    expect(isValidUrl('not-a-url')).toBe(false);
   });
 
-  it("should reject empty string", () => {
-    expect(isValidUrl("")).toBe(false);
+  it('should reject empty string', () => {
+    expect(isValidUrl('')).toBe(false);
   });
 
-  it("should reject numbers passed as strings", () => {
-    expect(isValidUrl("12345")).toBe(false);
+  it('should reject numbers passed as strings', () => {
+    expect(isValidUrl('12345')).toBe(false);
   });
 });
 
-describe("isValidPort", () => {
-  it("should accept port 1", () => {
+describe('isValidPort', () => {
+  it('should accept port 1', () => {
     expect(isValidPort(1)).toBe(true);
   });
 
-  it("should accept port 65535", () => {
+  it('should accept port 65535', () => {
     expect(isValidPort(65535)).toBe(true);
   });
 
-  it("should accept port 3000", () => {
+  it('should accept port 3000', () => {
     expect(isValidPort(3000)).toBe(true);
   });
 
-  it("should reject port 0", () => {
+  it('should reject port 0', () => {
     expect(isValidPort(0)).toBe(false);
   });
 
-  it("should reject port 65536", () => {
+  it('should reject port 65536', () => {
     expect(isValidPort(65536)).toBe(false);
   });
 
-  it("should reject negative ports", () => {
+  it('should reject negative ports', () => {
     expect(isValidPort(-1)).toBe(false);
   });
 
-  it("should reject non-integer values", () => {
+  it('should reject non-integer values', () => {
     expect(isValidPort(3.14)).toBe(false);
   });
 });
 
-describe("isNonEmptyString", () => {
-  it("should return true for non-empty strings", () => {
-    expect(isNonEmptyString("hello")).toBe(true);
+describe('isNonEmptyString', () => {
+  it('should return true for non-empty strings', () => {
+    expect(isNonEmptyString('hello')).toBe(true);
   });
 
-  it("should return false for empty strings", () => {
-    expect(isNonEmptyString("")).toBe(false);
+  it('should return false for empty strings', () => {
+    expect(isNonEmptyString('')).toBe(false);
   });
 
-  it("should return false for numbers", () => {
+  it('should return false for numbers', () => {
     expect(isNonEmptyString(42)).toBe(false);
   });
 
-  it("should return false for null", () => {
+  it('should return false for null', () => {
     expect(isNonEmptyString(null)).toBe(false);
   });
 
-  it("should return false for undefined", () => {
+  it('should return false for undefined', () => {
     expect(isNonEmptyString(undefined)).toBe(false);
   });
 
-  it("should return false for arrays", () => {
+  it('should return false for arrays', () => {
     expect(isNonEmptyString([])).toBe(false);
   });
 
-  it("should return false for objects", () => {
+  it('should return false for objects', () => {
     expect(isNonEmptyString({})).toBe(false);
   });
 });
 
-describe("isPlainObject", () => {
-  it("should return true for plain objects", () => {
+describe('isPlainObject', () => {
+  it('should return true for plain objects', () => {
     expect(isPlainObject({})).toBe(true);
-    expect(isPlainObject({ key: "value" })).toBe(true);
+    expect(isPlainObject({ key: 'value' })).toBe(true);
   });
 
-  it("should return false for null", () => {
+  it('should return false for null', () => {
     expect(isPlainObject(null)).toBe(false);
   });
 
-  it("should return false for arrays", () => {
+  it('should return false for arrays', () => {
     expect(isPlainObject([])).toBe(false);
   });
 
-  it("should return false for strings", () => {
-    expect(isPlainObject("hello")).toBe(false);
+  it('should return false for strings', () => {
+    expect(isPlainObject('hello')).toBe(false);
   });
 
-  it("should return false for numbers", () => {
+  it('should return false for numbers', () => {
     expect(isPlainObject(42)).toBe(false);
   });
 
-  it("should return false for undefined", () => {
+  it('should return false for undefined', () => {
     expect(isPlainObject(undefined)).toBe(false);
   });
 

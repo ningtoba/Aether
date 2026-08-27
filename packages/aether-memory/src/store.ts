@@ -4,7 +4,7 @@ import type {
   MemoryQuery,
   MemorySearchResult,
   MemoryType,
-} from "./types.js";
+} from './types.js';
 
 /**
  * In-memory memory store with optional tag/bucket organisation by MemoryType.
@@ -36,7 +36,7 @@ export class MemoryStore {
    * @param entry - The entry to add (id is auto-generated if empty)
    * @returns The stored entry
    */
-  async add(entry: Omit<MemoryEntry, "id" | "timestamp"> & { id?: string }): Promise<MemoryEntry> {
+  async add(entry: Omit<MemoryEntry, 'id' | 'timestamp'> & { id?: string }): Promise<MemoryEntry> {
     const id = entry.id ?? `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     const stored: MemoryEntry = {
       ...entry,
@@ -145,8 +145,9 @@ export class MemoryStore {
 
     // Enforce max entries (evict oldest first)
     if (this.entries.size > this.config.maxEntries) {
-      const sorted = Array.from(this.entries.entries())
-        .sort(([, a], [, b]) => a.timestamp - b.timestamp);
+      const sorted = Array.from(this.entries.entries()).sort(
+        ([, a], [, b]) => a.timestamp - b.timestamp,
+      );
       const excess = sorted.slice(0, sorted.length - this.config.maxEntries);
       for (const [id] of excess) {
         this.entries.delete(id);

@@ -9,14 +9,14 @@
  *   { getPassword, setPassword, deletePassword, findCredentials }
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // ── Paths ──────────────────────────────────────────────────────────
 
-const KEYCHAIN_DIR = join(homedir(), ".aether");
-const KEYCHAIN_PATH = join(KEYCHAIN_DIR, "keychain.json");
+const KEYCHAIN_DIR = join(homedir(), '.aether');
+const KEYCHAIN_PATH = join(KEYCHAIN_DIR, 'keychain.json');
 
 // ── Store helpers ──────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@ function readStore(): KeychainStore {
     return {};
   }
   try {
-    const raw = readFileSync(KEYCHAIN_PATH, "utf8");
+    const raw = readFileSync(KEYCHAIN_PATH, 'utf8');
     return JSON.parse(raw) as KeychainStore;
   } catch {
     return {};
@@ -44,34 +44,24 @@ function readStore(): KeychainStore {
 
 function writeStore(store: KeychainStore): void {
   ensureDir();
-  writeFileSync(KEYCHAIN_PATH, JSON.stringify(store, null, 2), "utf8");
+  writeFileSync(KEYCHAIN_PATH, JSON.stringify(store, null, 2), 'utf8');
 }
 
 // ── keytar-compatible API ──────────────────────────────────────────
 
-async function getPassword(
-  service: string,
-  account: string,
-): Promise<string | null> {
+async function getPassword(service: string, account: string): Promise<string | null> {
   const store = readStore();
   const key = `${service}:${account}`;
   return store[key] ?? null;
 }
 
-async function setPassword(
-  service: string,
-  account: string,
-  password: string,
-): Promise<void> {
+async function setPassword(service: string, account: string, password: string): Promise<void> {
   const store = readStore();
   store[`${service}:${account}`] = password;
   writeStore(store);
 }
 
-async function deletePassword(
-  service: string,
-  account: string,
-): Promise<boolean> {
+async function deletePassword(service: string, account: string): Promise<boolean> {
   const store = readStore();
   const key = `${service}:${account}`;
   if (!(key in store)) return false;

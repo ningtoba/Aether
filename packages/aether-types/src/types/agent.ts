@@ -1,13 +1,8 @@
 /** Agent identification - branded string type */
-export type AgentId = string & { readonly __brand: "AgentId" };
+export type AgentId = string & { readonly __brand: 'AgentId' };
 
 /** Possible states for an agent's execution lifecycle */
-export type AgentStatus = 
-  | "idle" 
-  | "running" 
-  | "error" 
-  | "completed" 
-  | "paused";
+export type AgentStatus = 'idle' | 'running' | 'error' | 'completed' | 'paused';
 
 /** Configuration for creating or running an agent */
 export interface AgentConfig {
@@ -36,11 +31,7 @@ export interface AgentExecutionState {
 }
 
 /** Agent role within the hierarchical architecture */
-export type AgentRole = 
-  | "executive" 
-  | "architect" 
-  | "worker" 
-  | "verifier";
+export type AgentRole = 'executive' | 'architect' | 'worker' | 'verifier';
 
 /** Agent registration payload for the agent registry */
 export interface AgentRegistration {

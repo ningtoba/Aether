@@ -7,9 +7,9 @@
  * @module @aether/orchestrator
  */
 
-import { MemorySaver } from "@langchain/langgraph";
-import type { BaseCheckpointSaver } from "@langchain/langgraph";
-import type { Checkpoint, CheckpointManager as CheckpointManagerInterface } from "./types.js";
+import { MemorySaver } from '@langchain/langgraph';
+import type { BaseCheckpointSaver } from '@langchain/langgraph';
+import type { Checkpoint, CheckpointManager as CheckpointManagerInterface } from './types.js';
 
 export { MemorySaver };
 export type { BaseCheckpointSaver };
@@ -21,16 +21,16 @@ export type { BaseCheckpointSaver };
  * For persistence, pass a BaseCheckpointSaver instance.
  */
 export function createCheckpointSaver(
-  backend?: "memory" | "sqlite",
+  backend?: 'memory' | 'sqlite',
   _config?: { dbPath?: string },
 ): BaseCheckpointSaver {
   switch (backend) {
-    case "sqlite":
+    case 'sqlite':
       console.warn(
-        "[orchestrator] SQLite checkpoint backend not yet available; falling back to memory",
+        '[orchestrator] SQLite checkpoint backend not yet available; falling back to memory',
       );
       return new MemorySaver();
-    case "memory":
+    case 'memory':
     default:
       return new MemorySaver();
   }
@@ -53,10 +53,7 @@ export class InMemoryCheckpointManager implements CheckpointManagerInterface {
     this.checkpoints.set(checkpoint.executionId, existing);
   }
 
-  async get(
-    executionId: string,
-    checkpointId: string,
-  ): Promise<Checkpoint | undefined> {
+  async get(executionId: string, checkpointId: string): Promise<Checkpoint | undefined> {
     const list = this.checkpoints.get(executionId);
     return list?.find((c) => c.id === checkpointId);
   }

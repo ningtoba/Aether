@@ -1,4 +1,4 @@
-import type { IVectorStore } from "./IVectorStore.js";
+import type { IVectorStore } from './IVectorStore.js';
 
 /**
  * In-memory vector store using brute-force cosine similarity.
@@ -11,18 +11,24 @@ export class MemoryVectorStore implements IVectorStore {
   private vectors = new Map<string, Float64Array>();
   private metadata = new Map<string, Record<string, unknown>>();
 
-  async upsert(entry: { id: string; vector: Float64Array; metadata: Record<string, unknown> }): Promise<void> {
+  async upsert(entry: {
+    id: string;
+    vector: Float64Array;
+    metadata: Record<string, unknown>;
+  }): Promise<void> {
     this.vectors.set(entry.id, entry.vector);
     this.metadata.set(entry.id, entry.metadata);
   }
 
-  async upsertMany(entries: { id: string; vector: Float64Array; metadata: Record<string, unknown> }[]): Promise<void> {
+  async upsertMany(
+    entries: { id: string; vector: Float64Array; metadata: Record<string, unknown> }[],
+  ): Promise<void> {
     for (const e of entries) await this.upsert(e);
   }
 
   async search(
     vector: Float64Array,
-    options?: { limit?: number; minScore?: number }
+    options?: { limit?: number; minScore?: number },
   ): Promise<Array<{ id: string; score: number }>> {
     const limit = options?.limit ?? 10;
     const minScore = options?.minScore ?? 0;
@@ -50,7 +56,10 @@ export class MemoryVectorStore implements IVectorStore {
     for (const [id, meta] of this.metadata) {
       let matches = true;
       for (const [key, value] of Object.entries(filter)) {
-        if (meta[key] !== value) { matches = false; break; }
+        if (meta[key] !== value) {
+          matches = false;
+          break;
+        }
       }
       if (matches) {
         this.vectors.delete(id);
@@ -72,7 +81,9 @@ export class MemoryVectorStore implements IVectorStore {
 }
 
 function cosineSimilarity(a: Float64Array, b: Float64Array): number {
-  let dot = 0, normA = 0, normB = 0;
+  let dot = 0,
+    normA = 0,
+    normB = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     normA += a[i] * a[i];

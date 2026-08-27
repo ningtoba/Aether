@@ -25,10 +25,14 @@ export class EventBus {
     if (!this.listeners.has(event)) this.listeners.set(event, new Set());
     const handlers = this.listeners.get(event)!;
     if (handlers.size >= this.options.maxListeners) {
-      console.warn(`EventBus: max listeners (${this.options.maxListeners}) reached for event "${event}"`);
+      console.warn(
+        `EventBus: max listeners (${this.options.maxListeners}) reached for event "${event}"`,
+      );
     }
     handlers.add(handler as EventHandler);
-    return () => { handlers.delete(handler as EventHandler); };
+    return () => {
+      handlers.delete(handler as EventHandler);
+    };
   }
 
   /** Subscribe to a single occurrence of an event */
@@ -46,11 +50,12 @@ export class EventBus {
     this.onceListeners.delete(event);
 
     if (this.options.asyncDelivery) {
-      await Promise.allSettled(allHandlers.map(h => this.invokeHandler(h, event, data)));
+      await Promise.allSettled(allHandlers.map((h) => this.invokeHandler(h, event, data)));
     } else {
       for (const handler of allHandlers) {
-        await this.invokeHandler(handler, event, data).catch(err => {
-          if (this.options.retryFailed) console.error(`EventBus: handler failed for "${event}":`, err);
+        await this.invokeHandler(handler, event, data).catch((err) => {
+          if (this.options.retryFailed)
+            console.error(`EventBus: handler failed for "${event}":`, err);
           else throw err;
         });
       }
