@@ -31,7 +31,7 @@ aether/
 │   ├── python-venv/          # Python virtual environment management
 │   └── playwright/           # Playwright browser automation
 ├── tsconfig.json             # Root TypeScript configuration (project references)
-└── electron.vite.config.ts   # Electron-vite build configuration
+└── (electron-vite config lives in packages/aether-electron/electron.vite.config.ts)
 ```
 
 ### Package Dependency Flow
@@ -79,9 +79,10 @@ Dependency relationships:
 | **Frontend** | React 19, TailwindCSS 4, Framer Motion, Zustand |
 | **Orchestration** | LangGraph-compatible DAG engine (LangGraph v1) |
 | **LLM Providers** | Anthropic, Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible |
-| **Memory** | In-memory vector store (brute-force cosine), SQLite, Qdrant |
-| **Container** | Docker (sandboxed execution), Dockerode || **Observability** | OpenTelemetry (OTLP), Pino structured logging |
-|| **Testing** | Vitest (580+ tests across 39 test files) |
+| **Memory** | In-memory vector store (brute-force cosine); SQLite/Qdrant backends planned |
+| **Container** | Docker (sandboxed execution), Dockerode |
+| **Observability** | OpenTelemetry (OTLP), Pino structured logging |
+| **Testing** | Vitest (585+ tests across 40 test files) |
 | **CI/CD** | GitHub Actions, electron-builder |
 
 ---
@@ -116,14 +117,17 @@ npm run build
 # Type-check
 npm run typecheck
 
-# Run tests (580+ tests, 39 test files)
+# Run tests (585+ tests, 40 test files)
 npm run test
 
 # Launch Electron app (dev mode)
 npm run dev
 
-# Start backend API server only
+# Start the backend API server (tsx watch, live reload)
 npm run dev:backend
+
+# Start the built backend server (production entrypoint)
+npm run start:backend
 ```
 
 The API server runs on `http://localhost:3001` with health check at `/health`.
@@ -145,8 +149,8 @@ The API server runs on `http://localhost:3001` with health check at `/health`.
 | `@aether/telemetry` | OpenTelemetry tracing (OTLP exporter), Pino structured logging, metrics collection (counters/gauges/histograms) |
 | `@aether/security` | Role-based access control (RBAC) with hierarchical roles, glob-based resource patterns |
 | `@aether/backend` | HTTP/WebSocket server with REST API for agent, provider, and execution management |
-| `@aether/frontend` | React-based admin GUI (Electron renderer) |
-| `aether-electron` | Electron desktop shell with tray, auto-updater, crash reporter |
+| `@aether/frontend` | Placeholder package — the React admin GUI lives in `aether-electron`'s renderer |
+| `aether-electron` | Electron desktop shell + React admin GUI (renderer), tray, auto-updater, crash reporter |
 | `@aether/docker` | Docker sandbox container lifecycle, resource profiles, file injection |
 | `@aether/ts-runtime` | TypeScript runtime sandbox — isolated VM execution via tsx with timeouts and resource limits |
 | `@aether/python-venv` | Python virtual environment management — create, install packages, run scripts |
@@ -201,7 +205,7 @@ Aether is v0.1.0 with the following implemented:
 - **SDK**: AetherAgent wrapping OpenAI Agents SDK, AetherRunner with provider support, ToolRegistry, message conversion
 - **Docker Deployment**: Dockerfile + docker-compose.yml for containerized operation via `docker compose up --build`
 - **CI/CD**: GitHub Actions (lint, type-check, test with sharding, build), electron-builder config (Windows/macOS/Linux)
-- **Testing**: 580+ tests across 39 test files, covering all 17 packages
+- **Testing**: 585+ tests across 40 test files (14 packages; types/frontend/electron carry no test files yet)
 
 ### Latest Iteration — v0.1.1 Security & Cross-Platform Hardening
 
@@ -215,19 +219,33 @@ This iteration closed 10 evidence-backed defects found by three independent audi
 - **Sandbox safety** — `copyFilesToSandbox` writes content via base64 (`printf %s '<b64>' | base64 -d > path`) and rejects path traversal; browser auto-install validates the browser name against an allow-list before running `npx playwright install`.
 - **Server lifecycle** — `stop()` clears its force-close timer and uses `closeIdleConnections()` so in-flight requests are not aborted at shutdown.
 
-Verification: **581 tests passing (was 548) across 39 files, `tsc -b` clean**, plus a dual-adversarial review loop (security + correctness reviewers, two rounds) before commit.
+
+### Latest Iteration — v0.1.2 Deployability, CI & Provider Wire Fixes
+
+This iteration made Aether actually runnable and fixed wire-level provider bugs found by three fresh-scope scouts (Electron layer, SDK/providers/core, docs-vs-code/CI):
+
+- **Production server entrypoint** — `packages/aether-backend/src/main.ts` reads `PORT`/`HOST`/`MAX_BODY_SIZE`, starts the HTTP/WebSocket server, and shuts down gracefully on SIGINT/SIGTERM. `npm run start:backend` runs it; Docker now boots a real server (previously the barrel export exited immediately).
+- **Electron IPC bridge wired** — the backend-bridge IPC handlers (`agents:*`, `providers:*`, `executions:*`, `plugins:*`, `memory:*`) were dead code (never imported); now registered in `app.whenReady`. The renderer's `window.electronAPI` calls no longer reject with "No handler registered".
+- **Quit fixed** — `app.isQuitting` is now set in `before-quit`; previously `app.quit()` was swallowed (window only hid to tray, process could not exit).
+- **CI repaired** — lint dependency `typescript-eslint` declared (lint previously crashed with `ERR_MODULE_NOT_FOUND`; now 0 errors after clearing 25 pre-existing ones + 19 renderer-page dead imports), `tsc -b --noEmit` replaced with `npm run typecheck` (the former fails TS6310 on fresh checkouts), a real coverage job added, and the circular-dep check wired to actually inspect files (`madge` pinned, globstar expansion).
+- **Docker build fixed** — `package-lock.json` no longer excluded from the build context; all 17 workspace manifests copied before `npm ci`; `CMD` points at the production entrypoint.
+- **Electron packaging fixed** — `electron-vite build` added before `electron-builder` in package/release jobs (installers previously shipped empty — `out/` was never produced); `electron-builder` is now a declared devDependency; release workflow migrated from deprecated `create-release@v1` to `gh release`.
+- **Provider wire fixes** — Gemini streaming URL no longer builds `?alt=sse?key=…` (double `?` — the API key was never sent, so authenticated streaming 403'd); `toolChoice: required` is mapped to the valid wire value `required` (was `any`); `getRetryAdvice` now honours the SDK's `{ suggested }` contract and never retries permanent errors; `ProviderRegistry.get()` shares one in-flight initialization and clears a provider whose `initialize()` failed.
+- **Docs made truthful** — README/ARCHITECTURE: dev-command semantics, SQLite/Qdrant backends marked planned (not implemented), `@aether/frontend` labeled a placeholder, test counts corrected.
+
+Verification: **585 tests passing across 40 files, `tsc -b` clean, lint + format checks green**, and a live backend smoke test (`/health`, graceful SIGTERM).
 
 ---
 
 ## Roadmap
 
-Next iterations target production hardening of the control plane:
+Next iterations target the remaining control-plane and correctness work:
 
-- **Authentication & authorization** — the HTTP/WebSocket API is currently unauthenticated on `0.0.0.0:3001`; wire the existing `aether-security` RBAC into backend routes and add per-session auth (API keys/tokens).
-- **Credential storage** — replace the plaintext JSON keychain fallback with the encrypted-file vault (currently dead code) and 0600 permissions; stop persisting raw provider API keys in the renderer (`localStorage`).
-- **WebSocket lifecycle** — aggregate connection-count cap and an idle/partial-frame reaper to bound FD usage by many half-open peers.
-- **Reliability parity** — apply memory-store `defaultTtlMs` at write time, isolate event-bus subscriber failures (per-handler try/catch), and fix stale execution state when a `threadId` is reused.
-- **Cross-platform CI** — add a Windows runner job to exercise the Windows-specific paths (tsx entry, cmd.exe escaping) on every push.
+- **Streaming tool calls** — accumulate tool-call fragments in `completeStream` so streamed tool runs work across all providers (currently the final `done` drops tool calls; multi-turn tool loops also lose `tool_call_id`, causing 400s on on OpenAI-compatible providers).
+- **Credential storage** — the vault's AES-256-GCM fallback is unreachable dead code (the keytar-less branch loads the plaintext JSON store and reports `usingKeychain: true`); make the encrypted-file store reachable with 0600 perms, and stop persisting raw provider API keys in the renderer settings store.
+- **Authentication & authorization** — the HTTP/WebSocket API is unauthenticated on `0.0.0.0:3001`; wire the existing `aether-security` RBAC into routes and add per-session auth.
+- **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.
+- **Reliability parity** — memory-store `defaultTtlMs` at write time, per-subscriber event-bus isolation, Gemini batch embeddings, provider-streaming `tool_call_id` threading.
 
 ---
 

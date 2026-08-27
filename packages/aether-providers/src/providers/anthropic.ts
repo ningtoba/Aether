@@ -108,9 +108,9 @@ export class AnthropicProvider extends ProviderInterface {
       let buffer = '';
       // Accumulate content deltas for building the final response
       let accumulatedContent = '';
-      let accumulatedToolCalls: { id: string; name: string; input: string }[] = [];
-      let responseId = '';
-      let responseModel = request.model;
+      const accumulatedToolCalls: { id: string; name: string; input: string }[] = [];
+      const responseId = '';
+      const responseModel = request.model;
 
       for (;;) {
         const { done, value } = await reader.read();
@@ -259,7 +259,7 @@ export class AnthropicProvider extends ProviderInterface {
     }
 
     if (request.toolChoice) {
-      if (request.toolChoice === 'any') {
+      if (request.toolChoice === 'any' || request.toolChoice === 'required') {
         payload.tool_choice = { type: 'any' };
       } else if (request.toolChoice === 'auto') {
         payload.tool_choice = { type: 'auto' };

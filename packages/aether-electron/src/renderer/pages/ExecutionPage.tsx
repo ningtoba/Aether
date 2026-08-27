@@ -15,19 +15,6 @@ interface NodeExecution {
   output?: unknown;
 }
 
-interface WorkflowState {
-  executionId: string;
-  workflowId: string;
-  currentNode: string | null;
-  nodeHistory: NodeExecution[];
-  data: Record<string, unknown>;
-  status: "pending" | "running" | "completed" | "failed" | "paused" | "cancelled";
-  error?: string;
-  startedAt: string;
-  lastCheckpointAt?: string;
-  version: number;
-}
-
 interface ExecutionSummary {
   executionId: string;
   workflowName: string;
@@ -55,8 +42,6 @@ interface WorkflowEdge {
 }
 
 // ─── Mock Data ─────────────────────────────────────────────────
-
-const MAX_DISPLAY_NODES = 15;
 
 const MOCK_WORKFLOW_NODES: Record<string, WorkflowNode[]> = {
   "wf-code-review": [
@@ -276,15 +261,6 @@ function formatDateTime(iso: string): string {
   });
 }
 
-function formatTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleTimeString("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-}
-
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
   const secs = Math.floor(diff / 1000);
@@ -379,23 +355,6 @@ function getKindIcon(kind: string): string {
   }
 }
 
-function getKindLabel(kind: string): string {
-  switch (kind) {
-    case "agent":
-      return "Agent";
-    case "tool":
-      return "Tool";
-    case "router":
-      return "Router";
-    case "map":
-      return "Map";
-    case "reduce":
-      return "Reduce";
-    default:
-      return kind;
-  }
-}
-
 // ─── Filter Types ──────────────────────────────────────────────
 
 interface ExecutionFilters {
@@ -478,19 +437,6 @@ function ProgressBar({ completed, total }: { completed: number; total: number })
       </div>
       <span className="text-xs text-gray-500 w-10 text-right">{pct}%</span>
     </div>
-  );
-}
-
-function Spinner() {
-  return (
-    <svg className="animate-spin h-3.5 w-3.5 text-emerald-400" viewBox="0 0 24 24" fill="none">
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-      />
-    </svg>
   );
 }
 
@@ -808,7 +754,7 @@ function ExecutionDetail({
         {activeTab === "graph" && (
           <NodeGraph workflowId={execution.workflowId} nodeHistory={nodeHistory} />
         )}
-        {activeTab === "stream" && <LiveStream executionId={execution.executionId} />}
+        {activeTab === "stream" && <LiveStream />}
       </div>
 
       {/* Full state JSON */}
@@ -843,7 +789,7 @@ function ExecutionDetail({
 
 // ─── Live Stream ───────────────────────────────────────────────
 
-function LiveStream({ executionId }: { executionId: string }) {
+function LiveStream() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [logIndex, setLogIndex] = useState(0);
   const [isPaused, setIsPaused] = useState(false);

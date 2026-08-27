@@ -111,8 +111,35 @@ function toProviderTools(tools: ModelRequest['tools']): ProviderToolDefinition[]
 function toProviderToolChoice(toolChoice: string | undefined): CompletionRequest['toolChoice'] {
   if (!toolChoice || toolChoice === 'auto') return 'auto';
   if (toolChoice === 'none') return 'none';
-  if (toolChoice === 'required') return 'any';
+  if (toolChoice === 'required') return 'required';
   return { type: 'function', function: { name: toolChoice } };
+}
+
+/**
+ * Return true for errors that are worth retrying: network/abort failures,
+ * rate limits (429) and 5xx, or errors a provider has explicitly marked
+ * retryable. Auth, bad-request, and model-not-found errors are permanent.
+ */
+function isTransientProviderError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const err = error as {
+    retryable?: boolean;
+    statusCode?: number;
+    name?: string;
+    code?: string;
+  };
+  if (err.retryable === true) return true;
+  if (typeof err.statusCode === 'number') {
+    return err.statusCode === 429 || err.statusCode >= 500;
+  }
+  const name = err.name ?? err.code ?? '';
+  return (
+    name === 'AbortError' ||
+    name === 'TimeoutError' ||
+    name === 'FetchError' ||
+    name === 'ECONNRESET' ||
+    name === 'ETIMEDOUT'
+  );
 }
 
 function toModelResponse(completion: CompletionResponse): ModelResponse {
@@ -215,11 +242,18 @@ export class AetherModel implements Model {
     error: unknown;
     stream: boolean;
     attempt: number;
-  }): { retry?: boolean; retryAfterMs?: number } | undefined {
-    if (_args.error && _args.attempt < 3) {
-      return { retry: true, retryAfterMs: 1000 * Math.pow(2, _args.attempt) };
+  }): { suggested?: boolean; retryAfterMs?: number; reason?: string } | undefined {
+    // The OpenAI Agents SDK's Model interface expects { suggested, retryAfterMs, reason }.
+    // Only recommend retrying transient failures (rate limits, 5xx, network/abort);
+    // authorization/bad-request/model-not-found errors are permanent.
+    if (_args.attempt >= 3 || !isTransientProviderError(_args.error)) {
+      return undefined;
     }
-    return undefined;
+    return {
+      suggested: true,
+      retryAfterMs: 1000 * Math.pow(2, _args.attempt),
+      reason: 'transient provider error',
+    };
   }
 
   private buildRequest(request: ModelRequest, stream: boolean): Partial<CompletionRequest> {

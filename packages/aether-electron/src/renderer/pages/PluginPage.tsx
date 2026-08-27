@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useSettingsStore } from "../stores/settingsStore";
-import { SettingsToggle, SettingsInput, SettingsButton } from "../components/SettingsComponents";
+import { SettingsToggle, SettingsInput } from "../components/SettingsComponents";
 
 // ─── Types ──────────────────────────────────────────────────────────
 

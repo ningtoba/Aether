@@ -25,6 +25,19 @@ function makeProvider(config?: ProviderConfig) {
   return new GeminiProvider(config ?? makeConfig(), registry);
 }
 
+describe('GeminiProvider URL building', () => {
+  it('joins streaming query params and API key with & (no double ?)', () => {
+    const provider = makeProvider(makeConfig({ apiKey: 'KEY123' }));
+    const url = (
+      provider as unknown as {
+        resolveGeminiUrl: (m: string, a?: string, q?: string) => string;
+      }
+    ).resolveGeminiUrl('gemini-test-model', 'streamGenerateContent', 'sse');
+    expect(url).toContain(':streamGenerateContent?alt=sse&key=KEY123');
+    expect(url).not.toContain('?alt=sse?key=');
+  });
+});
+
 function mockFetch(response: Partial<Response>, body?: unknown): void {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok: response.ok ?? true,
@@ -122,6 +135,21 @@ describe('GeminiProvider', () => {
       expect(body.system_instruction).toBeDefined();
       expect(body.system_instruction.parts[0].text).toBe('Be helpful.');
       expect(body.contents[0].role).toBe('user');
+    });
+    it('maps toolChoice required to forced function calling (mode ANY)', async () => {
+      const provider = makeProvider();
+      mockFetch({ ok: true, status: 200 }, {
+        candidates: [{ content: { role: 'model', parts: [{ text: 'ok' }] }, finishReason: 'STOP' }],
+      } as never);
+      await provider.complete({
+        model: 'gemini-test-model',
+        messages: [{ role: 'user', content: 'call a function' }],
+        tools: [{ name: 'get_weather', description: 'weather', inputSchema: {} }],
+        toolChoice: 'required',
+      });
+      const fetchCall = vi.mocked(fetch).mock.calls[0];
+      const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
+      expect(body.tool_config.function_calling_config.mode).toBe('ANY');
     });
 
     it('should handle function call responses', async () => {

@@ -98,17 +98,28 @@ describe('AetherModel', () => {
     expect(mockProvider.complete).toHaveBeenCalled();
   });
 
-  it('should return retry advice for errors', () => {
+  it('should suggest retry for transient provider errors (429/5xx/timeout)', () => {
     const model = new (AetherModel as any)(mockProvider, 'gpt-4o');
     const advice = model.getRetryAdvice({
       request: { input: 'test', tools: [] },
-      error: new Error('rate limit'),
+      error: Object.assign(new Error('rate limit'), { statusCode: 429 }),
       stream: false,
       attempt: 1,
     });
     expect(advice).toBeDefined();
-    expect(advice.retry).toBe(true);
+    expect(advice.suggested).toBe(true);
     expect(advice.retryAfterMs).toBeGreaterThan(0);
+  });
+
+  it('should not suggest retry for permanent errors (400/auth)', () => {
+    const model = new (AetherModel as any)(mockProvider, 'gpt-4o');
+    const advice = model.getRetryAdvice({
+      request: { input: 'test', tools: [] },
+      error: Object.assign(new Error('bad request'), { statusCode: 400 }),
+      stream: false,
+      attempt: 1,
+    });
+    expect(advice).toBeUndefined();
   });
 
   it('should not retry after max attempts', () => {

@@ -24,7 +24,8 @@
     "dev:frontend": "npm run dev -w @aether/frontend",
     "dev:backend": "npm run dev -w @aether/backend",
     "dev:electron": "npm run dev -w @aether/electron",
-    "dev": "npm run dev:backend",
+    "dev": "npm run dev:electron",
+    "start:backend": "npm run start -w @aether/backend",
     "start": "npm run dev:electron"
   },
   "devDependencies": {
@@ -34,8 +35,10 @@
     "@vitest/coverage-v8": "3.2.4",
     "concurrently": "^9.2.1",
     "eslint": "^9.0.0",
+    "madge": "8.0.0",
     "prettier": "^3.5.0",
     "typescript": "^5.9.3",
+    "typescript-eslint": "8.68.0",
     "vitest": "^3.0.0"
   },
   "optionalDependencies": {

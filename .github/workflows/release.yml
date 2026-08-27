@@ -15,11 +15,12 @@ jobs:
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-      release_id: ${{ steps.create_release.outputs.id }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history + tags so release notes cover commits since the
+          # previous tag (a depth-1 checkout would yield near-empty notes).
+          fetch-depth: 0
 
       - name: Get version from tag
         id: get_version
@@ -28,36 +29,31 @@ jobs:
       - name: Generate release notes
         id: release_notes
         run: |
-          # Generate release notes from git log
           PREV_TAG=$(git tag --sort=-version:refname | head -n 2 | tail -n 1 || echo "")
           if [ -n "$PREV_TAG" ]; then
-            NOTES=$(git log --oneline --no-decorate $PREV_TAG..HEAD 2>/dev/null | head -100)
+            NOTES=$(git log --oneline --no-decorate "$PREV_TAG"..HEAD 2>/dev/null | head -100)
           else
             NOTES=$(git log --oneline --no-decorate | head -50)
           fi
-          echo "notes<<EOF" >> "$GITHUB_OUTPUT"
-          echo "$NOTES" >> "$GITHUB_OUTPUT"
-          echo "EOF" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Aether v${{ steps.get_version.outputs.version }}"
+            echo
+            echo "$NOTES"
+            echo
+            echo "### Downloads"
+            echo "- Linux: AppImage, deb"
+            echo "- macOS: DMG"
+            echo "- Windows: NSIS Installer"
+          } > release-notes.md
 
       - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref_name }}
-          release_name: Aether v${{ steps.get_version.outputs.version }}
-          body: |
-            ## Aether v${{ steps.get_version.outputs.version }}
-
-            ${{ steps.release_notes.outputs.notes }}
-
-            ### Downloads
-            - Linux: AppImage (below)
-            - macOS: DMG (below)
-            - Windows: NSIS Installer (below)
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Aether v${{ steps.get_version.outputs.version }}" \
+            --notes-file release-notes.md \
+            ${{ contains(github.ref_name, '-') && '--prerelease' || '' }}
 
   build-linux:
     name: Build Linux
@@ -74,30 +70,23 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      - name: Build Electron bundles
+        run: npm run build -w @aether/electron
+
       - name: Package Linux
         run: npx electron-builder --linux --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload AppImage to Release
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: release/*.AppImage
-          asset_name: Aether-${{ github.ref_name }}-linux-x86_64.AppImage
-          asset_content_type: application/octet-stream
+        run: gh release upload "${{ github.ref_name }}" release/*.AppImage --clobber
 
       - name: Upload .deb to Release
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: release/*.deb
-          asset_name: Aether-${{ github.ref_name }}-linux-amd64.deb
-          asset_content_type: application/octet-stream
+        run: gh release upload "${{ github.ref_name }}" release/*.deb --clobber
 
   build-macos:
     name: Build macOS
@@ -114,6 +103,9 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      - name: Build Electron bundles
+        run: npm run build -w @aether/electron
+
       - name: Package macOS
         run: npx electron-builder --mac --publish=never
         env:
@@ -125,14 +117,9 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Upload DMG to Release
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: release/*.dmg
-          asset_name: Aether-${{ github.ref_name }}-macos-x86_64.dmg
-          asset_content_type: application/octet-stream
+        run: gh release upload "${{ github.ref_name }}" release/*.dmg --clobber
 
   build-windows:
     name: Build Windows
@@ -149,17 +136,15 @@ jobs:
       - run: npm ci
       - run: npm run build
 
+      - name: Build Electron bundles
+        run: npm run build -w @aether/electron
+
       - name: Package Windows
         run: npx electron-builder --win --publish=never
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload NSIS Installer to Release
-        uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: release/*.exe
-          asset_name: Aether-${{ github.ref_name }}-windows-x86_64.exe
-          asset_content_type: application/octet-stream
+        run: gh release upload "${{ github.ref_name }}" release/*.exe --clobber

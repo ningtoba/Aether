@@ -103,7 +103,12 @@ export interface CompletionRequest {
   stop?: string[];
   stream?: boolean;
   tools?: ToolDefinition[];
-  toolChoice?: 'auto' | 'any' | 'none' | { type: 'function'; function: { name: string } };
+  toolChoice?:
+    | 'auto'
+    | 'any'
+    | 'required'
+    | 'none'
+    | { type: 'function'; function: { name: string } };
   jsonMode?: boolean;
   reasoningEffort?: 'low' | 'medium' | 'high';
   /** Provider-specific options passed through */

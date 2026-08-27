@@ -11,10 +11,9 @@
  * TypeScript happy when the package isn't installed in dev environments.
  */
 
-// eslint-disable-next-line @typescript-eslint/no-require-imports
 function getAutoUpdater(): any {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     return require('electron-updater');
   } catch {
     return null;

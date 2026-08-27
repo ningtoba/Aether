@@ -14,12 +14,6 @@ interface VectorStoreInfo {
   indexSizeKB: number;
 }
 
-interface EmbeddingConfig {
-  model: string;
-  dimension: number;
-  provider: string;
-}
-
 interface RAGConfig {
   chunkSize: number;
   chunkOverlap: number;
@@ -53,12 +47,6 @@ const MOCK_VECTOR_INFO: VectorStoreInfo = {
   dimensionCount: 1536,
   documentCount: 1_247,
   indexSizeKB: 8_420,
-};
-
-const MOCK_EMBEDDING_CONFIG: EmbeddingConfig = {
-  model: "text-embedding-3-small",
-  dimension: 1536,
-  provider: "openai",
 };
 
 const MOCK_RAG_CONFIG_INITIAL: RAGConfig = {

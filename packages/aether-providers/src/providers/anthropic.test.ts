@@ -129,6 +129,30 @@ describe('AnthropicProvider', () => {
       expect(body.messages).toHaveLength(1);
       expect(body.messages[0].role).toBe('user');
     });
+    it('maps toolChoice required to forced tool use ({ type: "any" })', async () => {
+      const provider = makeProvider();
+      mockFetch(
+        { ok: true, status: 200 },
+        {
+          id: 'msg_1',
+          type: 'message',
+          role: 'assistant',
+          model: 'claude-sonnet-4-20250514',
+          content: [{ type: 'text', text: 'ok' }],
+          stop_reason: 'end_turn',
+          usage: { input_tokens: 1, output_tokens: 1 },
+        },
+      );
+      await provider.complete({
+        model: 'claude-sonnet-4-20250514',
+        messages: [{ role: 'user', content: 'call a function' }],
+        tools: [{ name: 'get_weather', description: 'weather', inputSchema: {} }],
+        toolChoice: 'required',
+      });
+      const fetchCall = vi.mocked(fetch).mock.calls[0];
+      const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
+      expect(body.tool_choice).toEqual({ type: 'any' });
+    });
 
     it('should handle tool_use responses', async () => {
       const provider = makeProvider();

@@ -265,7 +265,7 @@ export class WebSocketManager {
 
   /** Decode and dispatch every complete frame currently buffered for a socket. */
   private processFrames(client: WSClient, socket: Duplex): void {
-    let buf = this.rx.get(socket);
+    const buf = this.rx.get(socket);
     if (!buf || buf.length === 0) return;
 
     let offset = 0;

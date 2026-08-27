@@ -385,8 +385,6 @@ interface ProviderCardProps {
 
 function ProviderCard({ entry, onEdit, onToggle, onDelete, onHealthCheck }: ProviderCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const isConnected = entry.status === "connected";
-
   return (
     <div
       className={`bg-[#14141a] border rounded-xl transition-all ${

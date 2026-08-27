@@ -7,7 +7,6 @@ import {
   SettingsInput,
   SettingsSlider,
   SettingsButton,
-  SettingsTagGroup,
   SettingsKeyValueEditor,
   type KeyValuePair,
 } from "../components/SettingsComponents";
@@ -16,8 +15,6 @@ import { useSettingsStore } from "../stores/settingsStore";
 // ─── Type helpers ──────────────────────────────────────────────
 
 type ChunkingStrategy = "fixed" | "sentence" | "paragraph" | "semantic";
-type BackoffType = "fixed" | "exponential" | "linear";
-type NetworkMode = "bridge" | "host" | "none";
 
 // ─── Option tables ─────────────────────────────────────────────
 
@@ -121,27 +118,6 @@ const UPDATE_CHANNEL_OPTIONS = [
   { value: "beta", label: "Beta" },
   { value: "dev", label: "Dev" },
 ];
-
-const BACKOFF_OPTIONS = [
-  { value: "exponential", label: "Exponential" },
-  { value: "linear", label: "Linear" },
-  { value: "fixed", label: "Fixed" },
-];
-
-const LOG_LEVEL_OPTIONS = [
-  { value: "debug", label: "Debug" },
-  { value: "info", label: "Info" },
-  { value: "warn", label: "Warning" },
-  { value: "error", label: "Error" },
-];
-
-const NETWORK_OPTIONS = [
-  { value: "bridge", label: "Bridge" },
-  { value: "host", label: "Host" },
-  { value: "none", label: "None" },
-];
-
-const PROVIDER_TAGS = ["openai", "anthropic", "ollama", "google", "mistral", "cohere", "deepseek", "xai"];
 
 // ─── Sub-components ────────────────────────────────────────────
 

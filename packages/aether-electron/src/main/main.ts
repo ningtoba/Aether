@@ -3,6 +3,7 @@ import path from 'node:path';
 import { registerAutoUpdater } from './auto-updater';
 import { registerCrashReporter } from './crash-reporter';
 import { createTray, destroyTray } from './tray';
+import { registerIpcHandlers as registerBackendIpcHandlers } from './ipc-handlers';
 import { IPC_CHANNELS, type SystemInfo } from '../shared/ipc-protocol';
 
 /* ─── Constants ──────────────────────────────────────────────────────── */
@@ -128,6 +129,11 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.on(IPC_CHANNELS.OPEN_EXTERNAL, (_event, url: string) => {
+    // Only hand trusted schemes to the OS (https/http/mailto); arbitrary
+    // schemes (file:, custom handlers) could launch local applications.
+    if (!/^(https?|mailto):/i.test(url)) {
+      return;
+    }
     import('electron').then(({ shell }) => {
       shell.openExternal(url);
     });
@@ -202,6 +208,8 @@ if (!gotTheLock) {
 app.whenReady().then(() => {
   /* Register all IPC handlers */
   registerIpcHandlers();
+  /* Backend-bridge IPC handlers (agents/providers/executions/plugins/memory) */
+  registerBackendIpcHandlers();
 
   /* Register sub-modules */
   registerAutoUpdater({ getMainWindow });
@@ -231,5 +239,8 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  // Let the window close handler know a real quit is in progress, otherwise
+  // it preventDefaults every close and the app only hides to the tray.
+  (app as any).isQuitting = true;
   destroyTray();
 });

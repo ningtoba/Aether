@@ -12,7 +12,7 @@ import {
 import type { TelemetryConfig } from './types.js';
 
 // Mock @opentelemetry/api
-let mockGetSpanImpl: () => any = () => ({
+const mockGetSpanImpl: () => any = () => ({
   end: vi.fn(),
   setStatus: vi.fn(),
   setAttribute: vi.fn(),

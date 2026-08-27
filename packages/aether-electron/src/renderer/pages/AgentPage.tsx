@@ -403,7 +403,6 @@ function AgentFormView({
     [],
   );
 
-  const toolIds = new Set(config.tools.filter((t) => t.enabled).map((t) => t.name));
   const handoffCandidates = allAgentNames.filter((n) => n !== config.name);
 
   const handleToolToggle = useCallback(
@@ -680,13 +679,11 @@ function AgentFormView({
 
 function AgentDetailView({
   agent,
-  allAgents,
   onEdit,
   onBack,
   onToggleTool,
 }: {
   agent: MockAgent;
-  allAgents: MockAgent[];
   onEdit: () => void;
   onBack: () => void;
   onToggleTool: (agentId: string, toolName: string, enabled: boolean) => void;
@@ -1005,7 +1002,6 @@ export function AgentPage() {
     return (
       <AgentDetailView
         agent={selectedAgent}
-        allAgents={agents}
         onEdit={handleEdit}
         onBack={() => {
           setView("list");

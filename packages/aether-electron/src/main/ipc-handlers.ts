@@ -5,27 +5,10 @@
  * Each handler delegates to the backend-bridge module.
  */
 
-import { ipcMain, BrowserWindow } from 'electron';
+import { ipcMain } from 'electron';
 import * as bridge from './backend-bridge.js';
 
 export function registerIpcHandlers(): void {
-  // ── System Info ────────────────────────────────────────────────
-
-  ipcMain.handle('system:health', async (): Promise<{ status: string; version: string }> => {
-    const health = bridge.getSystemHealth();
-    return {
-      status: health.status,
-      version: health.version,
-    };
-  });
-
-  ipcMain.handle('system:platform', () => {
-    return {
-      platform: process.platform,
-      arch: process.arch,
-    };
-  });
-
   // ── Backend Health ─────────────────────────────────────────────
 
   ipcMain.handle('backend:health', async () => {
@@ -188,24 +171,5 @@ export function registerIpcHandlers(): void {
   ipcMain.handle('memory:clear', async (_event, type?: string) => {
     bridge.clearMemory(type);
     return { success: true };
-  });
-
-  // ── Window Controls ────────────────────────────────────────────
-
-  ipcMain.on('window:minimize', (event: Electron.IpcMainEvent) => {
-    BrowserWindow.fromWebContents(event.sender)?.minimize();
-  });
-
-  ipcMain.on('window:maximize', (event: Electron.IpcMainEvent) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (win?.isMaximized()) {
-      win.unmaximize();
-    } else {
-      win?.maximize();
-    }
-  });
-
-  ipcMain.on('window:close', (event: Electron.IpcMainEvent) => {
-    BrowserWindow.fromWebContents(event.sender)?.close();
   });
 }

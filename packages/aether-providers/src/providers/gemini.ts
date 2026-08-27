@@ -46,12 +46,24 @@ export class GeminiProvider extends ProviderInterface {
   /**
    * Build URL with API key as query parameter.
    * Gemini uses: https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key=...
+   * `actionQuery` (e.g. 'sse') is joined with the key via '&' so the two
+   * query parameters never collide into a malformed double-'?' URL.
    */
-  protected resolveGeminiUrl(model: string, action: string = 'generateContent'): string {
+  protected resolveGeminiUrl(
+    model: string,
+    action: string = 'generateContent',
+    actionQuery: string = '',
+  ): string {
     const base = this.config.baseUrl ?? 'https://generativelanguage.googleapis.com/v1beta';
     const cleanBase = base.replace(/\/+$/, '');
-    const key = this.config.apiKey ? `?key=${encodeURIComponent(this.config.apiKey)}` : '';
-    return `${cleanBase}/models/${encodeURIComponent(model)}:${action}${key}`;
+    const params = [
+      actionQuery ? `alt=${actionQuery}` : '',
+      this.config.apiKey ? `key=${encodeURIComponent(this.config.apiKey)}` : '',
+    ]
+      .filter(Boolean)
+      .join('&');
+    const sep = params ? '?' : '';
+    return `${cleanBase}/models/${encodeURIComponent(model)}:${action}${sep}${params}`;
   }
 
   // ── Core completions ────────────────────────────────────────────────
@@ -88,7 +100,7 @@ export class GeminiProvider extends ProviderInterface {
 
     try {
       // Gemini streaming uses SSE via the same endpoint with alt=sse
-      const url = this.resolveGeminiUrl(request.model, 'streamGenerateContent?alt=sse');
+      const url = this.resolveGeminiUrl(request.model, 'streamGenerateContent', 'sse');
       const res = await fetch(url, {
         method: 'POST',
         headers: this.buildHeaders(),
@@ -287,7 +299,7 @@ export class GeminiProvider extends ProviderInterface {
         payload.tool_config = { function_calling_config: { mode: 'NONE' } };
       } else if (request.toolChoice === 'auto') {
         payload.tool_config = { function_calling_config: { mode: 'AUTO' } };
-      } else if (request.toolChoice === 'any') {
+      } else if (request.toolChoice === 'any' || request.toolChoice === 'required') {
         payload.tool_config = { function_calling_config: { mode: 'ANY' } };
       } else if (typeof request.toolChoice === 'object' && request.toolChoice.function) {
         payload.tool_config = {

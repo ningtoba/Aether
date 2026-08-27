@@ -248,7 +248,7 @@ Admin GUI / Electron (display)
 
 ### Execution Flow (detailed)
 
-1. **API Layer** receives agent execution request (`POST /api/execute`), RBAC check via `aether-security`
+1. **API Layer** receives an agent execution request (`POST /api/executions`). Authentication/RBAC is planned, not yet implemented (see Security Model)
 2. **Orchestrator** resolves orchestration mode from workflow definition and agent configs
 3. **Provider** makes LLM calls with configured model (chat, stream, or embeddings)
 4. **Tool Execution** runs any tool calls the LLM generates (Docker sandbox or local)
@@ -338,12 +338,15 @@ Key configuration domains:
 
 ## Security Model
 
+Current state (honest):
+
 - **Sandboxed execution** — Tools run in Docker containers with resource limits
-- **API authentication** — All endpoints require API key or JWT
-- **Provider key isolation** — LLM API keys stored in encrypted vault, never leaked to sandboxes
-- **Path allow-listing** — File system tools only access explicitly allowed paths
-- **Rate limiting** — Per-API-key request throttling
-- **RBAC** — Role-based access control with 5 built-in roles
+- **WebSocket hardening** — RFC 6455 frame reassembly, length/memory bounds, masked-frame enforcement, Origin allow-list (see README v0.1.1)
+- **Request body limits** — 1 MB default, configurable `MAX_BODY_SIZE`, enforced for Content-Length and chunked bodies
+- **RBAC** — `aether-security` provides role-based access control with 5 built-in roles, but it is **not yet wired** into the HTTP API
+- **Provider key isolation** — vault exists (`keytar` → plaintext JSON fallback); the AES-256-GCM file store is **not yet reachable** (roadmap)
+
+Planned (not yet implemented): per-request API authentication (JWT/API keys), per-API-key rate limiting, path allow-listing enforcement, encrypted provider-key storage. **Do not deploy the API on an untrusted network — it is unauthenticated.**
 
 ---
 
@@ -383,8 +386,8 @@ services:
       - ./data:/app/data
       - /var/run/docker.sock:/var/run/docker.sock  # for sandbox execution
     environment:
-      - AETHER_PORT=3001
-      - AETHER_HOST=0.0.0.0
+      - PORT=3001
+      - HOST=0.0.0.0
     restart: unless-stopped
 ```
 
@@ -400,16 +403,16 @@ The service starts on port 3001 with the health check endpoint at `/health`.
 
 The Docker image includes:
 - All 17 workspace packages compiled via `tsc -b`
-- The backend API server as the entry point
-- Volume mounts for persistent data (config, memory, venvs)
-- Optional Docker socket mount for sandbox container execution
-- Non-root user for security
+- The backend API server as the entry point (`packages/aether-backend/dist/main.js`, reads `PORT`/`HOST`)
+- `dumb-init` for proper signal handling
+
+Not yet included (roadmap): persistent volume mounts, optional Docker socket mounting, a non-root runtime user.
 
 ---
 
 ## Testing
 
-The project uses Vitest with **520+ test cases across 35 test files**:
+The project uses Vitest with **585 test cases across 40 test files**:
 
 | Package | Tests | Coverage |
 |---------|-------|----------|

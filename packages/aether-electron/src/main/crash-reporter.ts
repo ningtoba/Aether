@@ -6,7 +6,7 @@
  */
 
 import { app } from 'electron';
-import { writeFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, existsSync, readFileSync, rmSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserWindow } from 'electron';
 
@@ -59,9 +59,12 @@ export function logCrash(report: {
     const entry = JSON.stringify(report) + '\n';
     const logPath = getLogPath();
 
-    // Rotate log if too large
+    // Rotate log if too large: rename the full file to .old (atomically, and
+    // the active log then starts clean) instead of appending to a still-
+    // oversized file after copying it.
     if (existsSync(logPath) && readFileSync(logPath).length > MAX_LOG_SIZE) {
-      writeFileSync(logPath + '.old', readFileSync(logPath));
+      rmSync(logPath + '.old', { force: true });
+      renameSync(logPath, logPath + '.old');
     }
 
     writeFileSync(logPath, entry, { flag: 'a' });

@@ -28,6 +28,8 @@ export interface RegisteredProvider {
   ctor: ProviderConstructor;
   /** Extra constructor args passed through */
   args: unknown[];
+  /** In-flight initialize() so concurrent get()s share one initialization */
+  initPromise?: Promise<void>;
 }
 
 /**
@@ -184,10 +186,19 @@ export class ProviderRegistry {
 
     if (!entry.instance) {
       entry.instance = new entry.ctor(entry.config, this.registry, ...entry.args);
-      await entry.instance.initialize();
     }
+    if (!entry.initPromise) {
+      entry.initPromise = entry.instance.initialize().catch((err: unknown) => {
+        // A provider whose initialization failed must not stay cached as a
+        // "ready" instance; clear it so the next get() retries fresh.
+        entry.instance = null;
+        entry.initPromise = undefined;
+        throw err;
+      });
+    }
+    await entry.initPromise;
 
-    return entry.instance;
+    return entry.instance as ProviderInterface;
   }
 
   /**

@@ -24,6 +24,8 @@ COPY packages/docker/package.json packages/docker/package.json
 COPY packages/playwright/package.json packages/playwright/package.json
 COPY packages/python-venv/package.json packages/python-venv/package.json
 COPY packages/ts-runtime/package.json packages/ts-runtime/package.json
+COPY packages/aether-electron/package.json packages/aether-electron/package.json
+COPY packages/aether-frontend/package.json packages/aether-frontend/package.json
 
 # Install ALL dependencies (including devDependencies for build)
 RUN npm ci
@@ -63,5 +65,5 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
 # Use dumb-init to handle signals properly
 ENTRYPOINT ["dumb-init", "--"]
 
-# Start the backend server
-CMD ["node", "packages/aether-backend/dist/index.js"]
+# Start the backend server (production entrypoint, see packages/aether-backend/src/main.ts)
+CMD ["node", "packages/aether-backend/dist/main.js"]

@@ -7,7 +7,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { Readable } from 'node:stream';
 import type { ToolDef, ToolParams, ToolOutput, ToolChunk, StreamCallback } from './types.js';
 
-export interface ShellResult extends ToolOutput {}
+export type ShellResult = ToolOutput;
 
 /**
  * Execute a shell command locally.

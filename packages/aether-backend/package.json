@@ -16,7 +16,8 @@
   ],
   "scripts": {
     "build": "tsc",
-    "dev": "tsc --watch",
+    "start": "node dist/main.js",
+    "dev": "tsx watch src/main.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -26,6 +27,7 @@
     "@aether/core": "*"
   },
   "devDependencies": {
+    "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "@types/node": "^22.0.0",
     "vitest": "^3.0.0"
