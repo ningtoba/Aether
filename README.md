@@ -248,11 +248,22 @@ Verification: **590 tests passing (was 585) across 40 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.4 Streamed Tool/Text Completion
+
+Streamed runs now produce a correct final response. Previously `completeStream` dropped tool-call fragments and the trailing `done` was empty (OpenAI-family even `return`ed on `data: [DONE]` before emitting any `done`), so streamed tool runs and consolidated streamed text came back empty to the SDK.
+
+- **OpenAI family** (OpenAI-compatible, vLLM, OpenRouter, Ollama, llama.cpp): SSE chunks now fold into a per-stream accumulator — text deltas join into `content`, `tool_calls` fragments accumulate by `index` (id/name set on first sight, `arguments` concatenated), and exactly one final `done` carries the assembled `CompletionResponse` (content + parsed tool calls + `finishReason`) after `[DONE]` or stream end. llamacpp's non-chat `completions` endpoint streams `choices[0].text` and is folded too.
+- **Anthropic**: capture id/model from `message_start`, stop emitting the empty `message_delta` done, accumulate text + `input_json_delta` fragments by content-block index, and emit one `done` built from the accumulators with the correct `stop_reason` mapping.
+- Superseded per-fragment parsers removed from the OpenAI family; mid-stream provider `error` events now surface and terminate the stream instead of becoming a success-looking `done`; discriminating stream tests added for the OpenAI family and Anthropic (and the sequential tool-loop wire tests from v0.1.3 still pass).
+
+Verification: **592 tests passing (was 590) across 40 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:
 
-- **Streaming tool calls** — accumulate tool-call fragments and final text in `completeStream` so **streamed** tool runs work across all providers (the final `done` event currently drops accumulated tool calls/text). Sequential tool loops were fixed in v0.1.3 (`tool_call_id` now threaded through every provider's serializer).
 - **Credential storage** — the vault's AES-256-GCM fallback is unreachable dead code (the keytar-less branch loads the plaintext JSON store and reports `usingKeychain: true`); make the encrypted-file store reachable with 0600 perms, and stop persisting raw provider API keys in the renderer settings store.
 - **Authentication & authorization** — the HTTP/WebSocket API is unauthenticated on `0.0.0.0:3001`; wire the existing `aether-security` RBAC into routes and add per-session auth.
 - **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.

@@ -24,6 +24,31 @@ import { ModelCapabilityRegistry } from '../model-capabilities.js';
  * This implementation extends OpenAI-compatible patterns with these
  * OpenRouter-specific customizations.
  */
+/** Per-stream accumulation state for folding SSE fragments into a response. */
+interface StreamAccumulator {
+  id: string;
+  model: string;
+  contentParts: string[];
+  toolCalls: Map<number, { id: string; name: string; input: string }>;
+  usage: { promptTokens: number; completionTokens: number; totalTokens: number };
+  finishReason: CompletionResponse['finishReason'];
+}
+
+/** Extract text from a streaming `content` field (string or content-parts array). */
+function extractStreamText(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) =>
+        part && typeof part === 'object' && (part as { type?: string }).type === 'text'
+          ? String((part as { text?: unknown }).text ?? '')
+          : '',
+      )
+      .join('');
+  }
+  return '';
+}
+
 export class OpenRouterProvider extends ProviderInterface {
   constructor(
     config: ProviderConfig,
@@ -90,6 +115,19 @@ export class OpenRouterProvider extends ProviderInterface {
 
       const decoder = new TextDecoder();
       let buffer = '';
+      // The SSE stream only ever delivers fragments; fold them into an
+      // accumulator so the final `done` carries the complete text and the
+      // assembled tool calls.
+      const acc: StreamAccumulator = {
+        id: '',
+        model: request.model,
+        contentParts: [],
+        toolCalls: new Map<number, { id: string; name: string; input: string }>(),
+        usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+        finishReason: 'stop',
+      };
+
+      let streamEnded = false;
 
       for (;;) {
         const { done, value } = await reader.read();
@@ -103,21 +141,29 @@ export class OpenRouterProvider extends ProviderInterface {
           const trimmed = line.trim();
           if (!trimmed || trimmed.startsWith(':')) continue;
 
-          if (trimmed === 'data: [DONE]') return;
+          if (trimmed === 'data: [DONE]') {
+            streamEnded = true;
+            break;
+          }
 
           if (trimmed.startsWith('data: ')) {
             try {
               const data = JSON.parse(trimmed.slice(6));
-              const parsed = this.parseStreamChunk(data);
-              if (parsed) yield parsed;
+              const event = this.accumulateOpenAIChunk(data, acc);
+              if (event) {
+                yield event;
+                // A mid-stream error ends the stream; no trailing done.
+                if (event.type === 'error') return;
+              }
             } catch {
               // Malformed chunk — skip
             }
           }
         }
+        if (streamEnded) break;
       }
 
-      yield { type: 'done', response: await this.buildEmptyResponse(request.model) };
+      yield { type: 'done', response: this.buildAccumulatedResponse(acc) };
     } finally {
       clearTimeout(timeout);
     }
@@ -330,55 +376,94 @@ export class OpenRouterProvider extends ProviderInterface {
     };
   }
 
-  protected parseStreamChunk(data: any): StreamEvent | null {
+  /**
+   * Fold one SSE chat-completions chunk into the stream accumulator. Content
+   * text accumulates; tool_calls accumulate per `index` (id/name set when
+   * first seen, `arguments` fragments concatenated). Returns an event for
+   * live streaming; the final `done` is built from the accumulator.
+   */
+  protected accumulateOpenAIChunk(data: any, acc: StreamAccumulator): StreamEvent | null {
+    // Provider errors delivered as SSE chunks ({"error":{...}}) after the 200
+    // stream starts must surface as error events, not be swallowed and turned
+    // into a success-looking done.
+    if (data?.error) {
+      return {
+        type: 'error',
+        error: new ProviderError(
+          ProviderErrorCode.Internal,
+          String(data.error?.message ?? 'Unknown OpenAI-compatible stream error'),
+          0,
+          false,
+        ),
+      };
+    }
+
     const choice = data.choices?.[0];
 
     if (choice?.finish_reason) {
-      return {
-        type: 'done',
-        response: {
-          id: data.id ?? '',
-          model: data.model ?? '',
-          content: null,
-          usage: {
-            promptTokens: data.usage?.prompt_tokens ?? 0,
-            completionTokens: data.usage?.completion_tokens ?? 0,
-            totalTokens: data.usage?.total_tokens ?? 0,
-          },
-          finishReason: this.mapFinishReason(choice.finish_reason),
-          raw: data,
-        },
+      acc.id = data.id ?? acc.id;
+      acc.model = data.model ?? acc.model;
+      acc.usage = {
+        promptTokens: data.usage?.prompt_tokens ?? 0,
+        completionTokens: data.usage?.completion_tokens ?? 0,
+        totalTokens: data.usage?.total_tokens ?? 0,
       };
+      acc.finishReason = this.mapFinishReason(choice.finish_reason);
+      return null;
     }
 
     const delta = choice?.delta ?? {};
 
-    if (delta.tool_calls) {
-      const tc = delta.tool_calls[0];
-      if (tc?.function?.name) {
-        return {
-          type: 'tool_call_delta',
-          id: tc.id ?? '',
-          name: tc.function.name,
-          input: tc.function.arguments ?? '',
-        };
+    if (Array.isArray(delta.tool_calls)) {
+      for (const tc of delta.tool_calls) {
+        const index = tc?.index ?? 0;
+        const entry = acc.toolCalls.get(index) ?? { id: '', name: '', input: '' };
+        if (tc?.id) entry.id = tc.id;
+        if (tc?.function?.name) entry.name = tc.function.name;
+        if (typeof tc?.function?.arguments === 'string') entry.input += tc.function.arguments;
+        acc.toolCalls.set(index, entry);
       }
+      const first = delta.tool_calls[0];
+      if (first) {
+        const entry = acc.toolCalls.get(first.index ?? 0);
+        if (entry) {
+          return { type: 'tool_call_delta', id: entry.id, name: entry.name, input: entry.input };
+        }
+      }
+      return null;
     }
 
-    if (delta.content) {
-      return { type: 'delta', content: delta.content };
+    const text = extractStreamText(delta.content);
+    if (text.length > 0) {
+      acc.contentParts.push(text);
+      return { type: 'delta', content: text };
     }
 
     return null;
   }
 
-  protected async buildEmptyResponse(model: string): Promise<CompletionResponse> {
+  /** Build the final response for a streamed run from accumulated fragments. */
+  protected buildAccumulatedResponse(acc: StreamAccumulator): CompletionResponse {
+    const toolCalls = [...acc.toolCalls.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([, tc]) => ({
+        id: tc.id,
+        name: tc.name || 'unknown',
+        input: (() => {
+          try {
+            return JSON.parse(tc.input || '{}');
+          } catch {
+            return {};
+          }
+        })(),
+      }));
     return {
-      id: '',
-      model,
-      content: null,
-      usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-      finishReason: 'stop',
+      id: acc.id,
+      model: acc.model,
+      content: acc.contentParts.join('') || null,
+      toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+      usage: acc.usage,
+      finishReason: toolCalls.length > 0 ? 'tool_calls' : acc.finishReason,
     };
   }
 

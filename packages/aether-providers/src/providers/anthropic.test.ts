@@ -291,11 +291,14 @@ describe('AnthropicProvider', () => {
         events.push(event);
       }
 
-      expect(events.length).toBeGreaterThanOrEqual(2);
-      // First event should be tool_call_delta from content_block_start
-      // or from the partial JSON delta
-      const toolDeltas = events.filter((e) => e.type === 'tool_call_delta');
-      expect(toolDeltas.length).toBeGreaterThanOrEqual(1);
+      // The assembled tool call arrives in the final done event.
+      const done = events.find((e) => e.type === 'done');
+      expect(done).toBeDefined();
+      expect(done.response.content).toBeNull();
+      expect(done.response.toolCalls).toEqual([
+        { id: 'toolu_1', name: 'get_weather', input: { location: 'SF' } },
+      ]);
+      expect(done.response.finishReason).toBe('tool_calls');
     });
   });
 
@@ -417,5 +420,64 @@ describe('AnthropicProvider tool-loop serialization', () => {
       tool_use_id: 'call_9',
       content: '"sunny"',
     });
+  });
+});
+describe('AnthropicProvider streamed tool calls', () => {
+  it('assembles streamed tool_use fragments into the final done event', async () => {
+    const provider = makeProvider();
+    const sse = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`;
+    const chunks = [
+      `event: message_start\n${sse({ type: 'message_start', message: { id: 'msg_1', model: 'claude-x' } })}`,
+      `event: content_block_start\n${sse({ type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'toolu_1', name: 'get_weather', input: {} } })}`,
+      `event: content_block_delta\n${sse({ type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"city":"SF"}' } })}`,
+      `event: content_block_delta\n${sse({ type: 'content_block_delta', index: 1, delta: { type: 'text_delta', text: 'done' } })}`,
+      `event: message_delta\n${sse({ type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 7 } })}`,
+      `event: message_stop\n${sse({ type: 'message_stop' })}`,
+    ];
+    mockFetchStream(chunks);
+
+    const events: any[] = [];
+    for await (const event of provider.completeStream({
+      model: 'claude-x',
+      messages: [{ role: 'user', content: 'weather?' }],
+    })) {
+      events.push(event);
+    }
+
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done.response.id).toBe('msg_1');
+    expect(done.response.content).toBe('done');
+    expect(done.response.toolCalls).toEqual([
+      { id: 'toolu_1', name: 'get_weather', input: { city: 'SF' } },
+    ]);
+    expect(done.response.finishReason).toBe('tool_calls');
+  });
+});
+describe('AnthropicProvider mid-stream errors', () => {
+  it('surfaces a provider error event instead of a success-looking done', async () => {
+    const provider = makeProvider();
+    const sse = (obj: unknown) => `data: ${JSON.stringify(obj)}\n\n`;
+    const chunks = [
+      `event: message_start\n${sse({ type: 'message_start', message: { id: 'msg_1', model: 'claude-x' } })}`,
+      `event: content_block_delta\n${sse({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'partial ' } })}`,
+      `event: error\n${sse({ type: 'error', error: { type: 'overloaded_error', message: 'overloaded' } })}`,
+      `event: message_stop\n${sse({ type: 'message_stop' })}`,
+    ];
+    mockFetchStream(chunks);
+
+    const events: any[] = [];
+    for await (const event of provider.completeStream({
+      model: 'claude-x',
+      messages: [{ role: 'user', content: 'hi' }],
+    })) {
+      events.push(event);
+    }
+
+    const err = events.find((e) => e.type === 'error');
+    expect(err).toBeDefined();
+    expect(err.error.message).toContain('overloaded');
+    // After an error the stream must NOT continue to a success-looking done.
+    expect(events.some((e) => e.type === 'done')).toBe(false);
   });
 });

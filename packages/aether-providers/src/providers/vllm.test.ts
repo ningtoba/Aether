@@ -292,3 +292,55 @@ describe('VLLMProvider tool-loop serialization', () => {
     expect(tool.tool_call_id).toBe('call_9');
   });
 });
+describe('VLLMProvider streamed tool calls', () => {
+  it('assembles streamed tool_calls and text into the final done event', async () => {
+    const provider = makeProvider();
+    const chunks = [
+      'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hi"},"finish_reason":null}]}\n',
+      'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"get_weather","arguments":""}}]},"finish_reason":null}]}\n',
+      'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\"city\\":\\"SF\\"}"}}]},"finish_reason":null}]}\n',
+      'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}\n',
+      'data: [DONE]\n',
+    ];
+    mockFetchStream(chunks);
+
+    const events: any[] = [];
+    for await (const event of provider.completeStream({
+      model: 'mistralai/Mistral-7B-Instruct-v0.3',
+      messages: [{ role: 'user', content: 'weather?' }],
+    })) {
+      events.push(event);
+    }
+
+    const done = events.find((e) => e.type === 'done');
+    expect(done).toBeDefined();
+    expect(done.response.content).toBe('Hi');
+    expect(done.response.toolCalls).toEqual([
+      { id: 'call_1', name: 'get_weather', input: { city: 'SF' } },
+    ]);
+    expect(done.response.finishReason).toBe('tool_calls');
+  });
+});
+describe('VLLMProvider mid-stream errors', () => {
+  it('surfaces an SSE error chunk and does not emit a trailing done', async () => {
+    const provider = makeProvider();
+    const chunks = [
+      'data: {"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}\n',
+      'data: {"error":{"message":"upstream exploded"}}\n',
+    ];
+    mockFetchStream(chunks);
+
+    const events: any[] = [];
+    for await (const event of provider.completeStream({
+      model: 'mistralai/Mistral-7B-Instruct-v0.3',
+      messages: [{ role: 'user', content: 'hi' }],
+    })) {
+      events.push(event);
+    }
+
+    const err = events.find((e) => e.type === 'error');
+    expect(err).toBeDefined();
+    expect(err.error.message).toContain('upstream exploded');
+    expect(events.some((e) => e.type === 'done')).toBe(false);
+  });
+});

@@ -107,11 +107,14 @@ export class AnthropicProvider extends ProviderInterface {
 
       const decoder = new TextDecoder();
       let buffer = '';
-      // Accumulate content deltas for building the final response
-      let accumulatedContent = '';
-      const accumulatedToolCalls: { id: string; name: string; input: string }[] = [];
-      const responseId = '';
-      const responseModel = request.model;
+      // Accumulate content/tool fragments for building the final `done`;
+      // per-call fragments are keyed by Anthropic's content-block index.
+      const contentParts: string[] = [];
+      const toolCalls = new Map<number, { id: string; name: string; input: string }>();
+      let responseId = '';
+      let responseModel = request.model;
+      let usageOutput = 0;
+      let stopReason: string | undefined;
 
       for (;;) {
         const { done, value } = await reader.read();
@@ -134,28 +137,59 @@ export class AnthropicProvider extends ProviderInterface {
           if (trimmed.startsWith('data: ')) {
             try {
               const data = JSON.parse(trimmed.slice(6));
-              const event = this.parseStreamEvent(data);
-              if (event) {
-                yield event;
+              const type = data?.type;
+              if (!type) continue;
 
-                // Accumulate for potential done event
-                if (event.type === 'delta') {
-                  accumulatedContent += event.content;
-                } else if (event.type === 'tool_call_delta') {
-                  const existing = accumulatedToolCalls.find((tc) => tc.id === event.id);
-                  if (existing) {
-                    existing.input += event.input;
-                  } else {
-                    accumulatedToolCalls.push({
-                      id: event.id,
-                      name: event.name,
-                      input: event.input,
-                    });
-                  }
-                } else if (event.type === 'done') {
-                  return; // Stream complete
+              if (type === 'message_start' && data.message) {
+                responseId = data.message.id ?? '';
+                responseModel = data.message.model ?? request.model;
+              } else if (type === 'message_delta') {
+                // Final usage + stop reason arrive here. Do NOT emit a done
+                // event yet: the done is built once below from the
+                // accumulated content/tool fragments.
+                stopReason = data.delta?.stop_reason ?? stopReason;
+                usageOutput = data.usage?.output_tokens ?? usageOutput;
+              } else if (type === 'content_block_start') {
+                const block = data.content_block;
+                if (block?.type === 'tool_use') {
+                  const index = data.index ?? 0;
+                  const entry = toolCalls.get(index) ?? { id: '', name: '', input: '' };
+                  entry.id = block.id ?? entry.id;
+                  entry.name = block.name ?? entry.name;
+                  // Do NOT preseed entry.input from block.input: Anthropic streams
+                  // tool arguments exclusively via input_json_delta, and
+                  // concatenating a pre-formed JSON doc with the deltas would
+                  // produce invalid JSON at assembly time.
+                  toolCalls.set(index, entry);
                 }
+              } else if (type === 'content_block_delta') {
+                const index = data.index ?? 0;
+                const delta = data.delta;
+                if (delta?.type === 'text_delta') {
+                  const text = delta.text ?? '';
+                  contentParts.push(text);
+                  yield { type: 'delta', content: text };
+                } else if (delta?.type === 'input_json_delta') {
+                  const entry = toolCalls.get(index) ?? { id: '', name: '', input: '' };
+                  entry.input += delta.partial_json ?? '';
+                  toolCalls.set(index, entry);
+                }
+              } else if (type === 'error') {
+                // Provider errors after the 200 stream started must surface as
+                // an error event; terminate the stream so no success-looking
+                // done is emitted afterwards.
+                yield {
+                  type: 'error',
+                  error: new ProviderError(
+                    ProviderErrorCode.Internal,
+                    String(data.error?.message ?? 'Unknown Anthropic stream error'),
+                    0,
+                    false,
+                  ),
+                };
+                return;
               }
+              // message_stop / content_block_stop are terminal markers — ignored.
             } catch {
               // Malformed chunk — skip
             }
@@ -163,29 +197,29 @@ export class AnthropicProvider extends ProviderInterface {
         }
       }
 
-      // If we never got a done event, send one
+      // Stream ended: emit the final response assembled from the fragments.
+      const assembledToolCalls = [...toolCalls.entries()]
+        .sort(([a], [b]) => a - b)
+        .map(([, tc]) => ({
+          id: tc.id,
+          name: tc.name,
+          input: (() => {
+            try {
+              return JSON.parse(tc.input);
+            } catch {
+              return {};
+            }
+          })(),
+        }));
       yield {
         type: 'done',
         response: {
           id: responseId,
           model: responseModel,
-          content: accumulatedContent || null,
-          toolCalls:
-            accumulatedToolCalls.length > 0
-              ? accumulatedToolCalls.map((tc) => ({
-                  id: tc.id,
-                  name: tc.name,
-                  input: (() => {
-                    try {
-                      return JSON.parse(tc.input);
-                    } catch {
-                      return {};
-                    }
-                  })(),
-                }))
-              : undefined,
-          usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
-          finishReason: 'stop',
+          content: contentParts.join('') || null,
+          toolCalls: assembledToolCalls.length > 0 ? assembledToolCalls : undefined,
+          usage: { promptTokens: 0, completionTokens: usageOutput, totalTokens: usageOutput },
+          finishReason: this.mapFinishReason(stopReason),
         },
       };
     } finally {
