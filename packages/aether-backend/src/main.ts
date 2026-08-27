@@ -18,7 +18,16 @@ const PORT = parseIntEnv('PORT', 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const MAX_BODY_SIZE = parseIntEnv('MAX_BODY_SIZE', 1_000_000);
 
-const server = new AetherServer({ port: PORT, host: HOST, maxBodySize: MAX_BODY_SIZE });
+const API_KEY = process.env.AETHER_API_KEY;
+
+const server = new AetherServer({
+  port: PORT,
+  host: HOST,
+  maxBodySize: MAX_BODY_SIZE,
+  // When AETHER_API_KEY is set, the API requires it (Bearer or X-API-Key)
+  // and authorizes via RBAC (admin role). Leave unset for open local dev.
+  ...(API_KEY ? { auth: { apiKey: API_KEY } } : {}),
+});
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[AetherServer] ${signal} received, shutting down...`);

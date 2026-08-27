@@ -82,11 +82,23 @@ export class WebSocketManager {
     this.allowedOrigins = origins;
   }
 
-  attach(server: Server): void {
+  /**
+   * Attach the upgrade handler to an HTTP server.
+   *
+   * @param authenticate - Optional request authenticator; when provided, an
+   *   upgrade is rejected unless it returns true (API-key auth for event
+   *   streaming).
+   */
+  attach(server: Server, authenticate?: (req: IncomingMessage) => boolean): void {
     this.server = server;
 
     this.upgradeHandler = (req, socket, head) => {
       if (!this.isOriginAllowed(req)) {
+        socket.destroy();
+        return;
+      }
+
+      if (authenticate && !authenticate(req)) {
         socket.destroy();
         return;
       }

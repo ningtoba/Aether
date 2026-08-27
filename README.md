@@ -272,14 +272,28 @@ Verification: **601 tests passing (was 594) across 42 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.6 API Authentication & RBAC
+
+The HTTP/WebSocket API can now be authenticated and role-authorized instead of running open on `0.0.0.0:3001`.
+
+- **API-key auth** — `AetherServerOptions.auth.apiKey` accepts a single key (→ `admin` role) or a key→role map. Requests authenticate via `Authorization: Bearer <key>` or `X-API-Key` (constant-time digest comparison); `/health` stays open for container probes.
+- **RBAC enforcement** — `@aether/security`'s RBACGuard is wired into the server: every `/api/*` request must authenticate (401) and be authorized (403) against a route→(resource, action) mapping (agents read/write, providers read/write, executions read/execute) using the built-in roles (admin/operator/developer/agent/viewer).
+- **WebSocket gated** — upgrades are rejected without a valid key (header or `?apikey=`), matching the HTTP policy.
+- `AETHER_API_KEY` env enables auth (admin) in the production entrypoint; unset keeps open local dev.
+- `@aether/security` gained its missing `src/index.ts` barrel (the package was previously unimportable — `main` pointed at a nonexistent `dist/index.js`).
+
+Verification: **605 tests passing (was 601) across 42 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:
 
 - **Persist secrets via the vault** — route provider keys from the renderer to the vault through main-process IPC (safeStorage/keytar) so re-launch keeps keys without ever touching localStorage; replace session-only re-entry.
-- **Authentication & authorization** — the HTTP/WebSocket API is unauthenticated on `0.0.0.0:3001`; wire the existing `aether-security` RBAC into routes and add per-session auth.
 - **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.
 - **Reliability parity** — memory-store `defaultTtlMs` at write time, per-subscriber event-bus isolation, Gemini batch embeddings.
+- **Auth polish** — per-user/session auth (JWT), key rotation via the vault, and role assignment for arbitrary API keys beyond the admin default.
 
 ---
 

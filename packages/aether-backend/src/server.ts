@@ -5,6 +5,7 @@
  * Structured for easy migration to Fastify/Express when needed.
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
+import { createHash } from 'node:crypto';
 import { Router } from './router.js';
 import { WebSocketManager } from './websocket.js';
 import { jsonResponse, parseBody, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
@@ -12,12 +13,25 @@ import { getHealthStatus } from './routes/health.js';
 import * as agentRoutes from './routes/agents.js';
 import * as providerRoutes from './routes/providers.js';
 import * as executionRoutes from './routes/executions.js';
+import { RBACGuard, type RoleId } from '@aether/security';
 
 export interface AetherServerOptions {
   port?: number;
   host?: string;
   /** Maximum request body size in bytes (default: 1MB) */
   maxBodySize?: number;
+  /** Optional API authentication + role-based authorization. */
+  auth?: ServerAuthConfig;
+}
+
+/** API auth for the HTTP/WebSocket server. */
+export interface ServerAuthConfig {
+  /**
+   * Either a single API key (authenticates as `admin`) or a map of
+   * key -> role. Requests must present the key via `Authorization: Bearer`
+   * or `X-API-Key`. When unset, the API stays open (local development).
+   */
+  apiKey?: string | Record<string, RoleId>;
 }
 
 export class AetherServer {
@@ -30,6 +44,8 @@ export class AetherServer {
   private corsOrigins: string[];
   private maxBodySize: number;
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
+  private rbac: RBACGuard | null = null;
+  private apiKeys = new Map<string, RoleId>();
 
   constructor(options: AetherServerOptions = {}) {
     this.port = options.port ?? 3001;
@@ -38,7 +54,98 @@ export class AetherServer {
     this.wsManager = new WebSocketManager();
     this.corsOrigins = ['*'];
     this.maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
+    this.configureAuth(options.auth);
     this.registerRoutes();
+  }
+
+  /** Set up API keys and the RBAC guard from the auth config. */
+  private configureAuth(auth?: ServerAuthConfig): void {
+    if (!auth?.apiKey) return;
+    if (typeof auth.apiKey === 'string') {
+      this.apiKeys.set(auth.apiKey, 'admin' as RoleId);
+    } else {
+      for (const [key, role] of Object.entries(auth.apiKey)) {
+        this.apiKeys.set(key, role);
+      }
+    }
+    if (this.apiKeys.size > 0) {
+      this.rbac = new RBACGuard();
+    }
+  }
+
+  /** True when API authentication is enabled. */
+  get authEnabled(): boolean {
+    return this.apiKeys.size > 0;
+  }
+
+  /** Extract the API key supplied via Authorization: Bearer or X-API-Key. */
+  private extractApiKey(req: IncomingMessage): string | null {
+    const auth = req.headers.authorization;
+    if (auth && auth.startsWith('Bearer ')) {
+      const token = auth.slice('Bearer '.length).trim();
+      if (token) return token;
+    }
+    const headerKey = req.headers['x-api-key'];
+    if (typeof headerKey === 'string' && headerKey.length > 0) return headerKey;
+    return null;
+  }
+
+  /** Constant-time key comparison (digest-compare). */
+  private keysEqual(a: string, b: string): boolean {
+    const ha = createHash('sha256').update(a).digest();
+    const hb = createHash('sha256').update(b).digest();
+    return ha.equals(hb);
+  }
+
+  /** Authenticate a request; returns the granted role or null. */
+  private authenticate(req: IncomingMessage): RoleId | null {
+    if (this.apiKeys.size === 0) return null;
+    const provided = this.extractApiKey(req);
+    if (!provided) return null;
+    for (const [key, role] of this.apiKeys) {
+      if (this.keysEqual(key, provided)) return role;
+    }
+    return null;
+  }
+
+  /** Authenticate a WebSocket upgrade request (header or ?apikey= query). */
+  private authenticateWebSocket(req: IncomingMessage): boolean {
+    if (this.apiKeys.size === 0) return true;
+    if (this.authenticate(req)) return true;
+    const query = req.url?.split('?')[1] ?? '';
+    const match = /\bapikey=([^&]+)/.exec(query);
+    let provided: string | null = null;
+    if (match) {
+      try {
+        provided = decodeURIComponent(match[1]);
+      } catch {
+        // Malformed percent-encoding (e.g. `?apikey=%zz`): treat as no key,
+        // never let a single request kill the process.
+        return false;
+      }
+    }
+    if (!provided) return false;
+    for (const key of this.apiKeys.keys()) {
+      if (this.keysEqual(key, provided)) return true;
+    }
+    return false;
+  }
+
+  /** Map an HTTP method + path to an RBAC (resource, action). */
+  private routePermission(
+    method: string,
+    pathname: string,
+  ): { resource: string; action: string } | null {
+    if (pathname.startsWith('/api/agents')) {
+      return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'write' };
+    }
+    if (pathname.startsWith('/api/providers')) {
+      return { resource: 'providers:config', action: method === 'GET' ? 'read' : 'write' };
+    }
+    if (pathname.startsWith('/api/executions')) {
+      return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'execute' };
+    }
+    return null;
   }
 
   /** Register all API routes */
@@ -115,6 +222,19 @@ export class AetherServer {
       }
     }
 
+    // Authenticate + authorize /api/* routes when auth is enabled.
+    // /health stays open (container healthchecks/probes).
+    if (this.authEnabled && url.startsWith('/api/')) {
+      const role = this.authenticate(req);
+      if (!role) {
+        return jsonResponse(res, 401, { error: 'Unauthorized' });
+      }
+      const perm = this.routePermission(method, url.split('?')[0]);
+      if (perm && this.rbac && !this.rbac.isAllowed([role], perm.resource, perm.action)) {
+        return jsonResponse(res, 403, { error: 'Forbidden' });
+      }
+    }
+
     const route = this.router.match(method, url);
     if (route) {
       try {
@@ -152,8 +272,8 @@ export class AetherServer {
         });
       });
 
-      // Attach WebSocket upgrade handling
-      this.wsManager.attach(this.server);
+      // Attach WebSocket upgrade handling (with API-key auth when enabled)
+      this.wsManager.attach(this.server, (req) => this.authenticateWebSocket(req));
 
       this.server.on('error', (err) => {
         this.running = false;

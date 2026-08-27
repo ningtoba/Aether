@@ -8,9 +8,10 @@
  * - WebSocket frame encoding/decoding end to end
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import net from 'node:net';
 import { AetherServer } from './server.js';
 import { WebSocketManager } from './websocket.js';
-import net from 'node:net';
+import type { RoleId } from '@aether/security';
 
 // ---------------------------------------------------------------------------
 // Full HTTP server integration
@@ -379,4 +380,106 @@ describe('WebSocket frame encoding/decoding E2E', () => {
     const parsed = JSON.parse(sentMessages[0]);
     expect(parsed.type).toBe('private.event');
   });
+});
+describe('API authentication & RBAC', () => {
+  it('rejects unauthenticated /api requests and health stays open', async () => {
+    const srv = new AetherServer({ port: 0, host: '127.0.0.1', auth: { apiKey: 'secret-key' } });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      expect((await fetch(`${base}/health`)).status).toBe(200);
+      expect((await fetch(`${base}/api/agents`)).status).toBe(401);
+      expect(
+        (await fetch(`${base}/api/agents`, { headers: { Authorization: 'Bearer wrong' } })).status,
+      ).toBe(401);
+    } finally {
+      await srv.stop();
+    }
+  });
+
+  it('accepts Bearer and X-API-Key with the configured key', async () => {
+    const srv = new AetherServer({ port: 0, host: '127.0.0.1', auth: { apiKey: 'secret-key' } });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      const bearer = await fetch(`${base}/api/agents`, {
+        headers: { Authorization: 'Bearer secret-key' },
+      });
+      expect(bearer.status).toBe(200);
+      const header = await fetch(`${base}/api/agents`, { headers: { 'X-API-Key': 'secret-key' } });
+      expect(header.status).toBe(200);
+    } finally {
+      await srv.stop();
+    }
+  });
+
+  it('enforces roles: view-only key cannot mutate agents', async () => {
+    const srv = new AetherServer({
+      port: 0,
+      host: '127.0.0.1',
+      auth: {
+        apiKey: { 'ro-key': 'viewer' as RoleId, 'admin-key': 'admin' as RoleId },
+      },
+    });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      const read = await fetch(`${base}/api/agents`, { headers: { 'X-API-Key': 'ro-key' } });
+      expect(read.status).toBe(200);
+      const write = await fetch(`${base}/api/agents`, {
+        method: 'POST',
+        headers: { 'X-API-Key': 'ro-key', 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'nope' }),
+      });
+      expect(write.status).toBe(403);
+      // Admin can write.
+      const adminWrite = await fetch(`${base}/api/agents`, {
+        method: 'POST',
+        headers: { 'X-API-Key': 'admin-key', 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'ok' }),
+      });
+      expect(adminWrite.status).toBe(201);
+    } finally {
+      await srv.stop();
+    }
+  });
+
+  it('rejects an unauthenticated WebSocket upgrade and accepts a query-keyed one', async () => {
+    const srv = new AetherServer({ port: 0, host: '127.0.0.1', auth: { apiKey: 'ws-key' } });
+    await srv.start();
+    const port = srv.getPort()!;
+
+    async function handshake(path: string): Promise<boolean> {
+      const socket = new net.Socket();
+      socket.on('data', () => {});
+      let closed = false;
+      socket.once('close', () => {
+        closed = true;
+      });
+      await new Promise<void>((resolve, reject) => {
+        socket.connect(port, '127.0.0.1', () => {
+          socket.write(
+            `GET ${path} HTTP/1.1\r\nHost: 127.0.0.1\r\n` +
+              'Upgrade: websocket\r\nConnection: Upgrade\r\n' +
+              'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
+              'Sec-WebSocket-Version: 13\r\n\r\n',
+          );
+          setTimeout(() => resolve(), 200);
+        });
+        socket.on('error', reject);
+      });
+      const result = closed;
+      socket.destroy();
+      return result;
+    }
+
+    try {
+      // Unauthenticated upgrade is destroyed (closed).
+      expect(await handshake('/')).toBe(true);
+      // Query-keyed upgrade is accepted (socket stays open).
+      expect(await handshake('/?apikey=ws-key')).toBe(false);
+    } finally {
+      await srv.stop();
+    }
+  }, 10_000);
 });
