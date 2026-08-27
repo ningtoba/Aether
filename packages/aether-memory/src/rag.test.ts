@@ -260,3 +260,33 @@ describe("RAGEngine", () => {
     });
   });
 });
+describe("chunking hardening", () => {
+  const longText =
+    "The quick brown fox jumps over the lazy dog. " +
+    "Lorem ipsum dolor sit amet, consectetur adipiscing elit, " +
+    "sed do eiusmod tempor incididunt ut labore et dolore magna aliqua.";
+
+  it("clamps overlap below maxChunkSize so chunkFixed always terminates", async () => {
+    // Old behavior: overlap >= maxChunkSize made the window regress forever.
+    const { engine } = createEngine({ maxChunkSize: 10, overlap: 64, strategy: "fixed" });
+    const ids = await engine.index(longText);
+    expect(ids.length).toBeGreaterThan(0);
+  }, 5_000);
+
+  it("clamps a non-positive maxChunkSize to 1 instead of looping forever", async () => {
+    const { engine } = createEngine({ maxChunkSize: 0, overlap: 5, strategy: "fixed" });
+    const ids = await engine.index(longText);
+    expect(ids.length).toBeGreaterThan(0);
+  }, 5_000);
+
+  it("still yields ordered, overlapping fixed chunks", async () => {
+    const { engine, store } = createEngine({ maxChunkSize: 24, overlap: 8, strategy: "fixed" });
+    const ids = await engine.index(longText);
+    expect(ids.length).toBeGreaterThan(1);
+    const entries = await Promise.all(ids.map((id) => store.get(id)));
+    const contents = entries.map((e) => e?.content ?? "");
+    expect(contents[0]).toContain("quick");
+    expect(contents[contents.length - 1]).toContain("aliqua");
+    store.dispose();
+  });
+});

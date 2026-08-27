@@ -4,18 +4,23 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteParams } from '../router.js';
 import * as store from '../store.js';
-import { jsonResponse, parseBody, notFound, badRequest } from '../utils.js';
+import { jsonResponse, parseBody, notFound, badRequest, payloadTooLarge } from '../utils.js';
 
 export async function listAgents(req: IncomingMessage, res: ServerResponse): Promise<void> {
   jsonResponse(res, 200, { agents: store.listAgents() });
 }
 
 export async function createAgent(req: IncomingMessage, res: ServerResponse, _params: RouteParams): Promise<void> {
-  const body = await parseBody<{ name?: string; config?: Record<string, unknown> }>(req);
-  if (!body || !body.name) {
+  const parsed = await parseBody<{ name?: string; config?: Record<string, unknown> }>(req);
+  if (!parsed.ok) {
+    if (parsed.reason === 'too_large') return payloadTooLarge(res);
     return badRequest(res, 'Agent name is required');
   }
-  const agent = store.createAgent({ name: body.name, config: body.config as any });
+  const body = parsed.value;
+  if (!body.name) {
+    return badRequest(res, 'Agent name is required');
+  }
+  const agent = store.createAgent({ name: body.name, config: body.config as Record<string, unknown> });
   jsonResponse(res, 201, { agent });
 }
 
@@ -26,9 +31,12 @@ export async function getAgent(req: IncomingMessage, res: ServerResponse, params
 }
 
 export async function updateAgent(req: IncomingMessage, res: ServerResponse, params: RouteParams): Promise<void> {
-  const body = await parseBody<Record<string, unknown>>(req);
-  if (!body) return badRequest(res, 'Invalid request body');
-  const agent = store.updateAgent(params.id as any, body as any);
+  const parsed = await parseBody<Record<string, unknown>>(req);
+  if (!parsed.ok) {
+    if (parsed.reason === 'too_large') return payloadTooLarge(res);
+    return badRequest(res, 'Invalid request body');
+  }
+  const agent = store.updateAgent(params.id as any, parsed.value as any);
   if (!agent) return notFound(res, 'Agent not found');
   jsonResponse(res, 200, { agent });
 }

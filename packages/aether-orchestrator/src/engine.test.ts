@@ -124,3 +124,54 @@ describe("LangGraphEngine", () => {
     });
   });
 });
+describe("conditional comparison operators", () => {
+  function comparisonWorkflow() {
+    return new WorkflowBuilder("cond-comparison", "1.0.0", "Conditional Comparison")
+      .routerNode("router", "Route", "Choose by score")
+      .agentNode("high", "high-agent")
+      .agentNode("low", "low-agent")
+      .connectIf("router", "high", [{ field: "data.score", operator: "gt", value: 5 }])
+      .connectIf("router", "low", [{ field: "data.score", operator: "lte", value: 5 }])
+      .withEntry("router")
+      .withTerminal("high")
+      .withTerminal("low")
+      .build();
+  }
+
+  it("routes through gt when the bound is exceeded", async () => {
+    const engine = new LangGraphEngine();
+    const result = await engine.execute(comparisonWorkflow(), { score: 7 });
+    expect(result.status).toBe("completed");
+    const data = result.data as Record<string, unknown>;
+    expect(data["high.output"]).toBeDefined();
+    expect(data["low.output"]).toBeUndefined();
+  }, 10_000);
+
+  it("routes through lte at the bound", async () => {
+    const engine = new LangGraphEngine();
+    const result = await engine.execute(comparisonWorkflow(), { score: 5 });
+    expect(result.status).toBe("completed");
+    const data = result.data as Record<string, unknown>;
+    expect(data["low.output"]).toBeDefined();
+    expect(data["high.output"]).toBeUndefined();
+  }, 10_000);
+
+  it("routes through lt for values below the bound", async () => {
+    const engine = new LangGraphEngine();
+    const wf = new WorkflowBuilder("cond-lt", "1.0.0")
+      .routerNode("router", "Route", "Range")
+      .agentNode("small", "s")
+      .agentNode("big", "b")
+      .connectIf("router", "big", [{ field: "data.n", operator: "gte", value: 10 }])
+      .connectIf("router", "small", [{ field: "data.n", operator: "lt", value: 10 }])
+      .withEntry("router")
+      .withTerminal("small")
+      .withTerminal("big")
+      .build();
+    const result = await engine.execute(wf, { n: 3 });
+    expect(result.status).toBe("completed");
+    const data = result.data as Record<string, unknown>;
+    expect(data["small.output"]).toBeDefined();
+    expect(data["big.output"]).toBeUndefined();
+  }, 10_000);
+});

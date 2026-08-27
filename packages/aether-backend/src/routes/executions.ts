@@ -3,7 +3,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteParams } from '../router.js';
-import { jsonResponse, parseBody, notFound, badRequest } from '../utils.js';
+import { jsonResponse, parseBody, notFound, badRequest, payloadTooLarge } from '../utils.js';
 
 /** Execution ID type (branded string) */
 type ExecutionId = string & { __brand: 'ExecutionId' };
@@ -45,13 +45,18 @@ export async function startExecution(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const body = await parseBody<{
+  const parsed = await parseBody<{
     agentId?: string;
     plan?: ExecutionPlan;
     input?: unknown;
   }>(req);
 
-  if (!body) return badRequest(res, 'Invalid request body');
+  if (!parsed.ok) {
+    if (parsed.reason === 'too_large') return payloadTooLarge(res);
+    return badRequest(res, 'Invalid request body');
+  }
+  const body = parsed.value;
+  const { input } = body;
 
   const id = crypto.randomUUID() as ExecutionId;
   const now = new Date().toISOString();
@@ -77,7 +82,7 @@ export async function startExecution(
         const e = executions.get(id);
         if (e && e.status === 'running') {
           e.status = 'completed';
-          e.result = { output: 'Execution completed successfully', input: body?.input };
+          e.result = { output: 'Execution completed successfully', input };
           e.completedAt = new Date().toISOString();
         }
       }, 2000);

@@ -13,6 +13,7 @@ import {
   copyFilesToSandbox,
   checkDockerEnv,
 } from "./index.js";
+import { assertSafeSandboxPath, shQuote } from "./sandbox.js";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -77,5 +78,25 @@ describe("copyFilesToSandbox", () => {
     await expect(
       copyFilesToSandbox("nonexistent", [{ path: "test.txt", content: "hi" }]),
     ).rejects.toThrow();
+  });
+});
+describe("sandbox path safety", () => {
+  it("rejects absolute paths and traversal segments", () => {
+    expect(() => assertSafeSandboxPath("/etc/passwd")).toThrow(/Absolute/);
+    expect(() => assertSafeSandboxPath("C:\\Windows\\system32")).toThrow(/Absolute/);
+    expect(() => assertSafeSandboxPath("../escape")).toThrow(/traversal/i);
+    expect(() => assertSafeSandboxPath("a/../../b")).toThrow(/traversal/i);
+    expect(() => assertSafeSandboxPath("")).toThrow(/Empty/);
+  });
+
+  it("accepts and normalizes nested relative paths", () => {
+    expect(assertSafeSandboxPath("dir/file.txt")).toBe("dir/file.txt");
+    expect(assertSafeSandboxPath("a\\b.txt")).toBe("a/b.txt");
+    expect(assertSafeSandboxPath("sub/x/y.md")).toBe("sub/x/y.md");
+  });
+
+  it("shQuote neutralizes embedded single quotes", () => {
+    expect(shQuote("it's")).toBe(`'it'\\''s'`);
+    expect(shQuote("plain")).toBe("'plain'");
   });
 });

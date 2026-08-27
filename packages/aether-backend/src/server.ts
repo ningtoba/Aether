@@ -7,7 +7,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { Router } from './router.js';
 import { WebSocketManager } from './websocket.js';
-import { jsonResponse, parseBody, serverError } from './utils.js';
+import { jsonResponse, parseBody, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
 import { getHealthStatus } from './routes/health.js';
 import * as agentRoutes from './routes/agents.js';
 import * as providerRoutes from './routes/providers.js';
@@ -28,6 +28,8 @@ export class AetherServer {
   private host: string;
   private running = false;
   private corsOrigins: string[];
+  private maxBodySize: number;
+  private stopTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: AetherServerOptions = {}) {
     this.port = options.port ?? 3001;
@@ -35,6 +37,7 @@ export class AetherServer {
     this.router = new Router();
     this.wsManager = new WebSocketManager();
     this.corsOrigins = ['*'];
+    this.maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
     this.registerRoutes();
   }
 
@@ -68,6 +71,7 @@ export class AetherServer {
   /** Set CORS allowed origins */
   setCorsOrigins(origins: string[]): void {
     this.corsOrigins = origins;
+    this.wsManager.setAllowedOrigins(origins.filter((o) => o !== '*'));
   }
 
   /** Handle CORS preflight and headers */
@@ -96,8 +100,20 @@ export class AetherServer {
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
     if (this.handleCors(req, res)) return;
 
-    const url = req.url ?? '/';
+        const url = req.url ?? '/';
     const method = req.method ?? 'GET';
+
+    // Carry the server's configured limit through to body parsing so no
+    // Content-Length (e.g. chunked transfer-encoding) is bounded too.
+    req.maxBodySize = this.maxBodySize;
+
+    // Reject advertised oversized bodies up front, before any bytes are read.
+    if (method === 'POST' || method === 'PUT') {
+      const declared = Number(req.headers['content-length']);
+      if (Number.isFinite(declared) && declared > this.maxBodySize) {
+        return jsonResponse(res, 413, { error: 'Request body too large' });
+      }
+    }
 
     const route = this.router.match(method, url);
     if (route) {
@@ -123,6 +139,7 @@ export class AetherServer {
         resolve();
         return;
       }
+      if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
 
       this.server = createServer((req, res) => {
         this.handleRequest(req, res).catch((err) => {
@@ -158,7 +175,11 @@ export class AetherServer {
 
       this.wsManager.detach();
 
-      this.server.close(() => {
+      const server = this.server;
+      if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
+
+      server.close(() => {
+        if (this.stopTimer) { clearTimeout(this.stopTimer); this.stopTimer = null; }
         this.running = false;
         this.server = null;
         console.log('[AetherServer] Stopped');
@@ -166,11 +187,15 @@ export class AetherServer {
       });
 
       // Force close after timeout
-      setTimeout(() => {
+      this.stopTimer = setTimeout(() => {
         this.running = false;
         this.server = null;
         resolve();
       }, 5000);
+
+      // Drop idle keep-alive connections that would otherwise pin server.close().
+      // (closeIdleConnections avoids aborting in-flight requests.)
+      server.closeIdleConnections();
     });
   }
 

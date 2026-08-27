@@ -7,6 +7,7 @@
 
 import { execFile } from "node:child_process";
 import { writeFileSync, readFileSync, existsSync, rmSync, mkdtempSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -45,31 +46,38 @@ export interface EvalResult<T = unknown> {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function getTsxPath(): string {
-  // Try common locations for tsx binary
-  // This module's own node_modules, hoisted root, or global
-  const __dirname = dirname(new URL(import.meta.url).pathname);
+/**
+ * Name of the tsx launcher for a given platform. Windows npm shims are
+ * `tsx.cmd` (plain `tsx` has no executable on Windows).
+ */
+export function tsxBinaryName(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? "tsx.cmd" : "tsx";
+}
 
-  const candidates = [
-    join(__dirname, "..", "node_modules", ".bin", "tsx"),
-    join(__dirname, "..", "node_modules", "tsx", "dist", "cli.mjs"),
-    join(__dirname, "..", "..", "..", "node_modules", ".bin", "tsx"),
-    join(__dirname, "..", "..", "..", "node_modules", "tsx", "dist", "cli.mjs"),
-    // direct lookup via PATH
-    "tsx",
-  ];
-  for (const candidate of candidates) {
-    try {
-      if (existsSync(candidate) || candidate === "tsx") {
-        return candidate;
-      }
-    } catch {
-      continue;
-    }
+/**
+ * Candidate locations for the tsx binary, most specific first.
+ * Resolves this module's directory from `import.meta.url` with
+ * `fileURLToPath` so absolute paths stay correct on Windows (URL
+ * `pathname` yields a leading `/C:/...` drive-relative path, which never
+ * exists). Exported for cross-platform tests.
+ */
+/**
+ * Resolve the tsx entry point.
+ *
+ * Prefers the `dist/cli.mjs` module, which can be launched directly with
+ * `process.execPath` on every OS. The `node_modules/.bin` shims are NOT
+ * usable through execFile on Windows (CreateProcessW only starts .com/.exe,
+ * and execFile refuses .cmd), so a PATH resolver name is only a last resort.
+ */
+export function getTsxEntryPath(platform: NodeJS.Platform = process.platform): string {
+  const moduleDir = dirname(fileURLToPath(import.meta.url));
+  for (const candidate of [
+    join(moduleDir, "..", "node_modules", "tsx", "dist", "cli.mjs"),
+    join(moduleDir, "..", "..", "..", "node_modules", "tsx", "dist", "cli.mjs"),
+  ]) {
+    if (existsSync(candidate)) return candidate;
   }
-  throw new Error(
-    "tsx not found. Ensure @aether/ts-runtime dependencies are installed.",
-  );
+  return tsxBinaryName(platform);
 }
 
 /** Write code to a temp file and return the file path. */
@@ -119,9 +127,15 @@ export function execTypeScript(
       env.NODE_OPTIONS = options.env.NODE_OPTIONS;
     }
 
+    // Launch the tsx entry module with the Node executable itself so the same
+    // code path works on Windows (where .cmd/.tsx shims cannot be execFile'd).
+    const tsxEntry = getTsxEntryPath();
+    const executable = tsxEntry.endsWith(".mjs") ? process.execPath : tsxEntry;
+    const tsxArgs = tsxEntry.endsWith(".mjs") ? [tsxEntry, filePath] : [filePath];
+
     const child = execFile(
-      getTsxPath(),
-      [filePath],
+      executable,
+      tsxArgs,
       {
         timeout,
         maxBuffer: maxOutput,

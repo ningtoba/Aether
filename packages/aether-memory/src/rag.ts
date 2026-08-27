@@ -25,12 +25,14 @@ export class RAGEngine {
   ) {
     this.store = store;
     this.vectorStore = new InMemoryVectorStore(vectorConfig);
+    // Sanitize chunking config: maxChunkSize < 1 and overlap >= maxChunkSize
+    // would stall chunkFixed() in an infinite loop, so clamp them up front.
+    const maxChunkSize = Math.max(1, Math.floor(chunking?.maxChunkSize ?? 512));
     this.chunking = {
-      maxChunkSize: 512,
-      overlap: 64,
-      separator: "\n",
-      strategy: "fixed",
-      ...chunking,
+      maxChunkSize,
+      overlap: Math.min(Math.max(0, Math.floor(chunking?.overlap ?? 64)), maxChunkSize - 1),
+      separator: chunking?.separator ?? "\n",
+      strategy: chunking?.strategy ?? "fixed",
     };
   }
 
@@ -161,6 +163,7 @@ export class RAGEngine {
     let start = 0;
 
     while (start < text.length) {
+      const chunkStart = start;
       const end = Math.min(start + maxChunkSize, text.length);
       let chunk = text.slice(start, end);
 
@@ -182,6 +185,8 @@ export class RAGEngine {
       if (start >= text.length) break;
       start -= overlap; // slide window
       if (start < 0) start = 0;
+      // Guarantee forward progress so no configuration can stall the loop.
+      if (start <= chunkStart) start = chunkStart + 1;
     }
 
     return chunks.filter(Boolean);

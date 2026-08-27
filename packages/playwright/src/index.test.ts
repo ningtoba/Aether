@@ -18,6 +18,8 @@ import {
   type,
   screenshot,
   getPageTitle,
+  BROWSER_NAMES,
+  isSupportedBrowser,
 } from "./index.js";
 
 afterEach(() => {
@@ -27,6 +29,20 @@ afterEach(() => {
 describe("VERSION", () => {
   it("should export a semver string", () => {
     expect(VERSION).toBe("0.1.0");
+  });
+});
+describe("isSupportedBrowser", () => {
+  it("accepts only the bundled browser names", () => {
+    for (const name of BROWSER_NAMES) {
+      expect(isSupportedBrowser(name)).toBe(true);
+    }
+  });
+
+  it("rejects arbitrary and injection-shaped inputs", () => {
+    expect(isSupportedBrowser("")).toBe(false);
+    expect(isSupportedBrowser("steam_cast")).toBe(false);
+    expect(isSupportedBrowser("chromium;cat /etc/passwd")).toBe(false);
+    expect(isSupportedBrowser("$(curl evil)")).toBe(false);
   });
 });
 

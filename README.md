@@ -80,9 +80,8 @@ Dependency relationships:
 | **Orchestration** | LangGraph-compatible DAG engine (LangGraph v1) |
 | **LLM Providers** | Anthropic, Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible |
 | **Memory** | In-memory vector store (brute-force cosine), SQLite, Qdrant |
-| **Container** | Docker (sandboxed execution), Dockerode |
-| **Observability** | OpenTelemetry (OTLP), Pino structured logging |
-| **Testing** | Vitest (520+ tests across 35 test files) |
+| **Container** | Docker (sandboxed execution), Dockerode || **Observability** | OpenTelemetry (OTLP), Pino structured logging |
+|| **Testing** | Vitest (580+ tests across 39 test files) |
 | **CI/CD** | GitHub Actions, electron-builder |
 
 ---
@@ -117,7 +116,7 @@ npm run build
 # Type-check
 npm run typecheck
 
-# Run tests (520+ tests, 35 test files)
+# Run tests (580+ tests, 39 test files)
 npm run test
 
 # Launch Electron app (dev mode)
@@ -191,7 +190,7 @@ Aether is v0.1.0 with the following implemented:
 - **Memory**: In-memory vector store (cosine similarity), memory store (TTL, keyword search), RAG engine (hybrid retrieval, 3 chunking strategies)
 - **Security**: RBAC with 5 built-in roles (admin, operator, developer, agent, viewer), hierarchical inheritance, glob resource matching
 - **Telemetry**: Pino structured logging with OTel trace context injection, OpenTelemetry tracing (console + OTLP exporters), metrics (counters, gauges, histograms with percentile support)
-- **Backend**: HTTP/WebSocket server (native, no framework), pattern-matched router, in-memory stores, CRUD routes, native WebSocket frame encoding/decoding
+- **Backend**: HTTP/WebSocket server (native, no framework), pattern-matched router, in-memory stores, CRUD routes, hardened native WebSocket (RFC 6455 frame reassembly, masked-frame enforcement, 1 MB frame/payload and per-socket memory bounds, outbound backlog cap, full teardown on protocol errors, Origin allow-list), request body size limit (1 MB default, per-server `maxBodySize` incl. chunked bodies)
 - **Electron Shell**: Main process with IPC handlers, tray, auto-updater (electron-updater), crash reporter, preload bridge
 - **Electron IPC Bridge**: Typed protocol with 12 channel groups (app, system, backend, agents, providers, executions, plugins, memory, window, update, maximize-changed), contextBridge preload API, `backend-bridge.ts` in-memory stores mirroring all REST API routes
 - **Frontend (React GUI)**: 8 complete pages — Dashboard, Providers, Agents, Workflows, Memory, Executions, Plugins, Settings — all connected to real data via IPC bridge (window.electronAPI). Zustand store with persist middleware for settings. Custom title bar with window controls. Sidebar navigation with active state. Components include: SettingsSection/SettingsRow, toggle switches, dropdown selects, text inputs, sliders, tag groups, key-value editors, buttons with danger/primary variants
@@ -202,7 +201,33 @@ Aether is v0.1.0 with the following implemented:
 - **SDK**: AetherAgent wrapping OpenAI Agents SDK, AetherRunner with provider support, ToolRegistry, message conversion
 - **Docker Deployment**: Dockerfile + docker-compose.yml for containerized operation via `docker compose up --build`
 - **CI/CD**: GitHub Actions (lint, type-check, test with sharding, build), electron-builder config (Windows/macOS/Linux)
-- **Testing**: 520+ tests across 35 test files, covering all 17 packages
+- **Testing**: 580+ tests across 39 test files, covering all 17 packages
+
+### Latest Iteration — v0.1.1 Security & Cross-Platform Hardening
+
+This iteration closed 10 evidence-backed defects found by three independent audit lenses (Windows cross-platform, async/reliability, security):
+
+- **Windows support** — `ts-runtime` resolves the tsx entry via `fileURLToPath` + `process.execPath` (works on Windows, where `.cmd` shims cannot be `execFile`'d); `execShell` now quotes args correctly for `cmd.exe` (POSIX single-quotes are inert there) and uses `windowsVerbatimArguments`.
+- **WebSocket hardening** — remote crash/OOM vectors removed: per-socket frame reassembly (fragmented and coalesced frames handled), strict length bounds before `Buffer.alloc`, masked-client-frame enforcement, control-frame ≤125 (RFC 6455 §5.5), bounded receive buffer, outbound write-backlog cap, and full socket teardown on protocol errors. Optional Origin allow-list wired from `setCorsOrigins`.
+- **Request body limits** — unbounded body accumulation replaced with a 1 MB default (`AetherServerOptions.maxBodySize`), enforced for both `Content-Length` and chunked requests (413).
+- **Conditional graph edges** — `gt/gte/lt/lte` operators in conditional workflow edges now actually evaluate (previously always `false`, so documented branches never fired).
+- **RAG chunking** — `chunkFixed` can no longer infinite-loop on misconfigured overlap/size (config clamped + guaranteed forward progress).
+- **Sandbox safety** — `copyFilesToSandbox` writes content via base64 (`printf %s '<b64>' | base64 -d > path`) and rejects path traversal; browser auto-install validates the browser name against an allow-list before running `npx playwright install`.
+- **Server lifecycle** — `stop()` clears its force-close timer and uses `closeIdleConnections()` so in-flight requests are not aborted at shutdown.
+
+Verification: **581 tests passing (was 548) across 39 files, `tsc -b` clean**, plus a dual-adversarial review loop (security + correctness reviewers, two rounds) before commit.
+
+---
+
+## Roadmap
+
+Next iterations target production hardening of the control plane:
+
+- **Authentication & authorization** — the HTTP/WebSocket API is currently unauthenticated on `0.0.0.0:3001`; wire the existing `aether-security` RBAC into backend routes and add per-session auth (API keys/tokens).
+- **Credential storage** — replace the plaintext JSON keychain fallback with the encrypted-file vault (currently dead code) and 0600 permissions; stop persisting raw provider API keys in the renderer (`localStorage`).
+- **WebSocket lifecycle** — aggregate connection-count cap and an idle/partial-frame reaper to bound FD usage by many half-open peers.
+- **Reliability parity** — apply memory-store `defaultTtlMs` at write time, isolate event-bus subscriber failures (per-handler try/catch), and fix stale execution state when a `threadId` is reused.
+- **Cross-platform CI** — add a Windows runner job to exercise the Windows-specific paths (tsx entry, cmd.exe escaping) on every push.
 
 ---
 

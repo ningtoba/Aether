@@ -54,6 +54,30 @@ export const SANDBOX_PROFILES: Record<SandboxProfile, SandboxLimits> = {
 };
 
 export const DEFAULT_LIMITS: SandboxLimits = { memoryMb: 512, cpuSeconds: 30, processes: 50, network: false, writeAccess: false };
+/**
+ * Validate a sandbox-relative destination path and return it normalized to
+ * forward slashes. Absolute paths and `..` traversal segments are rejected so
+ * a caller cannot write outside the sandbox working directory.
+ */
+export function assertSafeSandboxPath(relPath: string): string {
+  if (!relPath || relPath.length === 0) {
+    throw new Error("Empty sandbox file path");
+  }
+  if (relPath.startsWith("/") || /^[a-zA-Z]:/.test(relPath)) {
+    throw new Error(`Absolute paths are not allowed in sandbox files: "${relPath}"`);
+  }
+  const normalized = relPath.replace(/\\/g, "/");
+  const segments = normalized.split("/");
+  if (segments.includes("..")) {
+    throw new Error(`Path traversal is not allowed in sandbox files: "${relPath}"`);
+  }
+  return normalized;
+}
+
+/** Single-quote a string for POSIX /bin/sh, neutralizing embedded quotes. */
+export function shQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
 
 // ---------------------------------------------------------------------------
 // Docker sandbox — isolated code execution via ephemeral containers
@@ -287,24 +311,26 @@ export async function copyFilesToSandbox(
   const container = docker.getContainer(containerId);
 
   for (const file of files) {
-    // First, ensure the parent directory exists
-    const parentDir = file.path.includes("/")
-      ? file.path.substring(0, file.path.lastIndexOf("/"))
+    const safePath = assertSafeSandboxPath(file.path);
+    const parentDir = safePath.includes("/")
+      ? safePath.substring(0, safePath.lastIndexOf("/"))
       : "";
+    const dirTarget = parentDir ? `${destDir}/${parentDir}` : destDir;
 
-    await execInContainer(container, ["sh", "-c", `mkdir -p '${destDir}/${parentDir}'`]);
+    await execInContainer(container, ["sh", "-c", `mkdir -p ${shQuote(dirTarget)}`]);
 
-    // Write content via heredoc
-    const writeCmd = [
+    // Send content as base64 so no byte sequence in the payload can break out
+    // of a shell string or terminate a heredoc early.
+    const base64 = Buffer.from(file.content, "utf-8").toString("base64");
+    await execInContainer(container, [
       "sh", "-c",
-      `cat > '${destDir}/${file.path}' << 'AETHER_EOF'\n${file.content}\nAETHER_EOF`,
-    ];
-    await execInContainer(container, writeCmd);
+      `printf %s ${shQuote(base64)} | base64 -d > ${shQuote(`${destDir}/${safePath}`)}`,
+    ]);
 
     // Set mode after writing
     if (file.mode) {
       await execInContainer(container, [
-        "chmod", file.mode.toString(8), `'${destDir}/${file.path}'`,
+        "chmod", file.mode.toString(8), `${destDir}/${safePath}`,
       ]);
     }
   }

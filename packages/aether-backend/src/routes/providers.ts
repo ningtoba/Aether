@@ -3,7 +3,7 @@
  */
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteParams } from '../router.js';
-import { jsonResponse, parseBody, notFound, badRequest } from '../utils.js';
+import { jsonResponse, parseBody, notFound, badRequest, payloadTooLarge } from '../utils.js';
 
 interface ProviderRecord {
   id: string;
@@ -27,7 +27,7 @@ export async function addProvider(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const body = await parseBody<{
+  const parsed = await parseBody<{
     id?: string;
     name?: string;
     type?: string;
@@ -35,7 +35,13 @@ export async function addProvider(
     apiKey?: string;
   }>(req);
 
-  if (!body || !body.name || !body.type) {
+  if (!parsed.ok) {
+    if (parsed.reason === 'too_large') return payloadTooLarge(res);
+    return badRequest(res, 'Provider name and type are required');
+  }
+  const body = parsed.value;
+
+  if (!body.name || !body.type) {
     return badRequest(res, 'Provider name and type are required');
   }
 

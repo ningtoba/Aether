@@ -236,10 +236,26 @@ function evalCond(e: EdgeDefinition, data: Record<string, unknown>): boolean {
       case "eq": match = v === c.value; break;
       case "neq": match = v !== c.value; break;
       case "exists": match = v !== undefined && v !== null; break;
-      case "gt": case "gte": case "lt": case "lte": match = false; break;
+      case "gt": { const cmp = compareValues(v, c.value); match = cmp !== null && cmp > 0; break; }
+      case "gte": { const cmp = compareValues(v, c.value); match = cmp !== null && cmp >= 0; break; }
+      case "lt": { const cmp = compareValues(v, c.value); match = cmp !== null && cmp < 0; break; }
+      case "lte": { const cmp = compareValues(v, c.value); match = cmp !== null && cmp <= 0; break; }
       case "matches": { if (typeof v === "string" && typeof c.value === "string") { try { match = new RegExp(c.value).test(v); } catch { match = v.includes(c.value); } } break; }
     }
     if (!match) return false;
   }
   return true;
+}
+
+/**
+ * Compare two values for ordering. Returns a negative/zero/positive number,
+ * or `null` when the values are not order-comparable.
+ */
+function compareValues(a: unknown, b: unknown): number | null {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  if (typeof a === "bigint" && typeof b === "bigint") return a < b ? -1 : a > b ? 1 : 0;
+  if (typeof a === "string" && typeof b === "string") return a < b ? -1 : a > b ? 1 : 0;
+  if (typeof a === "boolean" && typeof b === "boolean") return Number(a) - Number(b);
+  if (a instanceof Date && b instanceof Date) return a.getTime() - b.getTime();
+  return null;
 }

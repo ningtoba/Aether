@@ -12,6 +12,8 @@ import {
   readOutputFile,
   VERSION,
 } from "./index.js";
+import { getTsxEntryPath, tsxBinaryName } from "./index.js";
+import { existsSync } from "node:fs";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -88,5 +90,26 @@ describe("readOutputFile", () => {
     expect(() => readOutputFile("/nonexistent/output.json")).toThrow(
       "Output file not found",
     );
+  });
+});
+describe("getTsxEntryPath", () => {
+  it("uses tsx.cmd on Windows and tsx on POSIX for PATH fallback", () => {
+    expect(tsxBinaryName("win32")).toBe("tsx.cmd");
+    expect(tsxBinaryName("linux")).toBe("tsx");
+    expect(tsxBinaryName("darwin")).toBe("tsx");
+  });
+
+  it("resolves the tsx entry module in this workspace", () => {
+    const entry = getTsxEntryPath();
+    expect(entry.endsWith("cli.mjs")).toBe(true);
+    expect(existsSync(entry)).toBe(true);
+  });
+
+  it("does not produce a drive-relative path on any platform", () => {
+    const platforms: NodeJS.Platform[] = ["win32", "linux", "darwin"];
+    for (const platform of platforms) {
+      expect(getTsxEntryPath(platform).startsWith("\\C:")).toBe(false);
+      expect(getTsxEntryPath(platform).startsWith("/C:")).toBe(false);
+    }
   });
 });

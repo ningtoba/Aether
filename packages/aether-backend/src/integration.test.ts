@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { AetherServer } from "./server.js";
 import { WebSocketManager } from "./websocket.js";
+import net from "node:net";
 
 // ---------------------------------------------------------------------------
 // Full HTTP server integration
@@ -176,6 +177,71 @@ describe("CORS integration", () => {
     expect(res.headers.get("access-control-allow-origin")).toBe("*");
   });
 });
+describe("request body size limits", () => {
+  it("rejects advertised oversized bodies with 413", async () => {
+    const small = new AetherServer({ port: 0, host: "127.0.0.1", maxBodySize: 64 });
+    await small.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${small.getPort()}/api/agents`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "x".repeat(200) }),
+      });
+      expect(res.status).toBe(413);
+    } finally {
+      await small.stop();
+    }
+  });
+
+  it("accepts bodies within the limit", async () => {
+    const small = new AetherServer({ port: 0, host: "127.0.0.1", maxBodySize: 1024 });
+    await small.start();
+    try {
+      const res = await fetch(`http://127.0.0.1:${small.getPort()}/api/agents`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "ok" }),
+      });
+      expect(res.status).toBe(201);
+    } finally {
+      await small.stop();
+    }
+  });
+  it("caps chunked request bodies (no Content-Length) at the configured limit", async () => {
+    const small = new AetherServer({ port: 0, host: "127.0.0.1", maxBodySize: 64 });
+    await small.start();
+    const port = small.getPort()!;
+    const body = JSON.stringify({ name: "x".repeat(200) });
+    const chunks: string[] = [];
+    for (let i = 0; i < body.length; i += 16) {
+      const piece = body.slice(i, i + 16);
+      chunks.push(piece.length.toString(16) + "\r\n" + piece + "\r\n");
+    }
+    const payload =
+      "POST /api/agents HTTP/1.1\r\n" +
+      "Host: 127.0.0.1\r\n" +
+      "Content-Type: application/json\r\n" +
+      "Transfer-Encoding: chunked\r\n\r\n" +
+      chunks.join("") +
+      "0\r\n\r\n";
+
+    const socket = new net.Socket();
+    const response = await new Promise<string>((resolve, reject) => {
+      socket.setTimeout(3_000, () => resolve(""));
+      socket.on("error", reject);
+      socket.on("data", (d) => {
+        const text = d.toString();
+        if (text.includes("\r\n\r\n")) {
+          socket.destroy();
+          resolve(text);
+        }
+      });
+      socket.connect(port, "127.0.0.1", () => socket.write(payload));
+    });
+    expect(response).toContain("413");
+    await small.stop();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // WebSocket frame encoding/decoding end to end
@@ -186,6 +252,20 @@ describe("WebSocket frame encoding/decoding E2E", () => {
   beforeEach(() => {
     wsm = new WebSocketManager();
   });
+  function maskClientFrame(data: string): Buffer {
+    const payload = Buffer.from(data, "utf-8");
+    const mask = Buffer.from([0x01, 0x02, 0x03, 0x04]);
+    const masked = Buffer.from(payload);
+    for (let i = 0; i < masked.length; i++) masked[i] ^= mask[i % 4];
+    const lenBytes: number[] = [];
+    for (let i = 7; i >= 0; i--) lenBytes.push(Number((BigInt(payload.length) >> BigInt(i * 8)) & 0xffn));
+    const header: number[] = payload.length < 126
+      ? [0x81, 0x80 | payload.length]
+      : payload.length < 65536
+        ? [0x81, 0x80 | 126, (payload.length >> 8) & 0xff, payload.length & 0xff]
+        : [0x81, 0x80 | 127, ...lenBytes];
+    return Buffer.concat([Buffer.from(header), mask, masked]);
+  }
 
   it("encode then decode a text frame produces original data", () => {
     const original = "Hello, Aether WebSocket!";
@@ -194,10 +274,11 @@ describe("WebSocket frame encoding/decoding E2E", () => {
     expect(frame).toBeInstanceOf(Buffer);
     expect(frame.length).toBeGreaterThan(original.length);
 
+    // decode a client-style (masked) frame of the same payload
     // @ts-expect-error - accessing private method for test
-    const decoded = wsm.decodeFrame(frame);
+    const decoded = wsm.tryParseFrame(maskClientFrame(original));
     expect(decoded).not.toBeNull();
-    expect(decoded!.toString()).toBe(original);
+    expect(decoded!.payload.toString()).toBe(original);
   });
 
   it("encode then decode a large text frame (>64KB)", () => {
@@ -205,25 +286,61 @@ describe("WebSocket frame encoding/decoding E2E", () => {
     // @ts-expect-error - accessing private method for test
     const frame = wsm.createTextFrame(original);
     // @ts-expect-error - accessing private method for test
-    const decoded = wsm.decodeFrame(frame);
+    const decoded = wsm.tryParseFrame(maskClientFrame(original));
     expect(decoded).not.toBeNull();
-    expect(decoded!.toString()).toBe(original);
-    expect(decoded!.length).toBe(70_000);
+    expect(decoded!.payload.length).toBe(70_000);
   });
 
-  it("decode returns null for non-text opcodes", () => {
+  it("decode rejects unsupported opcodes", () => {
     // Binary frame (opcode 0x02)
     const frame = Buffer.from([0x82, 0]);
     // @ts-expect-error - accessing private method for test
-    const decoded = wsm.decodeFrame(frame);
-    expect(decoded).toBeNull();
+    expect(() => wsm.tryParseFrame(frame)).toThrow(/opcode/);
   });
 
   it("decode returns null for frames shorter than 2 bytes", () => {
     // @ts-expect-error - accessing private method for test
-    const decoded = wsm.decodeFrame(Buffer.from([0x81]));
+    const decoded = wsm.tryParseFrame(Buffer.from([0x81]));
     expect(decoded).toBeNull();
   });
+  it("tears down the connection on a protocol error instead of buffering forever", async () => {
+    // Real-socket E2E: after an unmasked (protocol-violating) frame the server
+    // must fully destroy the socket; a half-close would let the peer keep
+    // streaming bytes into the rx buffer and grow memory without bound.
+    const srv = new AetherServer({ port: 0, host: "127.0.0.1" });
+    await srv.start();
+    const port = srv.getPort()!;
+
+    const socket = new net.Socket();
+    // Consume the server's 101 response: without a flowing reader the client
+    // stream stays paused, buffered bytes are never drained, and 'end'/'close'
+    // never fire — which would hang the assertion below.
+    socket.on("data", () => {});
+    const closed = new Promise<void>((resolve) => {
+      socket.once("close", () => resolve());
+      socket.once("error", () => { /* destroy arrives as error or close */ });
+    });
+    await new Promise<void>((resolve, reject) => {
+      socket.connect(port, "127.0.0.1", () => {
+        socket.write(
+          "GET / HTTP/1.1\r\n" +
+          "Host: 127.0.0.1\r\n" +
+          "Upgrade: websocket\r\n" +
+          "Connection: Upgrade\r\n" +
+          "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n" +
+          "Sec-WebSocket-Version: 13\r\n\r\n",
+        );
+        // Give the server a moment to complete the handshake before the
+        // malformed frame; real I/O with an external peer cannot be faked.
+        setTimeout(() => resolve(), 100);
+      });
+      socket.on("error", reject);
+    });
+    socket.write(Buffer.from([0x81, 0x02, 0x68, 0x69]));
+
+    await closed;
+    await srv.stop();
+  }, 5_000);
 
   it("broadcast sends JSON-formatted events to all clients", () => {
     const sentMessages: string[] = [];

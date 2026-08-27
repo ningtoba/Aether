@@ -6,7 +6,17 @@
  * works gracefully even if playwright-core is not installed.
  */
 
+import { execSync } from "node:child_process";
+import { existsSync } from "node:fs";
+
 export const VERSION = "0.1.0";
+/** Browser types that may be launched or auto-installed. */
+export const BROWSER_NAMES = ["chromium", "firefox", "webkit"] as const;
+
+/** Type guard for supported browser names (durable contract, also used at runtime). */
+export function isSupportedBrowser(name: string): name is (typeof BROWSER_NAMES)[number] {
+  return (BROWSER_NAMES as readonly string[]).includes(name);
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -83,7 +93,6 @@ async function ensureBrowserInstalled(
   try {
     const browserType = pw[browserName];
     const executablePath = browserType.executablePath();
-    const { existsSync } = await import("node:fs");
     if (existsSync(executablePath)) {
       return true;
     }
@@ -92,7 +101,10 @@ async function ensureBrowserInstalled(
   }
 
   try {
-    const { execSync } = await import("node:child_process");
+    // The name is interpolated into a shell command; only ever allow-listed
+    // identifiers may reach it, so an attacker-supplied value cannot run
+    // arbitrary commands on the host.
+    if (!isSupportedBrowser(browserName)) return false;
     execSync(`npx playwright install ${browserName}`, {
       stdio: "pipe",
       timeout: 120_000,

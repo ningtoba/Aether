@@ -46,6 +46,9 @@ export async function execShell(
       : process.env,
     stdio: ["pipe", "pipe", "pipe"],
     signal,
+    // Do not let Node re-quote our already-quoted command line on Windows:
+    // without this, Node would mangle the command string for cmd.exe.
+    ...(process.platform === "win32" ? { windowsVerbatimArguments: true } : {}),
   });
 
   return collectOutput(child, def, startedAt, onChunk);
@@ -86,7 +89,33 @@ export async function execShellDocker(
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function escapeShellArg(arg: string): string {
+/**
+ * Escape a single argument for a shell invocation.
+ *
+ * POSIX shells quote with single quotes. cmd.exe has no quote semantics for
+ * single quotes (they are passed through literally), so on Windows we wrap in
+ * double quotes and caret-escape the metacharacters that stay active inside
+ * them (`%` expansion, delayed-expansion `!`, and the caret itself, ahead of
+ * quote doubling). Exported so the per-platform logic is unit-testable on any
+ * host OS.
+ */
+export function escapeShellArg(
+  arg: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform === "win32") {
+    // Order matters: escape the caret first so the carets we inject below
+    // are never themselves re-escaped, then expansion metachars, then quotes.
+    // CR/LF are stripped outright so embedded newlines cannot split the
+    // command line cmd.exe builds.
+    const escaped = arg
+      .replace(/[\r\n]/g, " ")
+      .replace(/\^/g, "^^")
+      .replace(/%/g, "^%")
+      .replace(/!/g, "^!")
+      .replace(/"/g, '""');
+    return `"${escaped}"`;
+  }
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
