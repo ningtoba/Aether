@@ -10,31 +10,59 @@
  * keytar is unavailable (headless servers, Docker, WSL without dbus).
  *
  * The fallback encryption key is derived from a machine-specific seed
- * (/etc/machine-id or a generated UUID) — it's not as secure as a real
- * keychain but keeps secrets out of plaintext on disk.
+ * (/etc/machine-id or the hostname). This protects against casual disclosure
+ * and backup exfiltration on single-user hosts — it is NOT a defense against
+ * same-user malware or root, which can read the key seed and the vault file.
  */
 
 import { randomBytes, createCipheriv, createDecipheriv, createHash } from 'node:crypto';
-import { readFile, writeFile } from 'node:fs/promises';
-import { readFileSync, existsSync, mkdirSync } from 'node:fs';
+import { readFile, writeFile, rename } from 'node:fs/promises';
+import { readFileSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
 
-// ── Keytar fallback (pure JS JSON file when keytar is unavailable) ─
+// ── Keytar interface (optional OS keychain) ─────────────────────────
 
-let _keytar: typeof import('./vault-fallback.js').default | null = null;
+/** Minimal surface of the optional `keytar` dependency. */
+interface KeytarLike {
+  setPassword(service: string, account: string, password: string): Promise<void>;
+  getPassword(service: string, account: string): Promise<string | null>;
+  deletePassword(service: string, account: string): Promise<boolean>;
+  findCredentials(service: string): Promise<Array<{ account: string; password: string }>>;
+}
+
+let _keytar: KeytarLike | null = null;
 let _keytarAttempted = false;
 
-async function getKeytar(): Promise<typeof import('./vault-fallback.js').default | null> {
+/** Serialize read-modify-write cycles on the encrypted file vault. */
+let fileOpQueue: Promise<void> = Promise.resolve();
+
+function withFileLock<T>(operation: () => Promise<T>): Promise<T> {
+  const run = fileOpQueue.then(operation, operation);
+  fileOpQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
+/**
+ * Resolve the OS keychain (keytar) if installed. Returns null when keytar is
+ * unavailable — callers then fall back to the AES-256-GCM encrypted file
+ * vault. A missing keytar must never mean "plaintext": credentials always go
+ * to either a real keychain or the encrypted file.
+ */
+async function getKeytar(): Promise<KeytarLike | null> {
   if (_keytarAttempted) return _keytar;
   _keytarAttempted = true;
   try {
     const keytarModule = await import(/* @vite-ignore */ 'keytar' as string);
-    _keytar = keytarModule as unknown as typeof import('./vault-fallback.js').default;
+    // keytar is a CommonJS addon; Node may expose the API only via `.default`
+    // (cjs-module-lexer named exports are unreliable for native modules).
+    const mod = (keytarModule as { default?: unknown }).default ?? keytarModule;
+    _keytar = mod as unknown as KeytarLike;
   } catch {
-    // keytar not available — use the JSON file fallback
-    const fallback = await import('./vault-fallback.js');
-    _keytar = fallback.default;
+    _keytar = null;
   }
   return _keytar;
 }
@@ -121,21 +149,42 @@ async function readFileVault(): Promise<FileVaultStore> {
   }
   try {
     const raw = await readFile(VAULT_PATH, 'utf8');
-    // The file vault itself is encrypted at rest
+    if (raw.length === 0) throw new Error('empty vault file');
     const parts = raw.split('.');
-    if (parts.length !== 3) return { entries: {} };
+    if (parts.length !== 3) throw new Error('malformed vault file');
     const decrypted = decrypt(parts[0], parts[1], parts[2]);
     return JSON.parse(decrypted);
-  } catch {
+  } catch (err) {
+    // An undecryptable/truncated vault must never be treated as an empty
+    // store — the next serialized set() would read-modify-write over it and
+    // destroy every key. Preserve the ciphertext under a timestamped name for
+    // manual recovery, then continue with a clean store.
+    if (existsSync(VAULT_PATH)) {
+      try {
+        const backupPath = `${VAULT_PATH}.corrupt-${Date.now()}`;
+        await rename(VAULT_PATH, backupPath);
+        console.warn(
+          `[Vault] could not decrypt vault.enc (${(err as Error).message}); ` +
+            `preserved as ${backupPath}. Check host identity (machine-id/hostname).`,
+        );
+      } catch {
+        // Best-effort backup; never let this mask the underlying failure.
+      }
+    }
     return { entries: {} };
   }
 }
 
+/** Write the encrypted vault atomically with owner-only permissions. */
 async function writeFileVault(store: FileVaultStore): Promise<void> {
   const json = JSON.stringify(store);
   const { encrypted, iv, tag } = encrypt(json);
-  mkdirSync(VAULT_DIR, { recursive: true });
-  await writeFile(VAULT_PATH, `${encrypted}.${iv}.${tag}`, 'utf8');
+  // Owner-only directory + file so the ciphertext (and its decryption key
+  // material in /etc/machine-id) is not world-readable on multi-user hosts.
+  mkdirSync(VAULT_DIR, { recursive: true, mode: 0o700 });
+  const tmpPath = join(VAULT_DIR, `.vault.tmp-${process.pid}`);
+  await writeFile(tmpPath, `${encrypted}.${iv}.${tag}`, { encoding: 'utf8', mode: 0o600 });
+  await rename(tmpPath, VAULT_PATH);
 }
 
 // ── Public API ─────────────────────────────────────────────────────
@@ -147,7 +196,7 @@ async function writeFileVault(store: FileVaultStore): Promise<void> {
  * AES-256-GCM encrypted file at ~/.config/aether/vault.enc.
  */
 export class Vault {
-  private keytar: typeof import('./vault-fallback.js').default | null = null;
+  private keytar: KeytarLike | null = null;
   private ready = false;
   private usingKeytar = false;
 
@@ -156,6 +205,48 @@ export class Vault {
     this.keytar = await getKeytar();
     this.usingKeytar = this.keytar !== null;
     this.ready = true;
+    await this.migrateLegacyPlaintext();
+  }
+
+  /**
+   * Older Aether versions stored provider keys in a PLAINTEXT JSON file at
+   * ~/.aether/keychain.json. On upgrade, migrate any such keys into the vault
+   * (encrypted file or keychain) and delete the plaintext file so credentials
+   * do not linger on disk in clear.
+   */
+  private async migrateLegacyPlaintext(): Promise<void> {
+    const legacyPath = join(homedir(), '.aether', 'keychain.json');
+    if (!existsSync(legacyPath)) return;
+
+    try {
+      const raw = readFileSync(legacyPath, 'utf8');
+      const store = JSON.parse(raw) as Record<string, string>;
+      let migrated = 0;
+      for (const [key, secret] of Object.entries(store)) {
+        if (typeof secret !== 'string' || secret.length === 0) continue;
+        // Legacy key format: `${SERVICE_NAME}:${providerId}:${type}`
+        const account = key.startsWith(`${SERVICE_NAME}:`)
+          ? key.slice(SERVICE_NAME.length + 1)
+          : key;
+        const colonIdx = account.lastIndexOf(':');
+        const providerId = colonIdx === -1 ? account : account.slice(0, colonIdx);
+        const type = colonIdx === -1 ? 'api-key' : account.slice(colonIdx + 1);
+        if (!providerId) continue;
+        await this.set(providerId, type === 'auth-token' ? 'auth-token' : 'api-key', secret);
+        migrated += 1;
+      }
+      // Only remove the plaintext file after a successful full migration.
+      rmSync(legacyPath, { force: true });
+      if (migrated > 0) {
+        console.warn(
+          `[Vault] migrated ${migrated} legacy plaintext credential(s) into the encrypted vault and removed ~/.aether/keychain.json.`,
+        );
+      }
+    } catch (err) {
+      // Never delete the legacy file on failure — prefer duplicate storage over
+      // destroying the last copy of a secret.
+      console.warn(`[Vault] legacy plaintext migration skipped: ${(err as Error).message}`);
+    }
   }
 
   /** Whether the vault is using OS keychain (true) or file fallback (false) */
@@ -180,24 +271,27 @@ export class Vault {
       return;
     }
 
-    // File fallback
-    const store = await readFileVault();
-    const now = Date.now();
-    const key = `${providerId}:${type}`;
+    // File fallback: read-modify-write must be serialized against other
+    // setters/deletes so concurrent writes cannot lose entries.
+    return withFileLock(async () => {
+      const store = await readFileVault();
+      const now = Date.now();
+      const key = `${providerId}:${type}`;
 
-    if (store.entries[key]) {
-      store.entries[key].ciphertext = JSON.stringify(encrypt(secret));
-      store.entries[key].updatedAt = now;
-    } else {
-      store.entries[key] = {
-        type,
-        ciphertext: JSON.stringify(encrypt(secret)),
-        createdAt: now,
-        updatedAt: now,
-      };
-    }
+      if (store.entries[key]) {
+        store.entries[key].ciphertext = JSON.stringify(encrypt(secret));
+        store.entries[key].updatedAt = now;
+      } else {
+        store.entries[key] = {
+          type,
+          ciphertext: JSON.stringify(encrypt(secret)),
+          createdAt: now,
+          updatedAt: now,
+        };
+      }
 
-    await writeFileVault(store);
+      await writeFileVault(store);
+    });
   }
 
   // ── Get ────────────────────────────────────────────────────────
@@ -247,14 +341,16 @@ export class Vault {
       return this.keytar.deletePassword(SERVICE_NAME, `${providerId}:${type}`);
     }
 
-    // File fallback
-    const store = await readFileVault();
-    const key = `${providerId}:${type}`;
-    if (!store.entries[key]) return false;
+    // File fallback: serialize against concurrent setters.
+    return withFileLock(async () => {
+      const store = await readFileVault();
+      const key = `${providerId}:${type}`;
+      if (!store.entries[key]) return false;
 
-    delete store.entries[key];
-    await writeFileVault(store);
-    return true;
+      delete store.entries[key];
+      await writeFileVault(store);
+      return true;
+    });
   }
 
   // ── List ───────────────────────────────────────────────────────
@@ -304,7 +400,7 @@ export class Vault {
 
     // Verify we can write and read
     try {
-      mkdirSync(VAULT_DIR, { recursive: true });
+      mkdirSync(VAULT_DIR, { recursive: true, mode: 0o700 });
       return { ok: true, backend: 'file-fallback' };
     } catch (err) {
       return {

@@ -256,7 +256,19 @@ Streamed runs now produce a correct final response. Previously `completeStream` 
 - **Anthropic**: capture id/model from `message_start`, stop emitting the empty `message_delta` done, accumulate text + `input_json_delta` fragments by content-block index, and emit one `done` built from the accumulators with the correct `stop_reason` mapping.
 - Superseded per-fragment parsers removed from the OpenAI family; mid-stream provider `error` events now surface and terminate the stream instead of becoming a success-looking `done`; discriminating stream tests added for the OpenAI family and Anthropic (and the sequential tool-loop wire tests from v0.1.3 still pass).
 
-Verification: **592 tests passing (was 590) across 40 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
+Verification: **594 tests passing (was 590) across 40 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
+
+---
+
+### Latest Iteration — v0.1.5 Credential-Storage Hardening
+
+API keys and auth headers no longer land on disk in plaintext.
+
+- **Vault encryption reachable** — previously `getKeytar()`'s catch always substituted a plaintext JSON store (`~/.aether/keychain.json`) that reported `usingKeychain: true`, so the AES-256-GCM encrypted-file vault was unreachable dead code. Now a missing OS keychain means `null` (never plaintext): the encrypted vault (`~/.config/aether/vault.enc`, key derived from `/etc/machine-id` or hostname) is the real no-keychain backend, written atomically (temp + rename) with owner-only 0600/0700 perms, and read-modify-write cycles are serialized so concurrent writes cannot lose entries. The plaintext static store was deleted.
+- **Renderer secrets not persisted** — `sanitizePersistedSettings` strips `providers.apiKeys`/`customHeaders` from the zustand-persisted slice, so provider keys and auth headers never reach localStorage; they remain session-only in memory.
+- Threat model: the machine-id-derived key protects against casual disclosure and backup exfiltration on single-user hosts — not against same-user malware an attacker with the key file.
+
+Verification: **601 tests passing (was 594) across 42 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
 
 ---
 
@@ -264,7 +276,7 @@ Verification: **592 tests passing (was 590) across 40 files, `tsc -b` clean, lin
 
 Next iterations target the remaining control-plane and correctness work:
 
-- **Credential storage** — the vault's AES-256-GCM fallback is unreachable dead code (the keytar-less branch loads the plaintext JSON store and reports `usingKeychain: true`); make the encrypted-file store reachable with 0600 perms, and stop persisting raw provider API keys in the renderer settings store.
+- **Persist secrets via the vault** — route provider keys from the renderer to the vault through main-process IPC (safeStorage/keytar) so re-launch keeps keys without ever touching localStorage; replace session-only re-entry.
 - **Authentication & authorization** — the HTTP/WebSocket API is unauthenticated on `0.0.0.0:3001`; wire the existing `aether-security` RBAC into routes and add per-session auth.
 - **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.
 - **Reliability parity** — memory-store `defaultTtlMs` at write time, per-subscriber event-bus isolation, Gemini batch embeddings.

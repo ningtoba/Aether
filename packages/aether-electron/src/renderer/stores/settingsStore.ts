@@ -162,7 +162,8 @@ export interface AllAetherSettings {
 
 // ─── Defaults ───────────────────────────────────────────────────
 
-const DEFAULT_SETTINGS: AllAetherSettings = {
+/** Default settings snapshot (also used as the rehydrate base). */
+export const DEFAULT_SETTINGS: AllAetherSettings = {
   general: {
     theme: 'dark',
     language: 'en',
@@ -314,6 +315,30 @@ interface SettingsStore {
   saveSettings: () => void;
 }
 
+/**
+ * Strip secrets from a settings snapshot before it is persisted. Provider
+ * API keys and custom auth headers must never be written to localStorage/
+ * disk; they live only in the in-memory store for the current session.
+ * Exported so the sanitizer is unit-testable.
+ */
+export function sanitizePersistedSettings(state: { settings: AllAetherSettings }): {
+  settings: AllAetherSettings;
+} {
+  // Empty the secret fields (keeping the shape) so a shallow persist-rehydrate
+  // merge can never leave providers.apiKeys / customHeaders undefined — the
+  // Settings page iterates those objects and would crash on undefined.
+  return {
+    settings: {
+      ...state.settings,
+      providers: {
+        ...state.settings.providers,
+        apiKeys: {},
+        customHeaders: {},
+      },
+    },
+  };
+}
+
 export const useSettingsStore = create<SettingsStore>()(
   persist(
     (set) => ({
@@ -413,7 +438,7 @@ export const useSettingsStore = create<SettingsStore>()(
     }),
     {
       name: 'aether-settings',
-      partialize: (state) => ({ settings: state.settings }),
+      partialize: (state) => sanitizePersistedSettings(state),
       onRehydrateStorage: () => (state) => {
         if (state) state.isDirty = false;
       },

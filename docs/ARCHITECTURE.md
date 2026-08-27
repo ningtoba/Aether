@@ -344,7 +344,7 @@ Current state (honest):
 - **WebSocket hardening** — RFC 6455 frame reassembly, length/memory bounds, masked-frame enforcement, Origin allow-list (see README v0.1.1)
 - **Request body limits** — 1 MB default, configurable `MAX_BODY_SIZE`, enforced for Content-Length and chunked bodies
 - **RBAC** — `aether-security` provides role-based access control with 5 built-in roles, but it is **not yet wired** into the HTTP API
-- **Provider key isolation** — vault exists (`keytar` → plaintext JSON fallback); the AES-256-GCM file store is **not yet reachable** (roadmap)
+- **Provider key isolation** — OS keychain via keytar when available; otherwise an AES-256-GCM encrypted file at `~/.config/aether/vault.enc` (machine-key derived, owner-only perms, atomic writes). Legacy plaintext stores are migrated and removed on upgrade.
 
 Planned (not yet implemented): per-request API authentication (JWT/API keys), per-API-key rate limiting, path allow-listing enforcement, encrypted provider-key storage. **Do not deploy the API on an untrusted network — it is unauthenticated.**
 
