@@ -66,6 +66,23 @@ export class ProviderRegistry {
   );
 
   constructor(protected registry: ModelCapabilityRegistry) {}
+  /**
+   * Resolve a provider type's constructor, failing fast with a clear error
+   * when the type has never been registered instead of silently building an
+   * OpenAI-compatible provider with the wrong wire format.
+   */
+  private static resolveConstructor(type: string): ProviderConstructor {
+    const ctor = ProviderRegistry.customConstructors.get(type);
+    if (!ctor) {
+      throw new Error(
+        `No provider type "${type}" is registered; call registerProviderType() first. ` +
+          `Available types: ${
+            Array.from(ProviderRegistry.customConstructors.keys()).sort().join(', ') || '(none)'
+          }`,
+      );
+    }
+    return ctor;
+  }
 
   // ── Static registration (type-level) ──────────────────────────────
 
@@ -106,9 +123,7 @@ export class ProviderRegistry {
    */
   register(config: ProviderConfig, ...args: unknown[]): this {
     const type = config.provider;
-    const ctor =
-      ProviderRegistry.customConstructors.get(type) ??
-      ProviderRegistry.customConstructors.get('openai_compatible')!;
+    const ctor = ProviderRegistry.resolveConstructor(type);
 
     this.providers.set(config.name, {
       instance: null,
@@ -283,9 +298,7 @@ export class ProviderRegistry {
     ...args: unknown[]
   ): ProviderInterface {
     const type = config.provider;
-    const ctor =
-      ProviderRegistry.customConstructors.get(type) ??
-      ProviderRegistry.customConstructors.get('openai_compatible')!;
+    const ctor = ProviderRegistry.resolveConstructor(type);
     return new ctor(config, registry, ...args);
   }
 }

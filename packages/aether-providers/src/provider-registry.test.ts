@@ -89,3 +89,39 @@ describe('ProviderRegistry lazy init', () => {
     expect(initializeCount).toBe(1);
   });
 });
+describe('ProviderRegistry type resolution', () => {
+  it('throws a clear error when registering an unregistered provider type', () => {
+    const registry = new ProviderRegistry(new ModelCapabilityRegistry());
+    expect(() =>
+      registry.register({ name: 'typo', provider: 'not-a-real-type' as any, models: [] }),
+    ).toThrow(/No provider type "not-a-real-type" is registered/);
+  });
+
+  it('throws via create() instead of silently building an OpenAI-compatible provider', () => {
+    expect(() =>
+      ProviderRegistry.create(
+        { name: 'x', provider: 'bogus' as any, models: [] },
+        new ModelCapabilityRegistry(),
+      ),
+    ).toThrow(/No provider type "bogus" is registered/);
+  });
+
+  it('resolves every built-in provider type without throwing', () => {
+    const registry = new ProviderRegistry(new ModelCapabilityRegistry());
+    const builtins = [
+      'openai',
+      'openai_compatible',
+      'anthropic',
+      'gemini',
+      'ollama',
+      'vllm',
+      'llamacpp',
+      'openrouter',
+    ];
+    for (const provider of builtins) {
+      expect(() =>
+        registry.register({ name: `p-${provider}`, provider: provider as any, models: [] }),
+      ).not.toThrow();
+    }
+  });
+});

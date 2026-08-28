@@ -38,22 +38,34 @@ export class ModelCapabilityRegistry {
   }
 
   /** Get capabilities for a model, falling back to provider defaults */
+  /** Return a defensive copy so callers cannot mutate stored registry state. */
+  private cloneCaps(caps: ModelCapabilities): ModelCapabilities {
+    const clone = Object.assign({}, caps, { supported: new Set(caps.supported) });
+    return clone;
+  }
   get(model: string, provider?: string): ModelCapabilities {
     const key = model.toLowerCase();
 
     // Exact match
     const exact = this.knownModels.get(key);
-    if (exact) return exact;
+    if (exact) return this.cloneCaps(exact);
 
-    // Try prefix match (e.g. "gpt-4-turbo-2024-04-09" → "gpt-4-turbo")
+    // Longest-prefix match — the specific known id wins, so a dated leaf like
+    // "gpt-4o-mini-2024-07-18" resolves to "gpt-4o-mini", not the pricier "gpt-4o".
+    let best: ModelCapabilities | undefined;
+    let bestKey: string | undefined;
     for (const [known, caps] of this.knownModels) {
-      if (key.startsWith(known)) return caps;
+      if (key.startsWith(known) && (bestKey === undefined || known.length > bestKey.length)) {
+        best = caps;
+        bestKey = known;
+      }
     }
+    if (best) return this.cloneCaps(best);
 
     // Provider default fallback
     if (provider) {
       const fallback = this.providerDefaults.get(provider.toLowerCase());
-      if (fallback) return fallback;
+      if (fallback) return this.cloneCaps(fallback);
     }
 
     // Sensible default fallback
@@ -214,6 +226,35 @@ export class ModelCapabilityRegistry {
       },
     };
     this.registerMany(gemini);
+
+    // ── OpenAI ────────────────────────────────────────────────
+    this.setProviderDefaults('openai', {
+      contextWindow: 128_000,
+      maxOutputTokens: 16_384,
+      supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
+    });
+
+    // ── Anthropic ─────────────────────────────────────────────
+    this.setProviderDefaults('anthropic', {
+      contextWindow: 200_000,
+      maxOutputTokens: 8_192,
+      supported: cap('chat', 'streaming', 'function_calling', 'tool_use', 'json_mode', 'vision'),
+    });
+
+    // ── Gemini ────────────────────────────────────────────────
+    this.setProviderDefaults('gemini', {
+      contextWindow: 1_000_000,
+      maxOutputTokens: 8_192,
+      supported: cap(
+        'chat',
+        'streaming',
+        'function_calling',
+        'tool_use',
+        'json_mode',
+        'vision',
+        'audio',
+      ),
+    });
 
     // ── OpenRouter ────────────────────────────────────────────
     // OpenRouter mirrors provider model capabilities; set a generous default.

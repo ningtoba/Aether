@@ -291,6 +291,17 @@ export const DEFAULT_SETTINGS: AllAetherSettings = {
     refreshInterval: 5000,
   },
 };
+/**
+ * Deep-clone a settings category from DEFAULT_SETTINGS. resetCategory must
+ * not hand out references into the shared default object: nested subtrees
+ * (retryPolicy, resourceLimits, defaultViewport, commitSettings, …) would
+ * otherwise alias DEFAULT_SETTINGS for the rest of the session.
+ */
+export function resetCategorySettings(
+  category: keyof AllAetherSettings,
+): AllAetherSettings[keyof AllAetherSettings] {
+  return JSON.parse(JSON.stringify(DEFAULT_SETTINGS[category]));
+}
 
 // ─── Store ──────────────────────────────────────────────────────
 
@@ -428,7 +439,7 @@ export const useSettingsStore = create<SettingsStore>()(
 
       resetCategory: (category) =>
         set((state) => ({
-          settings: { ...state.settings, [category]: { ...DEFAULT_SETTINGS[category] } },
+          settings: { ...state.settings, [category]: resetCategorySettings(category) },
           isDirty: true,
         })),
 

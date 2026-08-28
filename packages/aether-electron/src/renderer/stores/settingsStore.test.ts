@@ -8,6 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   sanitizePersistedSettings,
+  resetCategorySettings,
   DEFAULT_SETTINGS,
   type AllAetherSettings,
   type ProviderSettings,
@@ -62,5 +63,29 @@ describe('sanitizePersistedSettings', () => {
     sanitizePersistedSettings({ settings: source });
     expect(Object.keys(source.providers)).toContain('apiKeys');
     expect(source.providers.apiKeys.openai).toBe('sk-super-secret');
+  });
+});
+describe('resetCategorySettings', () => {
+  it('returns a deep copy of a category instead of aliasing DEFAULT_SETTINGS', () => {
+    const execution = resetCategorySettings('execution') as AllAetherSettings['execution'];
+    expect(execution).toEqual(DEFAULT_SETTINGS.execution);
+    expect(execution.resourceLimits).not.toBe(DEFAULT_SETTINGS.execution.resourceLimits);
+
+    const orchestration = resetCategorySettings(
+      'orchestration',
+    ) as AllAetherSettings['orchestration'];
+    expect(orchestration.retryPolicy).not.toBe(DEFAULT_SETTINGS.orchestration.retryPolicy);
+  });
+
+  it('keeps later mutations isolated from DEFAULT_SETTINGS', () => {
+    const execution = resetCategorySettings('execution') as AllAetherSettings['execution'];
+    execution.resourceLimits.maxMemoryMB = 9999;
+    expect(DEFAULT_SETTINGS.execution.resourceLimits.maxMemoryMB).toBe(1024);
+
+    const orchestration = resetCategorySettings(
+      'orchestration',
+    ) as AllAetherSettings['orchestration'];
+    orchestration.retryPolicy.maxAttempts = 99;
+    expect(DEFAULT_SETTINGS.orchestration.retryPolicy.maxAttempts).toBe(3);
   });
 });

@@ -170,7 +170,8 @@ export function startExecution(data: {
   // Simulate async execution
   setImmediate(() => {
     const exec = executions.get(id);
-    if (exec) {
+    // Never resurrect an execution cancelled while it was still pending.
+    if (exec && exec.status === 'pending') {
       exec.status = 'running';
       exec.startedAt = now();
       setTimeout(() => {

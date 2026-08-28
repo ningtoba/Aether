@@ -354,6 +354,21 @@ Verification: **643 tests passing (was 632) across 45 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.12 Provider-Resolution & Electron-Bridge Correctness
+
+Six defects from a fresh-lens scout of the providers package (`model-capabilities`, `provider-registry`) and the Electron bridge + renderer settings store, each verified against the source before fixing:
+
+- **Longest-prefix capability lookup** — prefix matching returned the first known key that was a prefix of the query (insertion-ordered), so a dated leaf like `gpt-4o-mini-2024-07-18` resolved to the higher-priced `gpt-4o` (2.5/10) instead of `gpt-4o-mini` (0.15/0.6). The most specific known id now wins.
+- **Provider-level defaults for every provider** — OpenAI, Anthropic and Gemini had no provider defaults, so any unregistered model id (e.g. the real `claude-3-5-haiku-latest`) fell to the 4096-token generic fallback with no tool use/vision. Unknown models of those providers now inherit realistic chat/streaming/tool/vision defaults.
+- **Capability results are defensive copies** — `get()`/`hasCapability()` returned the stored mutable `ModelCapabilities` (live `supported` Set), so a consumer mutating a result corrupted the registry globally. Lookup results are now cloned.
+- **Unknown provider types fail fast** — `register()`/`create()` resolved an unregistered/misspelled type by silently falling back to the OpenAI-compatible constructor (and crashed opaquely if that fallback was itself unregistered, via a non-null-asserted `.get('openai_compatible')!`). Resolution now throws a clear `No provider type … is registered` error and the crash path is gone.
+- **Cancel-before-start respected in the Electron bridge** — `backend-bridge.startExecution` scheduled a `setImmediate` that unconditionally flipped `pending → running` (the HTTP backend got this guard in v0.1.10; the Electron bridge did not), so cancelling a just-created execution resurrected it to `running` then `completed`. The deferred start now only proceeds while `pending`.
+- **Settings reset returns deep copies** — `resetCategory` shallow-cloned `DEFAULT_SETTINGS[category]`, so nested subtrees (`resourceLimits`, `retryPolicy`, `defaultViewport`, …) — including the very defaults the reset reverts to — aliased the shared `DEFAULT_SETTINGS` object for the rest of the session. Resets now deep-clone the category.
+
+Verification: **656 tests passing (was 643) across 47 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:
