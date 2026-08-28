@@ -322,6 +322,22 @@ Verification: **623 tests passing (was 621) across 42 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.10 API Resilience & Telemetry Correctness
+
+Seven defects from a fresh-lens scout of the least-audited surfaces (backend route handlers/router, telemetry metrics/tracer, `MemoryVectorStore`), each verified against the source before fixing:
+
+- **Malformed URLs now return 400** — `Router.match` called `decodeURIComponent` unguarded on path params; a request like `GET /api/agents/%zz` threw URIError outside the request try/catch and could crash/hang the handler. The server now answers 400 for malformed percent-encoding.
+- **Cancel-before-start respected** — `POST /api/executions` scheduled a `setImmediate` that unconditionally flipped `pending → running`, so cancelling a just-created execution let the deferred start resurrect it back to `running`/`completed`. The deferred start now only proceeds while the execution is still `pending`.
+- **Agent updates are validated** — `PUT /api/agents/:id` spread the raw request body onto the record, so a client could forge `status` and store non-object `config`/`name`. Updates are now whitelisted to type-checked `name`/`config`; forged statuses are ignored and invalid types return 400.
+- **Histogram statistics use cumulative buckets correctly** — `MetricsRegistry` stores bucket counts cumulatively (Prometheus-style) but computed `min`/`max`/percentiles as if per-interval: `max` was pinned to the top bucket (30 s) and p50/p90/p99 under-reported once lower buckets filled. Percentiles now take the smallest bucket whose cumulative count reaches the target; `max` is the smallest bucket covering every observation.
+- **Per-recording labels reach snapshots** — `extraLabels` passed to `increment`/`setGauge`/`observe` were only written to a trace log and never merged into stored labels, so dashboard snapshots lost each recording's label dimensions. They are merged into the metric's labels now.
+- **`withSpan` activates the span** — the new span was started but never made current in the OTel context, so log mixins and nested spans inside the callback carried a stale parent (broken traceId/spanId propagation and parent-child hierarchy). The span is now set active for the callback duration.
+- **`MemoryVectorStore` guards vector dimensions** — brute-force cosine similarity only looped over `a.length`; a dimension-mismatched query produced NaN scores that silently dropped results. Mismatched dimensions now score 0 (not similar).
+
+Verification: **632 tests passing (was 623) across 43 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:

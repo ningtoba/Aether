@@ -118,6 +118,7 @@ class MetricsRegistry {
       return;
     }
     state.value += value;
+    if (extraLabels) Object.assign(state.labels, extraLabels);
     log.trace(
       { metric: name, delta: value, ...(extraLabels as Record<string, unknown>) },
       `Counter ${name} += ${value} = ${state.value}`,
@@ -143,6 +144,7 @@ class MetricsRegistry {
       return;
     }
     state.value = value;
+    if (extraLabels) Object.assign(state.labels, extraLabels);
   }
 
   // ── Histogram ─────────────────────────────────────────────────────
@@ -177,6 +179,7 @@ class MetricsRegistry {
         bucket.count += 1;
       }
     }
+    if (extraLabels) Object.assign(state.labels, extraLabels);
   }
 
   // ── Snapshot ──────────────────────────────────────────────────────
@@ -213,10 +216,10 @@ class MetricsRegistry {
       const getPercentile = (p: number): number => {
         if (totalCount === 0) return 0;
         const target = totalCount * p;
-        let cumulative = 0;
+        // Bucket counts are cumulative: the percentile is the smallest bucket
+        // bound whose cumulative count reaches the target count.
         for (const b of sorted) {
-          cumulative += b.count;
-          if (cumulative >= target) return b.le;
+          if (b.count >= target) return b.le;
         }
         return sorted[sorted.length - 1]?.le ?? 0;
       };
@@ -226,7 +229,7 @@ class MetricsRegistry {
         count: state.count,
         avg: state.count > 0 ? state.sum / state.count : 0,
         min: state.count > 0 ? (sorted.find((b) => b.count > 0)?.le ?? 0) : 0,
-        max: state.count > 0 ? (sorted.filter((b) => b.count > 0).pop()?.le ?? 0) : 0,
+        max: state.count > 0 ? (sorted.find((b) => b.count >= state.count)?.le ?? 0) : 0,
         p50: getPercentile(0.5),
         p90: getPercentile(0.9),
         p99: getPercentile(0.99),

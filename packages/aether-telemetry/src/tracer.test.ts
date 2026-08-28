@@ -9,6 +9,7 @@ import {
   extractTraceContext,
   getTracer,
 } from './tracer.js';
+import { context, trace } from '@opentelemetry/api';
 import type { TelemetryConfig } from './types.js';
 
 // Mock @opentelemetry/api
@@ -47,8 +48,10 @@ const mockTracer = {
 vi.mock('@opentelemetry/api', () => ({
   context: {
     active: () => ({}),
+    with: vi.fn((_ctx: any, fn: any, ...args: any[]) => fn(...args)),
   },
   trace: {
+    setSpan: vi.fn((ctx: any, _span: any) => ctx),
     getSpan: vi.fn(() => ({
       end: vi.fn(),
       setStatus: vi.fn(),
@@ -176,6 +179,21 @@ describe('Tracer', () => {
         expect.objectContaining({ code: 1 }), // ERROR
       );
       expect(mockSpan.end).toHaveBeenCalledTimes(1);
+    });
+    it('activates the wrapped span for the callback duration', async () => {
+      const setSpanMock = trace.setSpan as unknown as ReturnType<typeof vi.fn>;
+      const withMock = context.with as unknown as ReturnType<typeof vi.fn>;
+      let inside: any = null;
+
+      await withSpan('active-check', async (span) => {
+        inside = span;
+      });
+
+      expect(inside).toBe(mockSpan);
+      expect(withMock).toHaveBeenCalled();
+      // The span made current for the callback is the withSpan span itself,
+      // not a stale parent (was previously never activated at all).
+      expect(setSpanMock.mock.calls.some((c: any[]) => c[1] === mockSpan)).toBe(true);
     });
   });
 

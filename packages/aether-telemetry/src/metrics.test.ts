@@ -200,3 +200,55 @@ describe('metrics singleton convenience API', () => {
     expect(Object.keys(metrics.snapshot().counters)).toHaveLength(0);
   });
 });
+describe('histogram statistics & labels (cumulative semantics)', () => {
+  let registry: ReturnType<typeof getMetrics>;
+
+  beforeEach(() => {
+    registry = getMetrics();
+    registry.reset();
+  });
+
+  it('computes percentiles from cumulative bucket counts (no double-counting)', () => {
+    registry.histogram('h_stats', [10, 20, 30, 40, 50]);
+    for (let i = 0; i < 10; i++) registry.observe('h_stats', 5);
+    for (let i = 0; i < 5; i++) registry.observe('h_stats', 15);
+    for (let i = 0; i < 3; i++) registry.observe('h_stats', 25);
+    for (let i = 0; i < 2; i++) registry.observe('h_stats', 45);
+
+    const h = registry.snapshot().histograms['h_stats'];
+    // p90 is the 18th value (bucket 30); misreading cumulative counts as
+    // per-interval previously under-reported it to bucket 20.
+    expect(h.p90).toBe(30);
+  });
+
+  it('estimates max as the smallest bucket covering every observation', () => {
+    registry.histogram('h_mx', [10, 20, 30, 40, 50]);
+    for (let i = 0; i < 3; i++) registry.observe('h_mx', 5);
+
+    const h = registry.snapshot().histograms['h_mx'];
+    // The largest observation sits in the le=10 bucket; previously max was
+    // pegged at the top bucket (50) because cumulative counts made every
+    // bucket "non-empty".
+    expect(h.max).toBe(10);
+  });
+
+  it('reflects per-recording labels in the snapshot labels', () => {
+    registry.counter('labeled_c', { defaultLabels: { service: 'aether' } });
+    registry.increment('labeled_c', 2, { route: '/api/agents' });
+    expect(registry.snapshot().counters['labeled_c'].labels).toEqual(
+      expect.objectContaining({ service: 'aether', route: '/api/agents' }),
+    );
+
+    registry.gauge('labeled_g');
+    registry.setGauge('labeled_g', 5, { host: 'h1' });
+    expect(registry.snapshot().gauges['labeled_g'].labels).toEqual(
+      expect.objectContaining({ host: 'h1' }),
+    );
+
+    registry.histogram('labeled_h', [10, 20]);
+    registry.observe('labeled_h', 7, { op: 'run' });
+    expect(registry.snapshot().histograms['labeled_h'].labels).toEqual(
+      expect.objectContaining({ op: 'run' }),
+    );
+  });
+});

@@ -146,8 +146,12 @@ export async function withSpan<T>(
   options?: SpanOptions & { tracerName?: string; tracerVersion?: string },
 ): Promise<T> {
   const span = startSpan(name, options);
+  // Make the new span the active span for the duration of fn, so nested
+  // spans and the log-context mixin inherit this span's trace/span ids
+  // instead of a stale parent.
+  const ctx = trace.setSpan(context.active(), span);
   try {
-    const result = await fn(span);
+    const result = await context.with(ctx, () => fn(span));
     span.setStatus({ code: SpanStatusCode.OK });
     return result;
   } catch (err) {

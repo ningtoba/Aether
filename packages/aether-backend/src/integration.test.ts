@@ -483,3 +483,80 @@ describe('API authentication & RBAC', () => {
     }
   }, 10_000);
 });
+describe('AetherServer resilience', () => {
+  let server: AetherServer;
+
+  beforeEach(() => {
+    server = new AetherServer({ port: 0, host: '127.0.0.1' });
+  });
+
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  it('returns 400 for malformed percent-encoding in a path param', async () => {
+    await server.start();
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/agents/%zz`);
+    expect(res.status).toBe(400);
+  });
+
+  it('does not resurrect a pending execution cancelled before it started', async () => {
+    await server.start();
+    const base = `http://127.0.0.1:${server.getPort()}`;
+
+    const create = await fetch(`${base}/api/executions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input: 'hi' }),
+    });
+    expect(create.status).toBe(201);
+    const exec = ((await create.json()) as any).execution;
+    expect(exec.status).toBe('pending');
+
+    const cancel = await fetch(`${base}/api/executions/${exec.id}/cancel`, { method: 'POST' });
+    expect(cancel.status).toBe(200);
+    expect(((await cancel.json()) as any).execution.status).toBe('cancelled');
+
+    // Let the deferred start (setImmediate) fire; it must not flip to running.
+    await new Promise((r) => setTimeout(r, 50));
+    const after = await fetch(`${base}/api/executions/${exec.id}`);
+    expect(((await after.json()) as any).execution.status).toBe('cancelled');
+  });
+
+  it('ignores a forged status and rejects non-object config / non-string name', async () => {
+    await server.start();
+    const base = `http://127.0.0.1:${server.getPort()}`;
+
+    const create = await fetch(`${base}/api/agents`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'guard' }),
+    });
+    const agentId = ((await create.json()) as any).agent.id;
+
+    // Forging a status must not stick — status stays server-managed.
+    const forged = await fetch(`${base}/api/agents/${agentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'running', name: 'guarded' }),
+    });
+    expect(forged.status).toBe(200);
+    const updated = ((await forged.json()) as any).agent;
+    expect(updated.name).toBe('guarded');
+    expect(updated.status).toBe('idle');
+
+    const badConfig = await fetch(`${base}/api/agents/${agentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ config: 'oops' }),
+    });
+    expect(badConfig.status).toBe(400);
+
+    const badName = await fetch(`${base}/api/agents/${agentId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 42 }),
+    });
+    expect(badName.status).toBe(400);
+  });
+});

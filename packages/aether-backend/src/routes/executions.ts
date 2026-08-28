@@ -68,7 +68,7 @@ export async function startExecution(req: IncomingMessage, res: ServerResponse):
   // Simulate async execution
   setImmediate(() => {
     const exec = executions.get(id);
-    if (exec) {
+    if (exec && exec.status === 'pending') {
       exec.status = 'running';
       exec.startedAt = new Date().toISOString();
 

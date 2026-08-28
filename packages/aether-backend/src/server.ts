@@ -8,7 +8,13 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { createHash } from 'node:crypto';
 import { Router } from './router.js';
 import { WebSocketManager } from './websocket.js';
-import { jsonResponse, parseBody, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
+import {
+  badRequest,
+  jsonResponse,
+  parseBody,
+  serverError,
+  DEFAULT_MAX_BODY_SIZE,
+} from './utils.js';
 import { getHealthStatus } from './routes/health.js';
 import * as agentRoutes from './routes/agents.js';
 import * as providerRoutes from './routes/providers.js';
@@ -235,7 +241,14 @@ export class AetherServer {
       }
     }
 
-    const route = this.router.match(method, url);
+    let route: ReturnType<typeof this.router.match>;
+    try {
+      route = this.router.match(method, url);
+    } catch {
+      // Malformed percent-encoding in a path param (e.g. '/api/agents/%zz')
+      // makes decodeURIComponent throw; surface it as a 400, never a 500/hang.
+      return badRequest(res, 'Malformed URL');
+    }
     if (route) {
       try {
         await route.handler(req, res, route.params);

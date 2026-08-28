@@ -24,9 +24,13 @@ export async function createAgent(
   if (!body.name) {
     return badRequest(res, 'Agent name is required');
   }
+  const config =
+    body.config && typeof body.config === 'object' && !Array.isArray(body.config)
+      ? (body.config as Record<string, unknown>)
+      : undefined;
   const agent = store.createAgent({
     name: body.name,
-    config: body.config as Record<string, unknown>,
+    config,
   });
   jsonResponse(res, 201, { agent });
 }
@@ -51,7 +55,22 @@ export async function updateAgent(
     if (parsed.reason === 'too_large') return payloadTooLarge(res);
     return badRequest(res, 'Invalid request body');
   }
-  const agent = store.updateAgent(params.id as any, parsed.value as any);
+  // Only whitelisted, type-checked fields may be updated by a client; status
+  // and record metadata stay server-managed so a forged body cannot corrupt
+  // the record.
+  const body = parsed.value;
+  const patch: Partial<{ name: string; config: Record<string, unknown> }> = {};
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string') return badRequest(res, 'Invalid request body');
+    patch.name = body.name;
+  }
+  if (body.config !== undefined) {
+    if (typeof body.config !== 'object' || body.config === null || Array.isArray(body.config)) {
+      return badRequest(res, 'Invalid request body');
+    }
+    patch.config = body.config as Record<string, unknown>;
+  }
+  const agent = store.updateAgent(params.id as any, patch as any);
   if (!agent) return notFound(res, 'Agent not found');
   jsonResponse(res, 200, { agent });
 }

@@ -81,6 +81,9 @@ export class MemoryVectorStore implements IVectorStore {
 }
 
 function cosineSimilarity(a: Float64Array, b: Float64Array): number {
+  // A dimension mismatch would silently produce NaN ranks (dropped
+  // results) or wrong scores; treat a mismatched query as not similar.
+  if (a.length !== b.length) return 0;
   let dot = 0,
     normA = 0,
     normB = 0;
