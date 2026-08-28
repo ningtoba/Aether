@@ -113,6 +113,9 @@ export function execTypeScript(
     const { filePath, cleanup } = writeTempFile(code);
     const timeout: number = options.timeout ?? 10_000;
     const maxOutput: number = options.maxOutputSize ?? 1_048_576;
+    // Kill timers are cleared once the process settles so a fast script does
+    // not keep the event loop alive for the full timeout window.
+    const killTimers: ReturnType<typeof setTimeout>[] = [];
 
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
@@ -139,11 +142,12 @@ export function execTypeScript(
       {
         timeout,
         maxBuffer: maxOutput,
-        cwd: options.cwd,
+        cwd: options.cwd ?? dirname(filePath),
         env,
       },
       (error, stdout, stderr) => {
         cleanup();
+        for (const t of killTimers) clearTimeout(t);
         const timedOut =
           error?.killed === true ||
           (error?.message != null && error.message.includes('timed out')) ||
@@ -157,18 +161,24 @@ export function execTypeScript(
       },
     );
 
-    // Safety: ensure process is killed on timeout
-    if (child.exitCode === null) {
-      setTimeout(() => {
-        if (child.exitCode === null) {
-          child.kill('SIGTERM');
-          setTimeout(() => {
-            if (child.exitCode === null) {
-              child.kill('SIGKILL');
-            }
-          }, 2_000);
-        }
-      }, timeout);
+    // Safety: ensure the process is killed on timeout. execFile treats timeout 0
+    // as "no timeout", so the manual timer must too — otherwise timeout: 0
+    // SIGTERMs a just-spawned child at t=0.
+    if (timeout > 0 && child.exitCode === null) {
+      killTimers.push(
+        setTimeout(() => {
+          if (child.exitCode === null) {
+            child.kill('SIGTERM');
+            killTimers.push(
+              setTimeout(() => {
+                if (child.exitCode === null) {
+                  child.kill('SIGKILL');
+                }
+              }, 2_000),
+            );
+          }
+        }, timeout),
+      );
     }
   });
 }

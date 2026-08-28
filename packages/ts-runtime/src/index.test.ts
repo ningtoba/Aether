@@ -111,3 +111,18 @@ describe('getTsxEntryPath', () => {
     }
   });
 });
+describe('sandbox isolation', () => {
+  it('runs untrusted code in the temp working directory, not the caller cwd', async () => {
+    const result = await execTypeScript('console.log(process.cwd())');
+    expect(result.exitCode).toBe(0);
+    // The sandbox must default to its temp dir — never the calling process's
+    // cwd (which would hand untrusted code read/write access to the repo).
+    expect(result.stdout.trim()).not.toBe(process.cwd());
+  }, 20_000);
+
+  it('treats timeout: 0 as "no timeout" instead of killing at t=0', async () => {
+    const result = await execTypeScript('console.log("ok")', { timeout: 0 });
+    expect(result.exitCode).toBe(0);
+    expect(result.timedOut).toBe(false);
+  }, 10_000);
+});

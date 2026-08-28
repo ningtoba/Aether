@@ -13,7 +13,7 @@ import {
   copyFilesToSandbox,
   checkDockerEnv,
 } from './index.js';
-import { assertSafeSandboxPath, shQuote } from './sandbox.js';
+import { assertSafeSandboxPath, limitsToDockerHostConfig, shQuote } from './sandbox.js';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -94,5 +94,31 @@ describe('sandbox path safety', () => {
   it('shQuote neutralizes embedded single quotes', () => {
     expect(shQuote("it's")).toBe(`'it'\\''s'`);
     expect(shQuote('plain')).toBe("'plain'");
+  });
+});
+describe('limitsToDockerHostConfig', () => {
+  it('mounts a tmpfs workspace when the rootfs is read-only', () => {
+    const host = limitsToDockerHostConfig({
+      memoryMb: 512,
+      cpuSeconds: 30,
+      processes: 100,
+      writeAccess: false,
+      network: false,
+    });
+    expect(host.ReadonlyRootfs).toBe(true);
+    expect(host.Tmpfs).toBeDefined();
+    // Without this the workspace would be unwritable and file copying breaks.
+    expect(host.Tmpfs!['/workspace']).toContain('size=64m');
+  });
+
+  it('leaves Tmpfs unset when writes are allowed', () => {
+    const host = limitsToDockerHostConfig({
+      memoryMb: 512,
+      cpuSeconds: 30,
+      processes: 100,
+      writeAccess: true,
+      network: true,
+    });
+    expect(host.Tmpfs).toBeUndefined();
   });
 });

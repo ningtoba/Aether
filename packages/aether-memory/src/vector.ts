@@ -36,7 +36,10 @@ export interface VectorStore {
  */
 export class InMemoryVectorStore implements VectorStore {
   readonly dimension: number;
-  private vectors: Map<string, { vector: number[]; metadata: Record<string, unknown> }> = new Map();
+  private vectors: Map<
+    string,
+    { vector: number[]; metadata: Record<string, unknown>; insertedAt: number }
+  > = new Map();
 
   constructor(config: VectorStoreConfig) {
     this.dimension = config.embeddingDimension;
@@ -48,7 +51,7 @@ export class InMemoryVectorStore implements VectorStore {
         `Vector dimension ${vector.length} does not match store dimension ${this.dimension}`,
       );
     }
-    this.vectors.set(id, { vector, metadata });
+    this.vectors.set(id, { vector, metadata, insertedAt: Date.now() });
   }
 
   async search(
@@ -56,6 +59,18 @@ export class InMemoryVectorStore implements VectorStore {
     topK: number,
     threshold = 0.0,
   ): Promise<MemorySearchResult[]> {
+    if (queryVector.length !== this.dimension) {
+      throw new Error(
+        `Vector dimension ${queryVector.length} does not match store dimension ${this.dimension}`,
+      );
+    }
+    // A degenerate (all-zero) query is not similar to anything; cosine would
+    // report 0 for every stored vector and flood the result list with ties.
+    if (this.norm(queryVector) === 0) {
+      return [];
+    }
+    const k = Number.isFinite(topK) && topK > 0 ? Math.floor(topK) : 0;
+
     const results: Array<{ id: string; score: number }> = [];
 
     for (const [id, { vector, metadata }] of Array.from(this.vectors.entries())) {
@@ -66,18 +81,24 @@ export class InMemoryVectorStore implements VectorStore {
     }
 
     results.sort((a, b) => b.score - a.score);
-    const topResults = results.slice(0, topK);
+    const topResults = results.slice(0, k);
 
-    return topResults.map((r) => ({
-      entry: {
-        id: r.id,
-        type: 'semantic' as const,
-        content: '',
-        metadata: this.vectors.get(r.id)?.metadata ?? {},
-        timestamp: Date.now(),
-      },
-      score: r.score,
-    }));
+    return topResults.map((r) => {
+      const stored = this.vectors.get(r.id);
+      return {
+        entry: {
+          id: r.id,
+          type: 'semantic' as const,
+          content: '',
+          metadata: stored?.metadata ?? {},
+          // A stable insert-time timestamp: the previous code stamped
+          // Date.now() per query, so every result appeared freshly created and
+          // TTL/recency logic misbehaved.
+          timestamp: stored?.insertedAt ?? Date.now(),
+        },
+        score: r.score,
+      };
+    });
   }
 
   async delete(id: string): Promise<boolean> {
@@ -86,6 +107,12 @@ export class InMemoryVectorStore implements VectorStore {
 
   async count(): Promise<number> {
     return this.vectors.size;
+  }
+
+  private norm(vector: number[]): number {
+    let sum = 0;
+    for (const x of vector) sum += x * x;
+    return Math.sqrt(sum);
   }
 }
 

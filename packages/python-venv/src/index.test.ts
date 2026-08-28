@@ -123,3 +123,22 @@ describe('getPythonPath / getPipPath', () => {
     expect(() => getPipPath('/dev/null/venv')).toThrow();
   });
 });
+describe('createVenv path safety', () => {
+  it('never deletes an existing non-empty, non-venv directory', async () => {
+    const { mkdtempSync, writeFileSync, existsSync, readdirSync, rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'aether-venv-safe-'));
+    const marker = join(dir, 'keep-me.txt');
+    writeFileSync(marker, 'precious');
+    try {
+      // Either a real venv-refusal error (python present) or a python-not-found
+      // error — in both cases the pre-existing data must survive untouched.
+      expect(() => createVenv(dir)).toThrow();
+      expect(existsSync(marker)).toBe(true);
+      expect(readdirSync(dir)).toContain('keep-me.txt');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -124,3 +124,36 @@ describe('cosineSimilarity', () => {
     expect(() => cosineSimilarity([1, 0], [1, 0, 0])).toThrow('Vector dimension mismatch');
   });
 });
+describe('InMemoryVectorStore search edge cases', () => {
+  it('clamps a negative topK to an empty result set instead of all-but-last', async () => {
+    const store = new InMemoryVectorStore(makeConfig(4));
+    await store.insert('a', [1, 0, 0, 0], {});
+    await store.insert('b', [0, 1, 0, 0], {});
+    await store.insert('c', [0, 0, 1, 0], {});
+    expect(await store.search([1, 0, 0, 0], -1)).toEqual([]);
+  });
+
+  it('returns no results for an all-zero (degenerate) query', async () => {
+    const store = new InMemoryVectorStore(makeConfig(4));
+    await store.insert('a', [1, 0, 0, 0], {});
+    await store.insert('b', [0, 1, 0, 0], {});
+    expect(await store.search([0, 0, 0, 0], 10)).toEqual([]);
+  });
+
+  it('throws a store-aware error for a wrong-dimension query', async () => {
+    const store = new InMemoryVectorStore(makeConfig(4));
+    await store.insert('a', [1, 0, 0, 0], {});
+    await expect(store.search([1, 0, 0], 10)).rejects.toThrow(
+      'Vector dimension 3 does not match store dimension 4',
+    );
+  });
+
+  it('returns a stable insert-time timestamp across searches', async () => {
+    const store = new InMemoryVectorStore(makeConfig(2));
+    await store.insert('a', [1, 0], {});
+    const first = await store.search([1, 0], 10);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    const second = await store.search([1, 0], 10);
+    expect(first[0].entry.timestamp).toBe(second[0].entry.timestamp);
+  });
+});

@@ -239,8 +239,10 @@ export async function type(
   options?: { delay?: number },
 ): Promise<void> {
   // If delay is specified, use type for human-like typing
-  if (options?.delay) {
-    await page.type(selector, text, { delay: options.delay });
+  // delay: 0 is a legitimate "instant, but still typed character-by-character"
+  // value; only switch to fill() when no delay was requested at all.
+  if ((options?.delay ?? -1) >= 0) {
+    await page.type(selector, text, { delay: options?.delay ?? 0 });
   } else {
     await page.fill(selector, text);
   }

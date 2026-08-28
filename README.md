@@ -408,6 +408,24 @@ Verification: **676 tests passing (was 667) across 48 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.15 Sandbox Isolation, Vector Search & Docker/Playwright Correctness
+
+Ten defects from three fresh-lens scouts (memory-vector re-audit + type schemas, Docker/Playwright sandboxes, ts-runtime/python-venv executors), each verified against source before fixing:
+
+- **`createVenv` no longer deletes your data** — if the target path existed but wasn't a valid venv, it was `rmSync`'d recursively before `python -m venv` even ran: a typo'd path, a regular file, or any user directory without `bin/python` was silently destroyed. `createVenv` now only replaces an empty directory or a venv-marked (`pyvenv.cfg`) one, and throws without touching anything else.
+- **The TS sandbox runs in its own temp dir, not the caller's cwd** — `execFile` defaulted `cwd` to `process.cwd()`, so untrusted TS code had read/write access to the whole repo (source, `.env`, credentials) despite the documented "temp directory" contract. The sandbox now defaults to the temp dir it created.
+- **`timeout: 0` means "no timeout"** — Node's `execFile` treats 0 as disabled, but the supplementary kill timer fired at t=0 and SIGTERM'd every just-spawned script. The timer is now gated on `timeout > 0`.
+- **Kill timers are cleaned up** — the timeout/SIGKILL escalation timers were never cleared or unref'd, so a fast script still pinned the event loop for the full timeout window. They are cleared once the process settles.
+- **Vector search guards degenerate inputs** — an all-zero (empty/stopped-out) query used to return the entire store at score 0 (every entry "matches"); it now returns no results in both vector stores. Negative/NaN `topK`/`limit` (which silently returned all-but-last) are clamped to an empty set.
+- **`InMemoryVectorStore.search` validates the query dimension** — a wrong-length query crashed mid-loop with a generic `cosineSimilarity` error; it now throws a clear, store-aware error symmetric with `insert`'s guard.
+- **Search results carry a stable insert-time timestamp** — the entry timestamp was `Date.now()` per query, so every result appeared freshly created and TTL/recency logic misbehaved; it is now captured at insert.
+- **Playwright `type` honors `delay: 0`** — a zero delay was treated as "no delay" and silently switched to `fill()`, which skips keyboard input events (observably different for controlled inputs). `delay: 0` now stays on `type()`.
+- **Docker read-only sandboxes stay writable at the workspace** — `ReadonlyRootfs` (default profile) made the workdir unwritable, so the documented file-copy flow failed with `EROFS` out of the box. A tmpfs is now layered at the workdir whenever writes are forbidden.
+
+Verification: **689 tests passing (was 676) across 48 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:

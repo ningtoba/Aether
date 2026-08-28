@@ -138,7 +138,10 @@ function resolveLimits(limits?: SandboxProfile | Partial<SandboxLimits>): Sandbo
   return DEFAULT_LIMITS;
 }
 
-function limitsToDockerHostConfig(limits: SandboxLimits): Dockerode.HostConfig {
+export function limitsToDockerHostConfig(
+  limits: SandboxLimits,
+  workdir = '/workspace',
+): Dockerode.HostConfig {
   const hostConfig: Dockerode.HostConfig = {
     Memory: limits.memoryMb * 1024 * 1024,
     MemorySwap: limits.memoryMb * 1024 * 1024, // no swap
@@ -148,6 +151,12 @@ function limitsToDockerHostConfig(limits: SandboxLimits): Dockerode.HostConfig {
     ReadonlyRootfs: !limits.writeAccess,
     AutoRemove: true,
   };
+  // A read-only rootfs makes the workspace unwritable, which silently breaks
+  // the file-copy flow (mkdir inside the container hits EROFS). Layer a tmpfs
+  // at the workdir so the copy/exec flows still work.
+  if (!limits.writeAccess) {
+    hostConfig.Tmpfs = { [workdir]: 'size=64m,mode=1777' };
+  }
 
   if (!limits.network) {
     hostConfig.NetworkMode = 'none';
@@ -269,7 +278,7 @@ export async function createSandbox(
     );
   }
 
-  const hostConfig = limitsToDockerHostConfig(limits);
+  const hostConfig = limitsToDockerHostConfig(limits, config.workdir);
 
   // Build volume binds
   const binds: string[] = Object.entries(config.volumes).map(([host, cont]) => `${host}:${cont}`);

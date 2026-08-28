@@ -30,8 +30,13 @@ export class MemoryVectorStore implements IVectorStore {
     vector: Float64Array,
     options?: { limit?: number; minScore?: number },
   ): Promise<Array<{ id: string; score: number }>> {
-    const limit = options?.limit ?? 10;
+    const rawLimit = options?.limit ?? 10;
+    const k = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.floor(rawLimit) : 0;
     const minScore = options?.minScore ?? 0;
+
+    // A degenerate (all-zero) query is not similar to anything; cosine would
+    // report 0 for every stored vector and flood the result list with ties.
+    if (this.norm(vector) === 0) return [];
 
     const scores: Array<{ id: string; score: number }> = [];
 
@@ -43,7 +48,13 @@ export class MemoryVectorStore implements IVectorStore {
     }
 
     scores.sort((a, b) => b.score - a.score);
-    return scores.slice(0, limit);
+    return scores.slice(0, k);
+  }
+
+  private norm(vector: Float64Array): number {
+    let sum = 0;
+    for (const x of vector) sum += x * x;
+    return Math.sqrt(sum);
   }
 
   async delete(id: string): Promise<void> {

@@ -6,7 +6,7 @@
  */
 
 import { execSync, execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const VERSION = '0.1.0';
@@ -136,7 +136,19 @@ export function createVenv(venvPath?: string, options: VenvOptions = {}): string
     if (existsSync(pythonPath)) {
       return resolved; // Already exists and looks valid
     }
-    // Remove broken/incomplete venv directory
+    // Remove only a broken/incomplete venv (an empty directory, or one that
+    // carries the venv marker). Never delete an arbitrary pre-existing file
+    // or non-venv directory — a typo'd path force-removing user data is a
+    // data-loss hazard.
+    const isDir = statSync(resolved).isDirectory();
+    const markedVenv = isDir && existsSync(join(resolved, 'pyvenv.cfg'));
+    const emptyDir = isDir && readdirSync(resolved).length === 0;
+    if (!(emptyDir || markedVenv)) {
+      throw new Error(
+        `Refusing to delete "${resolved}": it exists but is neither an empty ` +
+          'directory nor a broken virtualenv.',
+      );
+    }
     rmSync(resolved, { recursive: true, force: true });
   }
 

@@ -82,3 +82,18 @@ describe('Error handling', () => {
     ).rejects.toThrow();
   });
 });
+describe('type() delay semantics', () => {
+  it('uses type() (not fill()) when delay is explicitly 0', async () => {
+    const page = { type: vi.fn(), fill: vi.fn() } as unknown as import('playwright-core').Page;
+    await type(page, '#input', 'hello', { delay: 0 });
+    expect(page.type).toHaveBeenCalledWith('#input', 'hello', { delay: 0 });
+    expect(page.fill).not.toHaveBeenCalled();
+  });
+
+  it('falls back to fill() when no delay option is given', async () => {
+    const page = { type: vi.fn(), fill: vi.fn() } as unknown as import('playwright-core').Page;
+    await type(page, '#input', 'hello');
+    expect(page.fill).toHaveBeenCalledWith('#input', 'hello');
+    expect(page.type).not.toHaveBeenCalled();
+  });
+});

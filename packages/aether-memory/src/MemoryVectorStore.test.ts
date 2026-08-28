@@ -22,3 +22,18 @@ describe('MemoryVectorStore', () => {
     expect(Number.isNaN(byScore[0].score)).toBe(false);
   });
 });
+describe('MemoryVectorStore search edge cases', () => {
+  it('clamps a negative limit to an empty result set instead of all-but-last', async () => {
+    const store = new MemoryVectorStore();
+    await store.upsert({ id: 'a', vector: new Float64Array([1, 0, 0, 0]), metadata: {} });
+    await store.upsert({ id: 'b', vector: new Float64Array([0, 1, 0, 0]), metadata: {} });
+    await store.upsert({ id: 'c', vector: new Float64Array([0, 0, 1, 0]), metadata: {} });
+    expect(await store.search(new Float64Array([1, 0, 0, 0]), { limit: -1 })).toEqual([]);
+  });
+
+  it('returns no results for an all-zero (degenerate) query', async () => {
+    const store = new MemoryVectorStore();
+    await store.upsert({ id: 'a', vector: new Float64Array([1, 0, 0, 0]), metadata: {} });
+    expect(await store.search(new Float64Array([0, 0, 0, 0]), { limit: 10 })).toEqual([]);
+  });
+});
