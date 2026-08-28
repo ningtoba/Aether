@@ -219,7 +219,8 @@ export class WorkflowBuilder {
           `Workflow "${this.id}": edge "${edge.id}" references unknown source node "${edge.from}".`,
         );
       }
-      if (!this.nodes.has(edge.to)) {
+      // The symbolic end sentinels are valid targets (conditional early exit).
+      if (edge.to !== 'END' && edge.to !== '__end__' && !this.nodes.has(edge.to)) {
         throw new Error(
           `Workflow "${this.id}": edge "${edge.id}" references unknown target node "${edge.to}".`,
         );

@@ -311,6 +311,17 @@ Verification: **621 tests passing (was 616) across 42 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.9 Conditional End Routing
+
+A workflow author could not express "conditionally end the workflow early", and a hand-built definition that tried to crashed the run:
+
+- **Builder now accepts `END`/`__end__` as an edge target** — `connectIf(node, 'END', …)` previously failed validation ("references unknown target node"), so conditional early-exit workflows were unrepresentable through the supported API.
+- **Engine routes conditional edges to `END` correctly** — the compiled router prefixed every target with `_n_` (returning `'_n_END'`), but the route map only registered `END` under the bare sentinel key, so LangGraph threw an unregistered-route error and the whole workflow reported `'failed'`. Both the router and the route map now resolve the symbolic end sentinels (`'END'`/`'__end__'`) to LangGraph's `END` via a shared `ref()` helper, so conditional early termination completes cleanly.
+
+Verification: **623 tests passing (was 621) across 42 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:

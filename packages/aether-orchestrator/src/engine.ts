@@ -209,6 +209,10 @@ export class LangGraphEngine {
   private compile(w: WorkflowDefinition): any {
     const g = new (StateGraph as any)(AetherState);
 
+    // Map a raw edge target to a graph node reference; the symbolic end
+    // sentinels ('END'/'__end__') resolve to LangGraph's END.
+    const ref = (to: string): string => (to === '__end__' || to === 'END' ? END : '_n_' + to);
+
     // Add nodes  need to use tracked runner
     for (const n of w.nodes) {
       g.addNode('_n_' + n.id, makeRunner(n));
@@ -242,17 +246,14 @@ export class LangGraphEngine {
           const router = async (st: S): Promise<string> => {
             const d = (st.data as Record<string, unknown>) || {};
             for (const e of condEdges) {
-              if (evalCond(e, d)) return '_n_' + e.to;
+              if (evalCond(e, d)) return ref(e.to);
             }
             // Fallback to first direct edge
-            if (directEdges.length > 0) return '_n_' + directEdges[0]!.to;
+            if (directEdges.length > 0) return ref(directEdges[0]!.to);
             return END;
           };
           const pm: Record<string, string> = {};
-          for (const e of edges) {
-            if (hasNode(e.to)) pm['_n_' + e.to] = '_n_' + e.to;
-            else pm[e.to] = e.to === '__end__' || e.to === 'END' ? END : e.to;
-          }
+          for (const e of edges) pm[ref(e.to)] = ref(e.to);
           // Also allow END as a return path
           pm[END] = END;
           g.addConditionalEdges(s, router, pm);

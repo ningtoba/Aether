@@ -212,3 +212,35 @@ describe('engine state channels', () => {
     expect(result.status).toBe('paused');
   }, 10_000);
 });
+describe('conditional routing to the workflow end', () => {
+  it('routes a conditional edge to END instead of failing the run', async () => {
+    const engine = new LangGraphEngine();
+    const wf = new WorkflowBuilder('cond-end', '1.0.0', 'Conditional Early End')
+      .agentNode('gate', 'gate-agent')
+      .connectIf('gate', 'END', [{ field: 'data.done', operator: 'eq', value: true }])
+      .withEntry('gate')
+      .withTerminal('gate')
+      .build();
+
+    const result = await engine.execute(wf, { done: true });
+    expect(result.status).toBe('completed');
+    expect(result.error).toBeUndefined();
+    const data = result.data as Record<string, unknown>;
+    expect(data['gate.output']).toBeDefined();
+  }, 10_000);
+
+  it('accepts END as an edge target in the builder and falls back to it', async () => {
+    const wf = new WorkflowBuilder('cond-end-b', '1.0.0', 'Build Check')
+      .agentNode('gate', 'gate-agent')
+      .connectIf('gate', 'END', [{ field: 'data.done', operator: 'eq', value: true }])
+      .withEntry('gate')
+      .withTerminal('gate')
+      .build();
+    expect(wf.edges.some((e) => e.to === 'END')).toBe(true);
+
+    // Condition false -> no route fires, so the router falls back to END.
+    const engine = new LangGraphEngine();
+    const result = await engine.execute(wf, { done: false });
+    expect(result.status).toBe('completed');
+  }, 10_000);
+});
