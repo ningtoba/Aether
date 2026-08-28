@@ -109,7 +109,34 @@ export class RAGEngine {
     // Sort by score descending, limit
     const results = Array.from(merged.values());
     results.sort((a, b) => b.score - a.score);
-    return results.slice(0, query.limit);
+
+    // The vector store keeps only vector + metadata, so vector-only hits carry
+    // fabricated `type`/`metadata` and empty `content`, and never honour the
+    // query's type/metadata filters. Resolve them against the memory store:
+    // drop out-of-type / out-of-filter hits and hydrate the real entry so the
+    // RAG context is truthful (no blank segments, no leaked rows).
+    const filtered: MemorySearchResult[] = [];
+    for (const r of results) {
+      if (r.entry.content) {
+        filtered.push(r);
+        continue;
+      }
+      const stored = await this.store.get(r.entry.id);
+      if (!stored) continue;
+      if (query.type && stored.type !== query.type) continue;
+      if (query.filter) {
+        let matches = true;
+        for (const [key, value] of Object.entries(query.filter)) {
+          if (stored.metadata[key] !== value) {
+            matches = false;
+            break;
+          }
+        }
+        if (!matches) continue;
+      }
+      filtered.push({ ...r, entry: stored });
+    }
+    return filtered.slice(0, query.limit);
   }
 
   /**

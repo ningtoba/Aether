@@ -287,3 +287,31 @@ describe('chunking hardening', () => {
     store.dispose();
   });
 });
+describe('vector-only retrieval', () => {
+  it('hydrates a vector-only hit with its stored content instead of a blank string', async () => {
+    const { store, engine } = createEngine();
+    const engineAny = engine as unknown as {
+      vectorStore: import('./vector.js').InMemoryVectorStore;
+      simulateEmbedding: (t: string) => number[];
+    };
+    const vs = engineAny.vectorStore;
+
+    // A store entry invisible to keyword search (the query term shares no
+    // characters with the content) but found by vector similarity.
+    await store.add({
+      id: 'vec-only-id',
+      type: 'semantic',
+      content: 'the real payload text',
+      metadata: {},
+    });
+    await vs.insert('vec-only-id', engineAny.simulateEmbedding('zeta'), {});
+
+    const results = await engine.retrieve({ query: 'zeta', limit: 10, threshold: 0.9 });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].entry.id).toBe('vec-only-id');
+    // Before the fix this was '' — vector hits produced blank context segments.
+    expect(results[0].entry.content).toBe('the real payload text');
+    store.dispose();
+  });
+});

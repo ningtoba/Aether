@@ -16,8 +16,10 @@ vi.mock('./internal-types.js', () => ({
     async run(_agent: any, _input: string, _opts?: any) {
       return {
         finalOutput: 'Mock response',
-        turns: 5,
-        usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 },
+        rawResponses: [
+          { usage: { inputTokens: 100, outputTokens: 50, totalTokens: 150 }, output: [] },
+        ],
+        newItems: [{ type: 'message', role: 'assistant', content: [] }],
       };
     }
   },
@@ -188,7 +190,7 @@ describe('AetherRunner', () => {
 
     expect(result).toBeDefined();
     expect(result.output).toBe('Mock response');
-    expect(result.turns).toBe(5);
+    expect(result.turns).toBe(1);
     expect(result.tokenUsage.total).toBe(150);
   });
 
@@ -220,5 +222,84 @@ describe('AetherRunner', () => {
     const result = await runner.runWithAgents(primary, 'Help me', [helper]);
     expect(result).toBeDefined();
     expect(result.output).toBe('Mock response');
+  });
+});
+describe('AetherRunner result mapping (real SDK shape)', () => {
+  const mockProviderRegistry = {
+    get: vi.fn(),
+    has: vi.fn(),
+    list: vi.fn().mockReturnValue(['default']),
+  };
+
+  it('derives turns, token usage and tool calls from rawResponses/newItems', async () => {
+    const runner = new AetherRunner({
+      providerRegistry: mockProviderRegistry,
+    });
+    const agent = new AetherAgent({
+      name: 'map',
+      model: 'gpt-4o',
+      instructions: 'Map',
+      tools: [],
+      handoffs: [],
+      outputType: undefined,
+      guardrails: [],
+      maxTurns: 5,
+    });
+
+    // The SDK run result carries no top-level `turns`/`usage`; it exposes
+    // finalOutput, one rawResponses entry per model call, and newItems that
+    // include { type: 'function_call' } items for tool use.
+    vi.spyOn((runner as any).runner, 'run').mockResolvedValue({
+      finalOutput: '42',
+      rawResponses: [
+        { usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 }, output: [] },
+        { usage: { inputTokens: 20, outputTokens: 10, totalTokens: 30 }, output: [] },
+      ],
+      newItems: [
+        {
+          type: 'function_call',
+          callId: 'call_1',
+          name: 'get_weather',
+          arguments: '{"city":"SF"}',
+        },
+        { type: 'function_call_result', callId: 'call_1', output: '"sunny"' },
+        { type: 'message', role: 'assistant', content: [] },
+      ],
+    });
+
+    const result = await runner.run(agent, 'what is the weather?');
+
+    expect(result.output).toBe('42');
+    expect(result.turns).toBe(2);
+    expect(result.tokenUsage).toEqual({ prompt: 30, completion: 15, total: 45 });
+    expect(result.toolCalls).toEqual([{ name: 'get_weather', args: { city: 'SF' } }]);
+  });
+
+  it('reports zero turns and an empty tool list when nothing ran', async () => {
+    const runner = new AetherRunner({
+      providerRegistry: mockProviderRegistry,
+    });
+    const agent = new AetherAgent({
+      name: 'empty',
+      model: 'gpt-4o',
+      instructions: 'Empty',
+      tools: [],
+      handoffs: [],
+      outputType: undefined,
+      guardrails: [],
+      maxTurns: 5,
+    });
+
+    vi.spyOn((runner as any).runner, 'run').mockResolvedValue({
+      finalOutput: undefined,
+      rawResponses: [],
+      newItems: [],
+    });
+
+    const result = await runner.run(agent, 'noop');
+    expect(result.output).toBe('');
+    expect(result.turns).toBe(0);
+    expect(result.toolCalls).toEqual([]);
+    expect(result.tokenUsage).toEqual({ prompt: 0, completion: 0, total: 0 });
   });
 });

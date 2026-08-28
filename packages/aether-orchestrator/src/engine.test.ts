@@ -190,3 +190,25 @@ describe('conditional comparison operators', () => {
     expect(data['big.output']).toBeUndefined();
   }, 10_000);
 });
+describe('engine state channels', () => {
+  it('reports the last executed node as currentNode', async () => {
+    const engine = new LangGraphEngine();
+    const result = await engine.execute(linearWorkflow(), { topic: 'AI' });
+    expect(result.status).toBe('completed');
+    expect(result.currentNode).toBe('summarize');
+  }, 10_000);
+
+  it('reports paused when the workflow terminates on a signal node', async () => {
+    const engine = new LangGraphEngine();
+    const wf = new WorkflowBuilder('signal-wf', '1.0.0', 'Signal Wait')
+      .agentNode('prepare', 'prep-agent')
+      .addNode({ id: 'wait', kind: 'signal', label: 'Waiting for human input' })
+      .connect('prepare', 'wait')
+      .withEntry('prepare')
+      .withTerminal('wait')
+      .build();
+
+    const result = await engine.execute(wf, {});
+    expect(result.status).toBe('paused');
+  }, 10_000);
+});

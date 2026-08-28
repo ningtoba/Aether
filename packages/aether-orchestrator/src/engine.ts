@@ -22,7 +22,7 @@ const AetherState = Annotation.Root({
     default: () => ({}),
   }),
   status: Annotation<string>({
-    reducer: (a: string, b: string) => b ?? a,
+    reducer: (a: string, b: string) => (a === 'paused' ? 'paused' : (b ?? a)),
     default: () => '',
   }),
   error: Annotation<string | undefined>({
@@ -39,6 +39,10 @@ const AetherState = Annotation.Root({
   }),
   startedAt: Annotation<string>({
     reducer: (a: string, b: string) => a ?? b,
+    default: () => '',
+  }),
+  lastNode: Annotation<string>({
+    reducer: (a: string, b: string) => b ?? a,
     default: () => '',
   }),
 });
@@ -89,7 +93,7 @@ function makeRunner(nodeDef: NodeDefinition): (state: S, _config: RunnableConfig
     const data = { ...((state.data as Record<string, unknown>) || {}) };
     data[nodeDef.id + '.output'] = output;
     if (error) data[nodeDef.id + '.error'] = error;
-    return { data, status, error, nd: nodeDef.id };
+    return { data, status, error, lastNode: nodeDef.id };
   };
 }
 
@@ -149,7 +153,7 @@ export class LangGraphEngine {
       );
 
       // Build node history from what we tracked
-      const execNodeId = (r.nd as string) || '';
+      const execNodeId = (r.lastNode as string) || '';
       for (const node of w.nodes) {
         const output = (r.data as Record<string, unknown>)[node.id + '.output'];
         const errVal = (r.data as Record<string, unknown>)[node.id + '.error'] as
@@ -170,7 +174,7 @@ export class LangGraphEngine {
         currentNode: execNodeId || null,
         nodeHistory: history,
         data: (r.data as Record<string, unknown>) ?? {},
-        status: r.error ? 'failed' : 'completed',
+        status: r.error ? 'failed' : r.status === 'paused' ? 'paused' : 'completed',
         error: r.error as string | undefined,
         startedAt: (r.startedAt as string) ?? new Date().toISOString(),
         lastCheckpointAt: new Date().toISOString(),

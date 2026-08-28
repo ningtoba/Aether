@@ -298,6 +298,19 @@ Verification: **616 tests passing (was 605) across 42 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.8 Core-Contract Truth (SDK RunResult, engine state, RAG filters)
+
+Four findings from a fresh-lens scout of the least-audited core packages (SDK bridge, orchestrator engine, RAG), each verified against the installed dependency before fixing:
+
+- **`AetherRunner` now returns real run data** — `toRunResult` read `turns`/`usage` off the run result, but the installed `@openai/agents` `RunResult` exposes neither (verified in agents-core 0.11.1 `result.d.ts`): `turns` was always `0` and `tokenUsage` all zeros on every real run, and `toolCalls` was hardcoded `[]` (tool use never surfaced). It now derives `turns` from `rawResponses` (one model call per turn), sums `tokenUsage` from `rawResponses[].usage`, and extracts `{name, args}` from `newItems` `function_call` items. The SDK unit mock — which baked in the wrong `turns: 5` shape — now returns the real result shape, with discriminating tests.
+- **Engine `currentNode` no longer always null** — the node runner published the executing node id as an undeclared state key `nd`, so LangGraph dropped it and `WorkflowState.currentNode` was `null` on every run. The state schema now declares a `lastNode` channel (last-writer-wins) and the final state reads it.
+- **`signal` nodes report `paused`** — the runner sets a `'paused'` status for signal nodes, but `execute` derived the final status only from the error channel, silently reporting `'completed'` past a wait/human-input gate. The status channel is now honoured (and sticky once paused), so workflows that reach a signal node return `status: 'paused'`.
+- **RAG respects type/metadata filters for vector hits and hydrates content** — `InMemoryVectorStore` stores only vector + metadata, so vector-only hits surfaced with fabricated `type: 'semantic'`, empty `content`, and ignored the query's type/metadata filters (a semantic-filtered query could return task rows, and RAG context contained blank segments). `RAGEngine.retrieve` now resolves vector-only hits against the `MemoryStore`: out-of-type / out-of-filter rows are dropped and the real entry (content included) is returned.
+
+Verification: **621 tests passing (was 616) across 42 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:
@@ -305,6 +318,7 @@ Next iterations target the remaining control-plane and correctness work:
 - **Persist secrets via the vault** — route provider keys from the renderer to the vault through main-process IPC (safeStorage/keytar) so re-launch keeps keys without ever touching localStorage; replace session-only re-entry.
 - **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.
 - **Auth polish** — per-user/session auth (JWT), key rotation via the vault, and role assignment for arbitrary API keys beyond the admin default.
+- **Signal-node resume** — stop executing downstream edges at a `signal` node (v0.1.8 reports `paused` but the graph still runs past it) and add a checkpoint-based resume path.
 
 ---
 

@@ -204,15 +204,44 @@ export class AetherRunner {
 
   private toRunResult(result: unknown): RunResult {
     const r = result as Record<string, unknown>;
+
+    // The OpenAI Agents SDK result exposes finalOutput/newItems/rawResponses —
+    // there is no top-level `turns` or `usage`. Derive the Aether contract from
+    // what the result actually carries so real runs report real numbers.
+    const rawResponses = (Array.isArray(r.rawResponses) ? r.rawResponses : []) as Array<{
+      usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number };
+    }>;
+    const newItems = Array.isArray(r.newItems) ? (r.newItems as unknown[]) : [];
+
+    const prompt = rawResponses.reduce((sum, resp) => sum + (resp.usage?.inputTokens ?? 0), 0);
+    const completion = rawResponses.reduce((sum, resp) => sum + (resp.usage?.outputTokens ?? 0), 0);
+    const total = rawResponses.reduce((sum, resp) => sum + (resp.usage?.totalTokens ?? 0), 0);
+
+    // Each model call is one turn.
+    const turns = rawResponses.length;
+
+    // { type: 'function_call', name, arguments } items carry the tool use.
+    const toolCalls: RunResult['toolCalls'] = newItems
+      .filter((item): item is { name: string; arguments: string } => {
+        if (typeof item !== 'object' || item === null) return false;
+        return 'type' in item && item.type === 'function_call';
+      })
+      .map((item) => {
+        let args: Record<string, unknown> = {};
+        try {
+          const parsed = JSON.parse(item.arguments || '{}') as unknown;
+          args = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+        } catch {
+          args = {};
+        }
+        return { name: item.name, args };
+      });
+
     return {
       output: String(r.finalOutput ?? r.output ?? ''),
-      turns: (r.turns as number) ?? 0,
-      tokenUsage: {
-        prompt: ((r.usage as Record<string, unknown>)?.inputTokens as number) ?? 0,
-        completion: ((r.usage as Record<string, unknown>)?.outputTokens as number) ?? 0,
-        total: ((r.usage as Record<string, unknown>)?.totalTokens as number) ?? 0,
-      },
-      toolCalls: [],
+      turns,
+      tokenUsage: { prompt, completion, total },
+      toolCalls,
     };
   }
 }
