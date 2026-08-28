@@ -36,6 +36,10 @@ export function registerCrashReporter(_deps: CrashReporterDeps): void {
       message: error.message,
       stack: error.stack,
     });
+    // Never keep running after an uncaught exception: the process state is
+    // undefined and continuing silently corrupts the app. Exit non-zero so a
+    // supervisor (or a relaunch) can recover cleanly.
+    process.exit(1);
   });
 
   process.on('unhandledRejection', (reason: unknown) => {
@@ -80,11 +84,15 @@ export function getCrashLogs(): Array<{
   message: string;
   stack?: string;
 }> {
-  const logPath = getLogPath();
-  if (!existsSync(logPath)) return [];
-  return readFileSync(logPath, 'utf-8')
-    .split('\n')
-    .filter(Boolean)
+  // Include the rotated archive first so entries stay chronological (rotation
+  // renames the full crash.log to crash.log.old before starting fresh).
+  const paths = [getLogPath() + '.old', getLogPath()];
+  const lines: string[] = [];
+  for (const p of paths) {
+    if (!existsSync(p)) continue;
+    lines.push(...readFileSync(p, 'utf-8').split('\n').filter(Boolean));
+  }
+  return lines
     .map((line) => {
       try {
         return JSON.parse(line);

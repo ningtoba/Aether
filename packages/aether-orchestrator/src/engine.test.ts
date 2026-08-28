@@ -306,3 +306,33 @@ describe('edge routing correctness', () => {
     expect(r.nodeHistory.find((n) => n.nodeId === 'target')?.status).toBe('completed');
   });
 });
+describe('engine checkpointing', () => {
+  it('persists a failed-state checkpoint when execution throws', async () => {
+    const engine = new LangGraphEngine();
+    const wf = new WorkflowBuilder('boom-wf', '1.0.0', 'Boom')
+      .addNode({ id: 'a', kind: 'agent', agentName: 'a' })
+      .withEntry('a')
+      .withTerminal('a')
+      .build();
+    // An unknown node kind inside the runner makes the graph itself throw,
+    // exercising the catch path (a thrown langgraph invoke).
+    (wf.nodes[0] as { kind: string }).kind = 'does-not-exist';
+    const result = await engine.execute(wf, {});
+    expect(result.status).toBe('failed');
+
+    const cps = await engine.getLegacyCheckpointer().list(result.executionId);
+    expect(cps.some((c) => c.state.status === 'failed')).toBe(true);
+  });
+
+  it('clear() works even when the injected checkpoint manager omits clear()', async () => {
+    const noClear = {
+      save: async () => {},
+      get: () => undefined,
+      list: () => [],
+      delete: () => false,
+      clearExecution: async () => {},
+    };
+    const engine = new LangGraphEngine({ checkpointManager: noClear as any });
+    expect(() => engine.clear()).not.toThrow();
+  });
+});

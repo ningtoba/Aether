@@ -32,7 +32,10 @@ export function pick<T extends Record<string, unknown>, K extends keyof T>(
 ): Pick<T, K> {
   const result = {} as Pick<T, K>;
   for (const key of keys) {
-    if (key in obj) result[key] = obj[key];
+    // Own properties only: `in` would copy inherited keys, and writing an own
+    // "__proto__" key via assignment would mutate the result's prototype.
+    if (key === '__proto__') continue;
+    if (Object.prototype.hasOwnProperty.call(obj, key)) result[key] = obj[key];
   }
   return result;
 }
@@ -81,5 +84,10 @@ export function isEqual(a: unknown, b: unknown): boolean {
 }
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null && !Array.isArray(val);
+  // Only real plain objects qualify; Date/Map/Set must not be treated as
+  // mergeable (spreading a Date into {} would destroy the value).
+  if (typeof val !== 'object' || val === null) return false;
+  if (Array.isArray(val)) return false;
+  const proto = Object.getPrototypeOf(val);
+  return proto === Object.prototype || proto === null;
 }

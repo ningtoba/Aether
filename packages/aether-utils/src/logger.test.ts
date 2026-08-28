@@ -183,3 +183,26 @@ describe('Logger', () => {
     });
   });
 });
+describe('Logger meta safety', () => {
+  let infoSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('never throws on meta JSON.stringify cannot serialize (BigInt)', () => {
+    const log = new Logger({ level: 'info', enableJson: true });
+    expect(() => log.info('with bigint', { big: 1n, nested: { n: 2n } })).not.toThrow();
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('with bigint'));
+  });
+
+  it('serializes structured meta in text mode', () => {
+    const log = new Logger({ level: 'info', enableJson: false });
+    log.info('hello', { keyname: 'value' });
+    expect(infoSpy).toHaveBeenCalledWith(expect.stringContaining('"keyname":"value"'));
+  });
+});

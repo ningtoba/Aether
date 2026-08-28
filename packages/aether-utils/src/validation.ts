@@ -20,5 +20,13 @@ export function isNonEmptyString(val: unknown): val is string {
 
 /** Type guard: checks if value is a plain object (not null, not array) */
 export function isPlainObject(val: unknown): val is Record<string, unknown> {
-  return typeof val === 'object' && val !== null && !Array.isArray(val);
+  return isPlainObjectValue(val);
+}
+function isPlainObjectValue(val: unknown): boolean {
+  // Only real plain objects qualify — Date/Map/Set/Buffer/RegExp must not,
+  // otherwise deepMerge would spread a Date into {} and destroy the value.
+  if (typeof val !== 'object' || val === null) return false;
+  if (Array.isArray(val)) return false;
+  const proto = Object.getPrototypeOf(val);
+  return proto === Object.prototype || proto === null;
 }

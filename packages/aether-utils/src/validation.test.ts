@@ -117,8 +117,11 @@ describe('isPlainObject', () => {
     expect(isPlainObject(undefined)).toBe(false);
   });
 
-  it("should return true for Date objects (typeof 'object')", () => {
-    // Date is typeof 'object' and not null and not array
-    expect(isPlainObject(new Date())).toBe(true);
+  it('should return false for Date/Map/Set (not plain objects)', () => {
+    // Only real plain objects qualify — Date/Map/Set must not, or deepMerge
+    // would spread a Date into {} and silently destroy the value.
+    expect(isPlainObject(new Date())).toBe(false);
+    expect(isPlainObject(new Map())).toBe(false);
+    expect(isPlainObject(new Set())).toBe(false);
   });
 });

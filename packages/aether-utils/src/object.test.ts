@@ -185,3 +185,28 @@ describe('isEqual deep semantics', () => {
     expect(isEqual({ a: 1 }, { a: 1, b: undefined })).toBe(false);
   });
 });
+describe('pick own-property safety', () => {
+  it('does not copy inherited keys', () => {
+    const obj = JSON.parse('{"a":1}') as Record<string, unknown>;
+    expect(pick(obj, ['toString'])).toEqual({});
+  });
+
+  it('never writes a __proto__ key into the result', () => {
+    const obj = JSON.parse('{"__proto__":{"admin":1}}') as Record<string, unknown>;
+    const result = pick(obj, ['__proto__']);
+    expect(Object.prototype.hasOwnProperty.call(result, '__proto__')).toBe(false);
+    expect(Object.getPrototypeOf(result)).toBe(Object.prototype);
+    expect((result as any).admin).toBeUndefined();
+  });
+});
+
+describe('deepMerge preserves non-plain values', () => {
+  it('keeps Date values intact instead of spreading them to {}', () => {
+    const result = deepMerge(
+      { d: new Date(100) } as Record<string, unknown>,
+      { d: new Date(200) } as Record<string, unknown>,
+    );
+    expect(result.d).toBeInstanceOf(Date);
+    expect((result.d as Date).getTime()).toBe(200);
+  });
+});

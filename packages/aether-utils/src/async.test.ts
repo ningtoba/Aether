@@ -220,3 +220,28 @@ describe('raceWithTimeout', () => {
     );
   });
 });
+describe('withTimeout timer hygiene', () => {
+  it('clears its timer when the promise wins the race', async () => {
+    vi.useFakeTimers();
+    try {
+      const result = await withTimeout(Promise.resolve('fast'), 60_000);
+      expect(result).toBe('fast');
+      // No pending timer may remain after the race settles.
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('still rejects when the timeout fires', async () => {
+    vi.useFakeTimers();
+    try {
+      const p = withTimeout(new Promise(() => {}), 1000, 'too slow');
+      const assertion = expect(p).rejects.toThrow('too slow');
+      vi.advanceTimersByTime(1001);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

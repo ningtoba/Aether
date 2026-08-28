@@ -224,3 +224,85 @@ describe('WebSocketManager', () => {
     });
   });
 });
+describe('attach lifecycle & fragmentation', () => {
+  let wsm: WebSocketManager;
+
+  beforeEach(() => {
+    wsm = new WebSocketManager();
+  });
+
+  it('is idempotent: a second attach replaces the listener instead of adding', () => {
+    const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
+    const fakeServer = {
+      on: (ev: string, fn: (...a: unknown[]) => void) => {
+        (listeners[ev] ??= []).push(fn);
+      },
+      removeListener: (ev: string, fn: (...a: unknown[]) => void) => {
+        listeners[ev] = (listeners[ev] ?? []).filter((f) => f !== fn);
+      },
+    } as unknown as import('node:http').Server;
+
+    wsm.attach(fakeServer);
+    wsm.attach(fakeServer);
+    // A double attach must not register two upgrade handlers (each would
+    // write its own 101 handshake and rip the socket in half).
+    expect(listeners['upgrade']?.length).toBe(1);
+  });
+
+  it('rejects a non-FIN (fragmented) frame and tears the socket down coherently', () => {
+    const listeners: Record<string, ((...a: unknown[]) => void)[]> = {};
+    const fakeServer = {
+      on: (ev: string, fn: (...a: unknown[]) => void) => {
+        (listeners[ev] ??= []).push(fn);
+      },
+      removeListener: () => {},
+    } as unknown as import('node:http').Server;
+    wsm.attach(fakeServer);
+
+    const writes: string[] = [];
+    let destroyed = false;
+    const socketHandlers: Record<string, ((...a: unknown[]) => void)[]> = {};
+    const socket = {
+      write: (d: string | Buffer) => {
+        writes.push(typeof d === 'string' ? d : d.toString('utf-8'));
+        return true;
+      },
+      destroy: () => {
+        destroyed = true;
+      },
+      on: (ev: string, fn: (...a: unknown[]) => void) => {
+        (socketHandlers[ev] ??= []).push(fn);
+      },
+      once: () => {},
+    } as unknown as import('node:stream').Duplex;
+
+    const upgrade = listeners['upgrade'][0];
+    upgrade(
+      {
+        headers: { 'sec-websocket-key': 'dGhlIHNhbXBsZSBub25jZQ==' },
+      } as unknown as import('node:http').IncomingMessage,
+      socket,
+      Buffer.alloc(0),
+    );
+
+    // A masked text frame with the FIN bit clear — the start of a fragmented
+    // message. The manager must reject it outright (not accept the fragment
+    // and then die on the mandatory continuation frame that follows).
+    const payload = Buffer.from('{"filter":["a"]}');
+    const key = Buffer.from([1, 2, 3, 4]);
+    const masked = Buffer.alloc(2 + 4 + payload.length);
+    masked[0] = 0x01; // FIN=0, opcode 0x1
+    masked[1] = 0x80 | payload.length; // MASK bit + length
+    key.copy(masked, 2);
+    for (let i = 0; i < payload.length; i++) {
+      masked[2 + 4 + i] = payload[i] ^ key[i % 4];
+    }
+
+    const dataCb = socketHandlers['data'][0];
+    dataCb(masked);
+
+    expect(writes.filter((w) => w.includes('101 Switching Protocols'))).toHaveLength(1);
+    expect(destroyed).toBe(true);
+    expect(wsm.connectionCount).toBe(0);
+  });
+});

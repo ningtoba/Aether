@@ -192,7 +192,7 @@ export class LangGraphEngine {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.emit('error', { workflowId: w.id, executionId: eid, error: msg });
-      return {
+      const failedState: WorkflowState = {
         executionId: eid,
         workflowId: w.id,
         currentNode: null,
@@ -203,6 +203,19 @@ export class LangGraphEngine {
         startedAt: new Date().toISOString(),
         version: 1,
       };
+      // Persist failures too: a crashed run must be recoverable/diagnosable
+      // from the checkpoint instead of vanishing (the success path already
+      // saves; previously only happy-path runs left any trace).
+      await this.legacy
+        .save({
+          id: 'cp-' + Date.now(),
+          executionId: eid,
+          state: JSON.parse(JSON.stringify(failedState)),
+          createdAt: new Date().toISOString(),
+          label: 'failed',
+        })
+        .catch(() => {});
+      return failedState;
     }
   }
 
@@ -313,7 +326,7 @@ export class LangGraphEngine {
   clear() {
     this.compiled.clear();
     this.workflows.clear();
-    (this.legacy as any).clear();
+    (this.legacy as any).clear?.();
   }
   private emit(ev: string, d: Record<string, unknown>) {
     this.eventBus?.publish(ev, d).catch(() => {});

@@ -426,6 +426,27 @@ Verification: **689 tests passing (was 676) across 48 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.16 Lifecycle Safety, Utils Hardening & Scoped-Store Contracts
+
+Twelve defects from three fresh-lens scouts (Electron main-process helpers, utils + WebSocket manager, scoped memory stores + orchestration checkpoints), each verified against source before fixing:
+
+- **WebSocket `attach()` is now idempotent** — attaching twice registered two `upgrade` listeners (each wrote its own `101` handshake for one upgrade and shared the socket's buffers, corrupting the frame stream), and `detach()` left a stale `server` reference. A re-attach now removes the previous listener first and `detach()` nulls the server.
+- **Fragmented WebSocket frames are rejected coherently** — the first (non-FIN) fragment of a fragmented message was silently accepted (its truncated JSON swallowed) and then the mandatory continuation frame killed the connection: an incoherent state machine. Non-FIN frames are now rejected outright at the first fragment.
+- **`isPlainObject` is actually "plain"** — the guard (`typeof === object`) admitted `Date`/`Map`/`Set`/`Buffer`/`RegExp`, so `deepMerge` recursively spread a `Date` into `{}` and silently destroyed the value. Only real plain objects qualify now (both copies of the guard); the codified test that pinned `isPlainObject(new Date()) === true` was corrected.
+- **`pick()` copies own properties only** — `key in obj` copied inherited keys (`toString` etc.) and an own `__proto__` selection could rewrite the result's prototype. Uses `hasOwnProperty` and skips `__proto__`.
+- **`withTimeout` no longer leaks its timer** — the lose-the-race `setTimeout` was never cancelled when the promise won, keeping the event loop alive (and a live timer) for up to the full timeout on every quick tool call. The timer is cleared when either side settles.
+- **Logger is never the crash point** — JSON mode threw `TypeError` on `BigInt`/circular meta, and text mode silently dropped all structured `meta`. JSON stringification is now exception-safe and text lines include the serialized meta.
+- **Scoped memory stores enforce their scope** — `EpisodicStore`/`SemanticStore`/`TaskStore`/`ConversationStore` (one store per scope) accepted and served entries of any scope, so a store could write/read/update/delete/count across scopes. Writes now reject a mismatched scope and every read path filters to the store's own scope. (This uncovered the stores' first tests.)
+- **Whitespace-only text queries match nothing** — `'   '.split(/\s+/)` produced `['']`, and the empty term matched every entry. Terms are now filtered and an all-empty query returns no results.
+- **Failed executions leave a checkpoint** — the legacy `CheckpointManager` only captured happy-path runs; a thrown invocation returned a synthetic failed state with no trace. Failures are now persisted (label `failed`) for recovery/diagnostics.
+- **`engine.clear()` tolerates a manager without `clear()`** — the optional interface method was called with a hard cast, crashing on any injected manager that omits it. Now called safely with `?.`.
+- **Crash reporter exits after an uncaught exception** — the handler logged and then kept running on undefined process state (silent corruption). It now logs and exits non-zero so a supervisor can restart cleanly.
+- **`getCrashLogs` reads the rotated archive** — rotation renames the full log to `crash.log.old`, which the reader skipped; logs now include the archive in chronological order.
+
+Verification: **705 tests passing (was 689) across 50 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:

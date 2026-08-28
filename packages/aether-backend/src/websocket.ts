@@ -90,6 +90,12 @@ export class WebSocketManager {
    *   streaming).
    */
   attach(server: Server, authenticate?: (req: IncomingMessage) => boolean): void {
+    // Re-attach safety: a previous upgrade listener on the same (or an older)
+    // server must be removed first, or a second attach() would double-handshake
+    // every upgrade and leak a stale listener.
+    if (this.server && this.upgradeHandler) {
+      this.server.removeListener('upgrade', this.upgradeHandler);
+    }
     this.server = server;
 
     this.upgradeHandler = (req, socket, head) => {
@@ -207,6 +213,7 @@ export class WebSocketManager {
       this.server.removeListener('upgrade', this.upgradeHandler);
       this.upgradeHandler = null;
     }
+    this.server = null;
     const entries = Array.from(this.clients.entries());
     for (const [, client] of entries) {
       client.close();
@@ -311,7 +318,8 @@ export class WebSocketManager {
         // Ping — answer with a pong carrying the same payload.
         this.writeFrame(socket, this.createFrame(0x0a, frame.payload));
       }
-      // Other opcodes (continuation, binary) are ignored.
+      // Binary frames are rejected in tryParseFrame; fragmented messages are
+      // rejected at their first non-FIN frame, so nothing else reaches here.
     }
 
     // Drop the consumed prefix so the residual buffer only holds a partial
@@ -336,6 +344,11 @@ export class WebSocketManager {
     if (first === null) return null;
 
     const opcode = first[0] & 0x0f;
+    // Fragmentation is unsupported: reject a non-FIN frame outright instead of
+    // accepting the first fragment and then killing the socket on the
+    // mandatory continuation frame that follows.
+    const fin = (first[0] & 0x80) !== 0;
+    if (!fin) throw new WsProtocolError('Fragmented frames are not supported');
     if (opcode !== 0x01 && opcode !== 0x08 && opcode !== 0x09) {
       throw new WsProtocolError(`Unsupported frame opcode: ${opcode}`);
     }

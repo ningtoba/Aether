@@ -57,14 +57,33 @@ export class Logger {
     if (this.config.source) entry.source = this.config.source;
     if (this.config.enableTimestamp) entry.timestamp = new Date().toISOString();
     if (meta) entry.meta = meta;
-    const output = this.config.enableJson ? JSON.stringify(entry) : this.format(entry);
+    const output = this.config.enableJson ? this.safeJson(entry) : this.format(entry);
     this.emit(level, output);
+  }
+
+  private safeJson(entry: Record<string, unknown>): string {
+    try {
+      return JSON.stringify(entry);
+    } catch {
+      // BigInts/circular meta must never crash a log line.
+      return this.format(entry);
+    }
   }
 
   private format(entry: Record<string, unknown>): string {
     const ts = entry.timestamp ? ` [${entry.timestamp}]` : '';
     const src = entry.source ? ` [${entry.source}]` : '';
-    return `[${String(entry.level).toUpperCase()}]${ts}${src} ${entry.msg}`;
+    const meta = entry.meta ? ` ${this.renderMeta(entry.meta)}` : '';
+    return `[${String(entry.level).toUpperCase()}]${ts}${src} ${entry.msg}${meta}`;
+  }
+
+  private renderMeta(meta: unknown): string {
+    try {
+      return JSON.stringify(meta) ?? String(meta);
+    } catch {
+      // BigInt etc. — fall back to a lossy text rendering rather than throw.
+      return String(meta);
+    }
   }
 
   private emit(level: LogLevel, output: string): void {

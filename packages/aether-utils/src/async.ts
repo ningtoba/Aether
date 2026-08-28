@@ -14,10 +14,15 @@ export interface RetryOptions {
 
 /** Wraps a promise with a timeout that rejects if it doesn't settle in time */
 export function withTimeout<T>(promise: Promise<T>, ms: number, msg?: string): Promise<T> {
-  return Promise.race([
-    promise,
-    delay(ms).then(() => Promise.reject(new Error(msg ?? `Timed out after ${ms}ms`))),
-  ]) as Promise<T>;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(msg ?? `Timed out after ${ms}ms`)), ms);
+  });
+  // Clear the timer when either side wins so a fast promise does not keep the
+  // event loop alive for the full `ms` (tool calls can run up to 60s).
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as Promise<T>;
 }
 
 /** Retries a function with configurable backoff. Returns the first successful result. */
