@@ -136,6 +136,79 @@ describe('AetherServer HTTP integration', () => {
   });
 });
 
+describe('provider routes & health wiring', () => {
+  let server: AetherServer;
+  beforeEach(() => {
+    server = new AetherServer({ port: 0, host: '127.0.0.1' });
+  });
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  it('rejects a null provider body with 400 instead of 500', async () => {
+    await server.start();
+    const base = `http://127.0.0.1:${server.getPort()}`;
+    try {
+      const res = await fetch(`${base}/api/providers`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: 'null',
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('rejects duplicate client-supplied provider ids with 409', async () => {
+    await server.start();
+    const base = `http://127.0.0.1:${server.getPort()}`;
+    try {
+      const body = JSON.stringify({ id: 'dup-provider', name: 'OpenAI', type: 'openai' });
+      const first = await fetch(`${base}/api/providers`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      expect(first.status).toBe(201);
+      const second = await fetch(`${base}/api/providers`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body,
+      });
+      expect(second.status).toBe(409);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it('reports real provider counts on /health', async () => {
+    await server.start();
+    const base = `http://127.0.0.1:${server.getPort()}`;
+    try {
+      const before = (
+        (await (await fetch(`${base}/health`)).json()) as {
+          providers: { configured: number };
+        }
+      ).providers.configured;
+      await fetch(`${base}/api/providers`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ name: 'OpenAI', type: 'openai' }),
+      });
+      const after = (
+        (await (await fetch(`${base}/health`)).json()) as {
+          providers: { configured: number };
+        }
+      ).providers.configured;
+      // Before the fix these were hardcoded to 0 regardless of registrations.
+      expect(after).toBe(before + 1);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
 // ---------------------------------------------------------------------------
 // CORS integration
 // ---------------------------------------------------------------------------
@@ -482,6 +555,19 @@ describe('API authentication & RBAC', () => {
       await srv.stop();
     }
   }, 10_000);
+  it('accepts a lowercase bearer auth scheme (RFC 7235 case-insensitive)', async () => {
+    const srv = new AetherServer({ port: 0, host: '127.0.0.1', auth: { apiKey: 'secret-key' } });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      const res = await fetch(`${base}/api/agents`, {
+        headers: { Authorization: 'bearer secret-key' },
+      });
+      expect(res.status).toBe(200);
+    } finally {
+      await srv.stop();
+    }
+  });
 });
 describe('AetherServer resilience', () => {
   let server: AetherServer;

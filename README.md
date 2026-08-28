@@ -389,6 +389,25 @@ Verification: **667 tests passing (was 656) across 48 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.14 Shell I/O, Provider Routes, Config & Server Hardening
+
+Ten defects from three fresh-lens scouts (core EventBus/lifecycle/config, RBAC + HTTP server/router, shell executor + backend stores/routes), each verified against source before fixing:
+
+- **Shell `stdin` is actually piped** — `ToolParams.stdin` ("Stdin to pipe (text or base64)") was documented but never written, and the child's stdin pipe was never closed, so any stdin-reading command (`cat`, `sort`, interactive) blocked on an empty open pipe until the timeout killed it. The payload is now written and stdin is ended with EOF (also for the Docker executor).
+- **Signal-killed commands report a stable exit chunk** — the streaming `exit` chunk serialized `String(exitCode)`, which is `null` on a signal kill, while the returned result said `-1`. The chunk now emits the same `-1`.
+- **Partial agent-config updates merge instead of replacing** — `updateAgent` shallow-spread a `{ config: { model } }` patch over the record, silently dropping every other config key (temperature, systemPrompt, …). Config patches now deep-merge with the existing map.
+- **Provider route accepts a null body with 400, not 500** — `parseBody` returns any JSON value, and a `null` (or non-object) body dereferenced `body.name` straight into the route handler, surfacing a leaked `TypeError` as a 500. Non-object bodies now return 400 alongside the existing name/type validation.
+- **Client-supplied provider ids are safe** — a duplicate `id` silently overwrote the existing record (on an unauthenticated API), and a non-string `id: 123` created a Map key no router param could ever address (orphan). Duplicates now return 409, non-string ids 400.
+- **`/health` reports real provider counts** — the payload hardcoded `providers {configured: 0, healthy: 0}` disconnected from the actual store, so dashboards/probes always showed zero. Health now reflects the live provider registry (delta-verified in the integration test).
+- **Server never leaks exception internals** — a throwing route handler echoed `err.message` (file paths, store keys) into the JSON response body, and a post-write throw crashed the response with `ERR_HTTP_HEADERS_SENT`. The client now always receives a fixed `Internal server error` (details logged server-side), guarded against already-sent headers.
+- **Bearer auth-scheme is case-insensitive** — `Authorization: bearer <key>` (valid per RFC 7235) was rejected because the prefix check was case-sensitive; lowercase `bearer` now authenticates.
+- **`ConfigManager.reset()` restores constructor defaults** — reset reverted to built-in defaults, silently discarding the overrides the manager was constructed with (`new ConfigManager({ port: 9000 })` → reset → `8456`). It now returns to the manager's own base defaults.
+- **`ConfigManager.load()` rejects prototype-polluting keys** — a JSON config carrying `__proto__` replaced the settings object's prototype (letting that key's properties be "known" to later loads). `__proto__`/`constructor`/`prototype` keys are skipped and only own settings keys are loadable.
+
+Verification: **676 tests passing (was 667) across 48 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:

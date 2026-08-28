@@ -42,7 +42,7 @@ export async function execShell(
     ...(process.platform === 'win32' ? { windowsVerbatimArguments: true } : {}),
   });
 
-  return collectOutput(child, def, startedAt, onChunk);
+  return collectOutput(child, def, startedAt, onChunk, params.stdin);
 }
 
 /**
@@ -75,7 +75,7 @@ export async function execShellDocker(
     signal,
   });
 
-  return collectOutput(child, def, startedAt, onChunk);
+  return collectOutput(child, def, startedAt, onChunk, params.stdin);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -112,6 +112,7 @@ async function collectOutput(
   def: ToolDef,
   startedAt: number,
   onChunk?: StreamCallback,
+  stdin?: string,
 ): Promise<ShellResult> {
   const timeoutMs = def.timeoutMs;
   const maxBytes = def.maxOutputBytes;
@@ -160,6 +161,13 @@ async function collectOutput(
   };
 
   // Timeout timer
+  // Pipe the documented stdin payload (or EOF) so commands that read stdin
+  // (cat, sort, interactive) do not block forever on an open, unwritten pipe.
+  if (stdin !== undefined) {
+    child.stdin?.write(stdin);
+  }
+  child.stdin?.end();
+
   const timer = setTimeout(() => {
     timedOut = true;
     child.kill('SIGTERM');
@@ -208,7 +216,7 @@ async function collectOutput(
       if (onChunk) {
         void onChunk({
           kind: 'exit',
-          data: String(exitCode),
+          data: String(exitCode ?? -1),
           timestamp: Date.now(),
         });
       }

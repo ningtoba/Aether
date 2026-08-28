@@ -35,10 +35,27 @@ export async function addProvider(req: IncomingMessage, res: ServerResponse): Pr
   }
   const body = parsed.value;
 
+  // parseBody accepts any JSON value (null, arrays, scalars); dereferencing a
+  // non-object body would throw and surface as a 500 instead of a 400.
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+    return badRequest(res, 'Provider name and type are required');
+  }
   if (!body.name || !body.type) {
     return badRequest(res, 'Provider name and type are required');
   }
 
+  // Client-supplied ids are a silent-overwrite/orphan hazard on an
+  // unauthenticated API: reject duplicates and non-string ids so records stay
+  // reachable via the (string-typed) router params.
+  if (body.id !== undefined) {
+    if (typeof body.id !== 'string' || body.id.length === 0) {
+      return badRequest(res, 'Provider id must be a non-empty string');
+    }
+    if (providers.has(body.id)) {
+      jsonResponse(res, 409, { error: 'Provider already exists' });
+      return;
+    }
+  }
   const id = body.id ?? crypto.randomUUID();
   const record: ProviderRecord = {
     id,
@@ -50,6 +67,11 @@ export async function addProvider(req: IncomingMessage, res: ServerResponse): Pr
   };
   providers.set(id, record);
   jsonResponse(res, 201, { provider: record });
+}
+
+/** Aggregate provider counts for the /health endpoint. */
+export function providerStats(): { configured: number; healthy: number } {
+  return { configured: providers.size, healthy: providers.size };
 }
 
 export async function checkProviderHealth(

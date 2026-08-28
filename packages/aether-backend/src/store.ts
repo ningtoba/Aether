@@ -60,6 +60,9 @@ export function updateAgent(id: AgentId, data: Partial<AgentRecord>): AgentRecor
   const updated: AgentRecord = {
     ...existing,
     ...data,
+    // A partial config patch must merge with the existing config; a raw
+    // spread would silently drop every other key (model, temperature, …).
+    config: data.config ? ({ ...existing.config, ...data.config } as AgentConfig) : existing.config,
     id: existing.id,
     createdAt: existing.createdAt,
     updatedAt: new Date().toISOString(),

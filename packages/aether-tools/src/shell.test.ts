@@ -79,4 +79,27 @@ describe('execShell', () => {
     expect(result.timedOut).toBe(true);
     expect(result.exitCode).not.toBe(0);
   }, 15_000);
+  it('pipes the documented stdin payload to the command', async () => {
+    const result = await execShell(def, {
+      command: 'cat',
+      args: [],
+      stdin: 'hello via stdin\n',
+    });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain('hello via stdin');
+    expect(result.timedOut).toBe(false);
+  }, 10_000);
+
+  it('emits a numeric exit chunk when the command is killed', async () => {
+    const short: ToolDef = { ...def, timeoutMs: 300 };
+    const exitData: string[] = [];
+    const result = await execShell(short, { command: 'sleep 30', args: [] }, (chunk) => {
+      if (chunk.kind === 'exit') exitData.push(chunk.data);
+    });
+    expect(result.timedOut).toBe(true);
+    // A signal-killed process reports exitCode null; the chunk must serialize
+    // it as the stable '-1', never the literal string 'null'.
+    expect(exitData.includes('null')).toBe(false);
+    expect(exitData.includes('-1')).toBe(true);
+  }, 10_000);
 }, 20_000);

@@ -77,6 +77,17 @@ describe('Agent Store', () => {
       const result = store.updateAgent('nonexistent' as AgentId, { name: 'nope' });
       expect(result).toBeUndefined();
     });
+    it('merges a partial config patch instead of replacing the whole config', () => {
+      const agent = store.createAgent({
+        name: 'config-merge',
+        config: { model: 'gpt-4o', temperature: 0.7, systemPrompt: 'be concise' },
+      });
+      const updated = store.updateAgent(agent.id, { config: { model: 'gpt-4o-mini' } });
+      expect(updated!.config.model).toBe('gpt-4o-mini');
+      // Keys not mentioned in the patch survive the merge.
+      expect(updated!.config.temperature).toBe(0.7);
+      expect(updated!.config.systemPrompt).toBe('be concise');
+    });
   });
 
   describe('deleteAgent', () => {

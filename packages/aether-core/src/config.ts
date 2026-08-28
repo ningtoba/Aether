@@ -24,9 +24,12 @@ const DEFAULT_SETTINGS: AppSettings = {
 /** Type-safe configuration manager with defaults */
 export class ConfigManager<T extends Record<string, unknown> = AppSettings> {
   private settings: T;
+  /** The defaults this manager was constructed with; reset() restores them. */
+  private readonly baseDefaults: T;
 
   constructor(defaults?: Record<string, unknown>) {
-    this.settings = { ...DEFAULT_SETTINGS, ...defaults } as unknown as T;
+    this.baseDefaults = { ...DEFAULT_SETTINGS, ...defaults } as unknown as T;
+    this.settings = { ...this.baseDefaults };
   }
 
   /** Get a configuration value */
@@ -51,13 +54,18 @@ export class ConfigManager<T extends Record<string, unknown> = AppSettings> {
 
   /** Reset all settings to defaults */
   reset(defaults?: Partial<T>): void {
-    this.settings = { ...DEFAULT_SETTINGS, ...defaults } as unknown as T;
+    this.settings = { ...this.baseDefaults, ...defaults } as unknown as T;
   }
 
   /** Load settings from a JSON config object */
   load(config: Record<string, unknown>): void {
     for (const key of Object.keys(config)) {
-      if (key in this.settings) {
+      // JSON configs can arrive with __proto__/constructor/prototype keys; never
+      // let them touch the settings object (prototype pollution) or later keys.
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      // Only own settings keys are loadable — a polluted prototype must not
+      // make unrelated keys "known".
+      if (Object.prototype.hasOwnProperty.call(this.settings, key)) {
         (this.settings as Record<string, unknown>)[key] = config[key];
       }
     }

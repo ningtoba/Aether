@@ -87,8 +87,9 @@ export class AetherServer {
   /** Extract the API key supplied via Authorization: Bearer or X-API-Key. */
   private extractApiKey(req: IncomingMessage): string | null {
     const auth = req.headers.authorization;
-    if (auth && auth.startsWith('Bearer ')) {
-      const token = auth.slice('Bearer '.length).trim();
+    // RFC 7235 auth-schemes are case-insensitive; accept lowercase `bearer`.
+    if (auth && /^bearer[ \t]+/i.test(auth)) {
+      const token = auth.replace(/^bearer[ \t]+/i, '').trim();
       if (token) return token;
     }
     const headerKey = req.headers['x-api-key'];
@@ -253,8 +254,16 @@ export class AetherServer {
       try {
         await route.handler(req, res, route.params);
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Internal server error';
-        serverError(res, message);
+        // Never echo exception internals (paths, store keys) to remote clients;
+        // log them server-side and return a fixed message.
+        console.error('Route handler error:', err);
+        if (res.headersSent) {
+          // The handler wrote a partial response before failing; do not try to
+          // write a second response over already-sent headers.
+          res.destroy();
+          return;
+        }
+        serverError(res, 'Internal server error');
       }
     } else {
       jsonResponse(res, 404, {

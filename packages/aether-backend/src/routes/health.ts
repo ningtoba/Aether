@@ -1,6 +1,7 @@
 /**
  * Health check endpoint
  */
+import { providerStats } from './providers.js';
 
 export interface HealthStatus {
   status: 'ok' | 'degraded' | 'error';
@@ -34,8 +35,8 @@ export function getHealthStatus(): HealthStatus {
       external: mem.external,
     },
     providers: {
-      configured: 0,
-      healthy: 0,
+      configured: providerStats().configured,
+      healthy: providerStats().healthy,
     },
     timestamp: new Date().toISOString(),
   };

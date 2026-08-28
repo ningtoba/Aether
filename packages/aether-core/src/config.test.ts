@@ -100,6 +100,15 @@ describe('ConfigManager', () => {
       config.load({ foo: 'bar' as unknown as string });
       expect(config.get('port')).toBe(original);
     });
+    it('ignores prototype-polluting keys from JSON configs', () => {
+      const cm = new ConfigManager();
+      // JSON.parse creates an own "__proto__" data property; loading it must
+      // not replace the settings object's prototype (which would let a later
+      // "injected" key become loadable).
+      cm.load(JSON.parse('{"__proto__":{"injected":1}}') as Record<string, unknown>);
+      cm.load({ injected: 999 } as unknown as Record<string, unknown>);
+      expect((cm.getAll() as Record<string, unknown>).injected).toBeUndefined();
+    });
   });
 
   describe('reset', () => {
@@ -116,6 +125,15 @@ describe('ConfigManager', () => {
       config.reset({ port: 3000 });
       expect(config.get('port')).toBe(3000);
       expect(config.get('theme')).toBe('dark');
+    });
+    it('restores constructor-provided defaults on reset', () => {
+      const cm = new ConfigManager({ port: 9000, host: '0.0.0.0' });
+      cm.set('port', 9999);
+      cm.reset();
+      // reset() must return to the defaults the manager was built with, not
+      // forget the constructor overrides and fall all the way back to built-ins.
+      expect(cm.get('port')).toBe(9000);
+      expect(cm.get('host')).toBe('0.0.0.0');
     });
   });
 
