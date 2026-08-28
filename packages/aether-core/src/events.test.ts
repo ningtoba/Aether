@@ -189,3 +189,65 @@ describe('EventBus', () => {
     });
   });
 });
+describe('EventBus per-subscriber isolation', () => {
+  it('should not let one throwing handler starve the subscribers behind it', async () => {
+    const b = new EventBus();
+    const good1 = vi.fn();
+    const bad = vi.fn(() => {
+      throw new Error('boom');
+    });
+    const good2 = vi.fn();
+
+    b.subscribe('iso', good1);
+    b.subscribe('iso', bad);
+    b.subscribe('iso', good2);
+
+    await expect(b.publish('iso', 'data')).rejects.toThrow('boom');
+    expect(good1).toHaveBeenCalledWith('data');
+    expect(bad).toHaveBeenCalledWith('data');
+    expect(good2).toHaveBeenCalledWith('data');
+  });
+
+  it('should log and continue when retryFailed is true', async () => {
+    const b = new EventBus({ retryFailed: true });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const listener1 = vi.fn();
+    const listener2 = vi.fn();
+
+    b.subscribe('tolerant', () => {
+      throw new Error('logged');
+    });
+    b.subscribe('tolerant', listener1);
+    b.subscribe('tolerant', listener2);
+
+    await b.publish('tolerant', 'data');
+    expect(listener1).toHaveBeenCalledWith('data');
+    expect(listener2).toHaveBeenCalledWith('data');
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('tolerant'), expect.any(Error));
+    errSpy.mockRestore();
+  });
+
+  it('should log rejections in async delivery mode when retryFailed is true', async () => {
+    const b = new EventBus({ asyncDelivery: true, retryFailed: true });
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const good = vi.fn();
+
+    b.subscribe('async-safe', () => Promise.reject(new Error('async-boom')));
+    b.subscribe('async-safe', good);
+
+    await b.publish('async-safe', 'data');
+    expect(good).toHaveBeenCalled();
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('async-safe'), expect.any(Error));
+    errSpy.mockRestore();
+  });
+
+  it('should keep resolving in async mode even when a handler rejects', async () => {
+    const b = new EventBus({ asyncDelivery: true });
+    const good = vi.fn();
+    b.subscribe('async-calm', () => Promise.reject(new Error('nope')));
+    b.subscribe('async-calm', good);
+
+    await expect(b.publish('async-calm', 'data')).resolves.toBeUndefined();
+    expect(good).toHaveBeenCalledWith('data');
+  });
+});

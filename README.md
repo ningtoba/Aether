@@ -286,13 +286,24 @@ Verification: **605 tests passing (was 601) across 42 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.7 Reliability Parity
+
+Closed three documented-but-dead correctness gaps in core runtime packages:
+
+- **`MemoryStore` now honours `defaultTtlMs`** — the config option was previously dead: `add()` never stamped a TTL, so entries with a non-zero default never expired. Entries now get the store-wide default TTL at write time (a per-entry `ttl` still wins) and every read path (`get`/`search`/`list`/`stats`) treats an expired entry as absent immediately — no more serving stale data until the next (up to 60s late) auto-compact sweep.
+- **Event-bus per-subscriber isolation** — a throwing handler no longer starves the subscribers registered behind it: `publish` delivers to every subscriber, then surfaces the first error (default) or logs and continues (`retryFailed`). `asyncDelivery` rejections were silently swallowed even with `retryFailed: true`; they are now logged there too (the documented resolve-despite-rejection contract is unchanged).
+- **Gemini batch embeddings work** — `embed()` with an array input joined the texts with `\n`, called single-input `embedContent`, and returned **one** embedding for N inputs. Arrays now target `batchEmbedContents` with one `requests[]` entry per input and map one embedding each, in order; a single string still uses `embedContent`; an empty array short-circuits without an API call.
+
+Verification: **616 tests passing (was 605) across 42 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:
 
 - **Persist secrets via the vault** — route provider keys from the renderer to the vault through main-process IPC (safeStorage/keytar) so re-launch keeps keys without ever touching localStorage; replace session-only re-entry.
 - **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.
-- **Reliability parity** — memory-store `defaultTtlMs` at write time, per-subscriber event-bus isolation, Gemini batch embeddings.
 - **Auth polish** — per-user/session auth (JWT), key rotation via the vault, and role assignment for arbitrary API keys beyond the admin default.
 
 ---

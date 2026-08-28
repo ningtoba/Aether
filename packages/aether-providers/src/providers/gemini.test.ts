@@ -437,3 +437,57 @@ describe('GeminiProvider tool-loop serialization', () => {
     ]);
   });
 });
+describe('GeminiProvider batch embeddings', () => {
+  it('sends one request per input to batchEmbedContents and maps one embedding each', async () => {
+    const provider = makeProvider();
+    mockFetch(
+      { ok: true, status: 200 },
+      {
+        embeddings: [{ values: [0.1, 0.2] }, { values: [0.3, 0.4] }],
+      },
+    );
+
+    const response = await provider.embed({
+      model: 'text-embedding-004',
+      input: ['first text', 'second text'],
+    });
+
+    expect(response.embeddings).toHaveLength(2);
+    expect(response.embeddings[0]).toEqual([0.1, 0.2]);
+    expect(response.embeddings[1]).toEqual([0.3, 0.4]);
+
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    expect(fetchCall[0]).toContain(':batchEmbedContents');
+
+    const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
+    expect(body.requests).toHaveLength(2);
+    expect(body.requests[0].content.parts[0].text).toBe('first text');
+    expect(body.requests[1].content.parts[0].text).toBe('second text');
+  });
+
+  it('returns no embeddings for an empty input array without calling the API', async () => {
+    const provider = makeProvider();
+    const spy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({} as Response);
+
+    const response = await provider.embed({ model: 'text-embedding-004', input: [] });
+
+    expect(response.embeddings).toEqual([]);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('keeps using embedContent for a single string input', async () => {
+    const provider = makeProvider();
+    mockFetch({ ok: true, status: 200 }, { embedding: { values: [0.7, 0.8, 0.9] } });
+
+    const response = await provider.embed({
+      model: 'text-embedding-004',
+      input: 'solo',
+    });
+
+    expect(response.embeddings).toEqual([[0.7, 0.8, 0.9]]);
+    const fetchCall = vi.mocked(fetch).mock.calls[0];
+    expect(fetchCall[0]).toContain(':embedContent');
+    const body = JSON.parse((fetchCall[1] as RequestInit).body as string);
+    expect(body.content.parts[0].text).toBe('solo');
+  });
+});

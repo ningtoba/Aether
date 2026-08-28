@@ -41,7 +41,17 @@ export class EventBus {
     this.onceListeners.get(event)!.add(handler as EventHandler);
   }
 
-  /** Publish an event to all subscribers */
+  /**
+   * Publish an event to all subscribers.
+   *
+   * Delivery is isolated per subscriber: a handler that throws/rejects never
+   * prevents the remaining subscribers from receiving the event. With
+   * `retryFailed` the failures are logged and swallowed; without it the first
+   * failure is surfaced once every subscriber has had its turn. In
+   * `asyncDelivery` mode handlers run concurrently and the documented
+   * deliver-all-then-resolve contract is kept (a rejection is confined to that
+   * subscriber; with `retryFailed` it is also logged).
+   */
   async publish<T = unknown>(event: string, data: T): Promise<void> {
     const allHandlers = [
       ...(this.listeners.get(event) ?? []),
@@ -50,16 +60,32 @@ export class EventBus {
     this.onceListeners.delete(event);
 
     if (this.options.asyncDelivery) {
-      await Promise.allSettled(allHandlers.map((h) => this.invokeHandler(h, event, data)));
-    } else {
-      for (const handler of allHandlers) {
-        await this.invokeHandler(handler, event, data).catch((err) => {
-          if (this.options.retryFailed)
-            console.error(`EventBus: handler failed for "${event}":`, err);
-          else throw err;
-        });
+      const results = await Promise.allSettled(
+        allHandlers.map((h) => this.invokeHandler(h, event, data)),
+      );
+      if (this.options.retryFailed) {
+        for (const result of results) {
+          if (result.status === 'rejected') {
+            console.error(`EventBus: handler failed for "${event}":`, result.reason);
+          }
+        }
+      }
+      return;
+    }
+
+    let firstError: unknown = null;
+    for (const handler of allHandlers) {
+      try {
+        await this.invokeHandler(handler, event, data);
+      } catch (err) {
+        if (this.options.retryFailed) {
+          console.error(`EventBus: handler failed for "${event}":`, err);
+        } else if (firstError === null) {
+          firstError = err;
+        }
       }
     }
+    if (firstError !== null) throw firstError;
   }
 
   /** Remove all listeners for an event */

@@ -38,8 +38,12 @@ export class MemoryStore {
    */
   async add(entry: Omit<MemoryEntry, 'id' | 'timestamp'> & { id?: string }): Promise<MemoryEntry> {
     const id = entry.id ?? `mem-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    // Apply the store-wide default TTL when the entry does not set its own, so
+    // `defaultTtlMs` actually expires entries instead of being dead config.
+    const ttl = entry.ttl ?? (this.config.defaultTtlMs > 0 ? this.config.defaultTtlMs : undefined);
     const stored: MemoryEntry = {
       ...entry,
+      ...(ttl !== undefined ? { ttl } : {}),
       id,
       timestamp: Date.now(),
     };
@@ -51,7 +55,8 @@ export class MemoryStore {
    * Retrieve a single entry by id.
    */
   async get(id: string): Promise<MemoryEntry | undefined> {
-    return this.entries.get(id);
+    const entry = this.entries.get(id);
+    return entry && !this.isExpired(entry) ? entry : undefined;
   }
 
   /**
@@ -63,6 +68,9 @@ export class MemoryStore {
     const q = query.query.toLowerCase();
 
     for (const entry of Array.from(this.entries.values())) {
+      // Skip entries that have already expired since the last compaction.
+      if (this.isExpired(entry)) continue;
+
       // Type filter
       if (query.type && entry.type !== query.type) continue;
 
@@ -103,9 +111,9 @@ export class MemoryStore {
    * List all entries, optionally filtered by type.
    */
   async list(type?: MemoryType): Promise<MemoryEntry[]> {
-    const all = Array.from(this.entries.values());
-    if (type) return all.filter((e) => e.type === type);
-    return all;
+    const live = Array.from(this.entries.values()).filter((e) => !this.isExpired(e));
+    if (type) return live.filter((e) => e.type === type);
+    return live;
   }
 
   /**
@@ -116,11 +124,14 @@ export class MemoryStore {
     byType: Record<string, number>;
   }> {
     const byType: Record<string, number> = {};
+    let total = 0;
     for (const entry of Array.from(this.entries.values())) {
+      if (this.isExpired(entry)) continue;
+      total += 1;
       byType[entry.type] = (byType[entry.type] ?? 0) + 1;
     }
     return {
-      totalEntries: this.entries.size,
+      totalEntries: total,
       byType,
     };
   }
@@ -134,7 +145,7 @@ export class MemoryStore {
 
     for (const [id, entry] of Array.from(this.entries.entries())) {
       // Expiry check
-      if (entry.ttl && entry.ttl > 0 && now - entry.timestamp > entry.ttl) {
+      if (this.isExpired(entry, now)) {
         toDelete.push(id);
       }
     }
@@ -159,8 +170,17 @@ export class MemoryStore {
    * Release resources (clear interval).
    */
   dispose(): void {
-    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
+    clearInterval(this.cleanupTimer);
     this.entries.clear();
+  }
+
+  /**
+   * True when an entry has expired (a TTL is set and it has lived past it).
+   * Expired entries are treated as absent by every read path; `compact()` is
+   * what physically removes them from the store.
+   */
+  private isExpired(entry: MemoryEntry, now: number = Date.now()): boolean {
+    return typeof entry.ttl === 'number' && entry.ttl > 0 && now - entry.timestamp > entry.ttl;
   }
 
   /**

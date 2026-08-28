@@ -290,3 +290,50 @@ describe('MemoryStore', () => {
     });
   });
 });
+describe('MemoryStore defaultTtlMs & read-time expiry', () => {
+  it('should stamp the default TTL on entries that do not provide their own', async () => {
+    const ttlStore = new MemoryStore({ maxEntries: 100, autoCompact: false, defaultTtlMs: 5000 });
+    try {
+      const entry = await ttlStore.add({ type: 'semantic', content: 'x', metadata: {} });
+      expect(entry.ttl).toBe(5000);
+    } finally {
+      ttlStore.dispose();
+    }
+  });
+
+  it('should let a per-entry ttl override the default', async () => {
+    const ttlStore = new MemoryStore({ maxEntries: 100, autoCompact: false, defaultTtlMs: 5000 });
+    try {
+      const entry = await ttlStore.add({ type: 'semantic', content: 'x', metadata: {}, ttl: 10 });
+      expect(entry.ttl).toBe(10);
+    } finally {
+      ttlStore.dispose();
+    }
+  });
+
+  it('should not stamp a ttl when defaultTtlMs is 0', async () => {
+    const noTtlStore = new MemoryStore({ maxEntries: 100, autoCompact: false, defaultTtlMs: 0 });
+    try {
+      const entry = await noTtlStore.add({ type: 'semantic', content: 'x', metadata: {} });
+      expect(entry.ttl).toBeUndefined();
+    } finally {
+      noTtlStore.dispose();
+    }
+  });
+
+  it('should treat default-TTL entries as expired once they outlive the TTL', async () => {
+    const ttlStore = new MemoryStore({ maxEntries: 100, autoCompact: false, defaultTtlMs: 1 });
+    try {
+      const entry = await ttlStore.add({ type: 'semantic', content: 'expiring', metadata: {} });
+      expect(entry.ttl).toBe(1);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      expect(await ttlStore.get(entry.id)).toBeUndefined();
+      expect(await ttlStore.list()).toHaveLength(0);
+      expect(await ttlStore.search({ query: 'expiring', limit: 10, threshold: 0 })).toHaveLength(0);
+      expect((await ttlStore.stats()).totalEntries).toBe(0);
+    } finally {
+      ttlStore.dispose();
+    }
+  });
+});

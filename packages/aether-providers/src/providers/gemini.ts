@@ -164,17 +164,35 @@ export class GeminiProvider extends ProviderInterface {
       const timeout = setTimeout(() => controller.abort(), this.config.timeout ?? 60_000);
 
       try {
-        const input = Array.isArray(request.input) ? request.input.join('\n') : request.input;
-        const url = this.resolveGeminiUrl(request.model, 'embedContent');
+        const inputs = Array.isArray(request.input) ? request.input : [request.input];
+        if (inputs.length === 0) {
+          return {
+            model: request.model,
+            embeddings: [],
+            usage: { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+          };
+        }
+        const isBatch = inputs.length > 1;
+        const url = this.resolveGeminiUrl(
+          request.model,
+          isBatch ? 'batchEmbedContents' : 'embedContent',
+        );
         const res = await fetch(url, {
           method: 'POST',
           headers: this.buildHeaders(),
-          body: JSON.stringify({
-            model: `models/${request.model}`,
-            content: {
-              parts: [{ text: input }],
-            },
-          }),
+          body: JSON.stringify(
+            isBatch
+              ? {
+                  requests: inputs.map((text) => ({
+                    model: `models/${request.model}`,
+                    content: { parts: [{ text }] },
+                  })),
+                }
+              : {
+                  model: `models/${request.model}`,
+                  content: { parts: [{ text: inputs[0] }] },
+                },
+          ),
           signal: controller.signal,
         });
 
@@ -184,11 +202,17 @@ export class GeminiProvider extends ProviderInterface {
 
         const json: any = await res.json();
 
-        // Gemini returns: { embedding: { values: [0.1, 0.2, ...] } }
-        // For batch, Gemini uses batchEmbedContents
+        // embedContent:       { embedding: { values: [0.1, 0.2, ...] } }
+        // batchEmbedContents: { embeddings: [{ values: [...] }, ...] }
+        const embeddings: number[][] = isBatch
+          ? (json.embeddings ?? []).map((e: any) => e.values)
+          : json.embedding?.values
+            ? [json.embedding.values]
+            : [];
+
         return {
           model: request.model,
-          embeddings: json.embedding?.values ? [json.embedding.values] : [],
+          embeddings,
           usage: {
             promptTokens: 0,
             completionTokens: 0,
