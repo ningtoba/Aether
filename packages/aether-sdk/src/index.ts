@@ -9,5 +9,6 @@
 
 export { AetherAgent, AetherRunner } from './agent.js';
 export { createTool, ToolRegistry } from './tools.js';
+export * from './internal-types.js';
 
 export type { AgentConfig, RunConfig, RunResult, ToolDefinition } from './types.js';

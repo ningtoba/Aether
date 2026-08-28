@@ -114,3 +114,18 @@ describe('createTool', () => {
     expect(tool.name).toBe('no_handler');
   });
 });
+describe('ToolRegistry name validation', () => {
+  it('rejects empty names with a clear error instead of a late agents-core failure', () => {
+    const registry = new ToolRegistry();
+    expect(() => registry.register({ name: '', description: 'd', parameters: {} })).toThrow(
+      /Invalid tool name/,
+    );
+  });
+
+  it('rejects names with invalid characters', () => {
+    const registry = new ToolRegistry();
+    expect(() =>
+      registry.register({ name: 'has space', description: 'd', parameters: {} }),
+    ).toThrow(/Invalid tool name/);
+  });
+});

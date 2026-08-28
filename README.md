@@ -447,6 +447,24 @@ Verification: **705 tests passing (was 689) across 50 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.17 Graph Rendering & SDK Contract Wiring
+
+Nine defects from two fresh-lens scouts (workflow visualizer, SDK remainder wrappers), each verified against source before fixing:
+
+- **Mermaid output quotes/escapes every node/edge id** — labels were escaped but ids were interpolated raw, so an id like `bad"id` / `a[0]` / `with space` broke out of the node/edge strings and produced malformed (or injectable) diagrams in `toMermaid` and `toMermaidSequence`. Ids are now quoted + escaped everywhere (sequence participant aliases are sanitized to safe tokens).
+- **The conditional-edge highlight no longer recolors every edge** — `linkStyle default` turned direct/llm-route edges yellow too; it is now an indexed `linkStyle <n>` emitted once per conditional edge.
+- **`toTextTree` renders the `END`/`__end__` sentinel as a leaf** — the (builder-supported) early-exit sentinel was printed as a bogus `[?]` node; it is now `-> END (end)`, and a missing entry node renders `(no entry node)` instead of garbage.
+- **`llm-route` edges are visually distinct in DOT** — they fell through to the plain `->` style, losing the routing distinction the Mermaid renderer attempts; DOT now uses a dotted purple edge, and Mermaid uses the standard `==>` thick arrow (replacing the non-standard `==o`).
+- **Mermaid comment headers can no longer be broken out of** — `workflow.name`/`description` were interpolated into `%%` comments raw; an embedded newline terminated the comment and let the rest parse as diagram code. Newlines are now collapsed.
+- **A node that is both entry and terminal gets one merged style** — two conflicting `style` lines (blue then green) lost the entry marker; a combined style is emitted.
+- **DOT declares isolated nodes** — only entry/terminal nodes were styled and everything else implicitly declared via edges, so an orphan node vanished from output. Every node is now declared.
+- **SDK context actually reaches the model** — `AgentConfig.context` and `RunConfig.context` (both documented "injected into instructions") were dead: the docs' promise held but the LLM never saw the data the Electron UI ships (domain/languages/etc.). `toSdkAgent` now appends merged agent + per-run context to the instructions, and `run()`/`runWithAgents()` forward `config.context`.
+- **SDK barrel re-exports the bridge surface + tool names are validated** — `@aether/sdk` never re-exported `internal-types` (so consumers needed a direct `@openai/agents` dependency for `sdkTool`/`Runner`/`Agent`/types); it now does. `ToolRegistry.register` rejects empty/invalid names up front instead of deferring a confusing "Tool name cannot be empty" to agents-core.
+
+Verification: **715 tests passing (was 705) across 51 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:

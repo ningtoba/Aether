@@ -398,3 +398,31 @@ describe('AetherAgent tool metadata handoff', () => {
     expect(result).toContain('timed out');
   });
 });
+describe('context injection', () => {
+  const baseConfig = (): AgentConfig => ({
+    name: 'ctx',
+    model: 'gpt-4o',
+    instructions: 'You are a test agent',
+    tools: [],
+    handoffs: [],
+    guardrails: [],
+    maxTurns: 5,
+  });
+
+  it('merges agent-level context into the model instructions', () => {
+    const agent = new AetherAgent({
+      ...baseConfig(),
+      context: { domain: 'finance', language: 'en' },
+    });
+    const sdk = agent.toSdkAgent() as unknown as { _config: { instructions: string } };
+    expect(sdk._config.instructions).toContain('"domain":"finance"');
+    expect(sdk._config.instructions).toContain('"language":"en"');
+    expect(sdk._config.instructions).toContain('You are a test agent');
+  });
+
+  it('leaves instructions untouched when no context is set', () => {
+    const agent = new AetherAgent(baseConfig());
+    const sdk = agent.toSdkAgent() as unknown as { _config: { instructions: string } };
+    expect(sdk._config.instructions).toBe('You are a test agent');
+  });
+});

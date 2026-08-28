@@ -55,12 +55,20 @@ export class AetherAgent {
     this.context = config.context ?? {};
   }
 
-  toSdkAgent(handoffAgents?: Map<string, AetherAgent>): InstanceType<typeof SdkAgent> {
+  toSdkAgent(
+    handoffAgents?: Map<string, AetherAgent>,
+    contextOverride?: Record<string, unknown>,
+  ): InstanceType<typeof SdkAgent> {
     const tools = this.buildTools();
+
+    // Documented context injection: agent-level and per-run context are merged
+    // into the instructions sent to the model (previously both were dead).
+    const context = { ...this.context, ...(contextOverride ?? {}) };
+    const contextBlock = Object.keys(context).length > 0 ? JSON.stringify(context) : '';
 
     const config: Record<string, unknown> = {
       name: this.name,
-      instructions: this.instructions,
+      instructions: [this.instructions, contextBlock].filter(Boolean).join('\n\n'),
       model: this.model,
       tools,
       maxTurns: this.maxTurns,
@@ -186,7 +194,7 @@ export class AetherRunner {
   }
 
   async run(agent: AetherAgent, input: string, config?: Partial<RunConfig>): Promise<RunResult> {
-    const sdkAgent = agent.toSdkAgent();
+    const sdkAgent = agent.toSdkAgent(undefined, config?.context);
 
     const result = await this.runner.run(sdkAgent as any, input, {
       maxTurns: config?.maxTurns ?? agent.maxTurns,
@@ -206,7 +214,7 @@ export class AetherRunner {
       agentMap.set(a.name, a);
     }
 
-    const sdkAgent = primaryAgent.toSdkAgent(agentMap);
+    const sdkAgent = primaryAgent.toSdkAgent(agentMap, config?.context);
 
     const result = await this.runner.run(sdkAgent as any, input, {
       maxTurns: config?.maxTurns ?? primaryAgent.maxTurns,

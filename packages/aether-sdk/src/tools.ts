@@ -30,6 +30,13 @@ export class ToolRegistry {
    * Register a tool. Throws if a tool with the same name already exists.
    */
   register(tool: ToolDefinition): void {
+    // Fail fast with a clear error instead of passing an unusable name down to
+    // agents-core (which throws a confusing "Tool name cannot be empty" late).
+    if (!tool.name || !/^[a-zA-Z0-9_-]{1,64}$/.test(tool.name)) {
+      throw new Error(
+        `Invalid tool name "${tool.name}": expected 1-64 characters of [a-zA-Z0-9_-]`,
+      );
+    }
     if (this.tools.has(tool.name)) {
       throw new Error(`Tool "${tool.name}" is already registered`);
     }
