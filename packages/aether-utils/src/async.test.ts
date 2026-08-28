@@ -191,6 +191,19 @@ describe('parallel', () => {
     expect(results).toEqual(['a', 'b']);
   });
 });
+describe('parallel() concurrency guards', () => {
+  it('still runs all tasks when concurrency is 0 (no silent drop)', async () => {
+    const spy = vi.fn(async () => 42);
+    const results = await parallel([spy, spy], 0);
+    expect(results).toEqual([42, 42]);
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('runs all tasks sequentially for negative concurrency instead of RangeError', async () => {
+    const results = await parallel([async () => 1, async () => 2], -3);
+    expect(results).toEqual([1, 2]);
+  });
+});
 
 describe('raceWithTimeout', () => {
   it('should return the first resolved promise', async () => {

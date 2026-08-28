@@ -303,3 +303,67 @@ describe('AetherRunner result mapping (real SDK shape)', () => {
     expect(result.tokenUsage).toEqual({ prompt: 0, completion: 0, total: 0 });
   });
 });
+describe('AetherAgent tool metadata handoff', () => {
+  it('does not expose disabled tools to the SDK agent', () => {
+    const agent = new AetherAgent({
+      name: 't',
+      model: 'gpt-4o',
+      instructions: 'T',
+      tools: [],
+      handoffs: [],
+      outputType: undefined,
+      guardrails: [],
+      maxTurns: 5,
+    });
+    agent.tools.register({
+      name: 'disabled_tool',
+      description: 'd',
+      parameters: {},
+      enabled: false,
+    });
+    agent.tools.register({
+      name: 'enabled_tool',
+      description: 'd',
+      parameters: {},
+      enabled: true,
+      timeout: 500,
+      handler: async () => 'ok',
+    });
+
+    const sdk = agent.toSdkAgent();
+    const names = ((sdk as any)._config.tools as { name: string }[]).map((t) => t.name);
+    expect(names).toContain('enabled_tool');
+    expect(names).not.toContain('disabled_tool');
+  });
+
+  it('enforces the per-tool handler timeout', async () => {
+    const agent = new AetherAgent({
+      name: 't2',
+      model: 'gpt-4o',
+      instructions: 'T',
+      tools: [],
+      handoffs: [],
+      outputType: undefined,
+      guardrails: [],
+      maxTurns: 5,
+    });
+    agent.tools.register({
+      name: 'slow',
+      description: 'd',
+      parameters: {},
+      enabled: true,
+      timeout: 20,
+      handler: () => new Promise(() => {}), // never settles
+    });
+
+    const sdk = agent.toSdkAgent();
+    const tool = (
+      (sdk as any)._config.tools as {
+        name: string;
+        execute: (a: unknown) => Promise<string | undefined>;
+      }[]
+    ).find((t) => t.name === 'slow');
+    const result = await tool!.execute({});
+    expect(result).toContain('timed out');
+  });
+});

@@ -1,7 +1,8 @@
 /** Truncates a string to maxLen, appending "..." if truncated */
 export function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
-  return str.slice(0, Math.max(0, maxLen - 3)) + '...';
+  // Never return something longer than maxLen (e.g. '...' when maxLen < 3).
+  return (str.slice(0, Math.max(0, maxLen - 3)) + '...').slice(0, maxLen);
 }
 
 /** Converts a string to a URL-safe slug */

@@ -257,6 +257,13 @@ export class GraphEditor {
         error: `Node "${edit.nodeId}" not found`,
       };
     }
+    if ('id' in edit.patch) {
+      return {
+        success: false,
+        workflow: this.workflow,
+        error: 'Node id cannot be changed via update-node (edges and entry/terminal would orphan)',
+      };
+    }
     Object.assign(node, edit.patch);
     return { success: true, workflow: this.workflow };
   }
@@ -294,6 +301,13 @@ export class GraphEditor {
         success: false,
         workflow: this.workflow,
         error: `Edge "${edit.edgeId}" not found`,
+      };
+    }
+    if ('id' in edit.patch) {
+      return {
+        success: false,
+        workflow: this.workflow,
+        error: 'Edge id cannot be changed via update-edge',
       };
     }
     Object.assign(edge, edit.patch);

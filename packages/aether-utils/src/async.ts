@@ -73,7 +73,11 @@ export async function parallel<T>(
     }
   }
 
-  const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, worker);
+  // Non-positive concurrency must not silently skip tasks (0 dropped every
+  // task) or crash with an opaque RangeError (< 0): clamp to a single
+  // sequential worker so all tasks still run.
+  const capacity = Math.max(1, Math.min(concurrency, tasks.length));
+  const workers = Array.from({ length: capacity }, worker);
   await Promise.all(workers);
   return results;
 }

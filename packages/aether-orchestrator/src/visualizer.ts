@@ -107,14 +107,14 @@ export function toDOT(workflow: WorkflowDefinition): string {
   // Entry node styling
   if (workflow.entryNode) {
     lines.push(
-      `  "${workflow.entryNode}" [shape=oval, style=filled, fillcolor="#1a73e8", fontcolor=white];`,
+      `  "${escapeDOT(workflow.entryNode)}" [shape=oval, style=filled, fillcolor="#1a73e8", fontcolor=white];`,
     );
   }
 
   // Terminal node styling
   for (const terminalId of workflow.terminalNodes) {
     lines.push(
-      `  "${terminalId}" [shape=doublecircle, style=filled, fillcolor="#2e7d32", fontcolor=white];`,
+      `  "${escapeDOT(terminalId)}" [shape=doublecircle, style=filled, fillcolor="#2e7d32", fontcolor=white];`,
     );
   }
 
@@ -125,10 +125,12 @@ export function toDOT(workflow: WorkflowDefinition): string {
     const label = edge.label ?? getEdgeLabel(edge);
     if (edge.kind === 'conditional') {
       lines.push(
-        `  "${edge.from}" -> "${edge.to}" [label="${escapeDOT(label)}", style=dashed, color="#f9a825"];`,
+        `  "${escapeDOT(edge.from)}" -> "${escapeDOT(edge.to)}" [label="${escapeDOT(label)}", style=dashed, color="#f9a825"];`,
       );
     } else {
-      lines.push(`  "${edge.from}" -> "${edge.to}" [label="${escapeDOT(label)}"];`);
+      lines.push(
+        `  "${escapeDOT(edge.from)}" -> "${escapeDOT(edge.to)}" [label="${escapeDOT(label)}"];`,
+      );
     }
   }
 
@@ -189,7 +191,9 @@ function escapeMermaid(text: string): string {
 }
 
 function escapeDOT(text: string): string {
-  return text.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\\/g, '\\\\');
+  // Backslashes FIRST so the backslashes the quote pass inserts are not
+  // re-doubled into invalid escape sequences by a later pass.
+  return text.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
 function getKindIcon(kind: string): string {

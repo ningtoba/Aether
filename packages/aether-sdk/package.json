@@ -11,7 +11,9 @@
       "types": "./dist/index.d.ts"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -21,6 +23,7 @@
   },
   "dependencies": {
     "@aether/providers": "*",
+    "@aether/utils": "*",
     "@openai/agents": "0.11.1"
   },
   "devDependencies": {

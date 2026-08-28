@@ -21,11 +21,15 @@ describe('truncate', () => {
   });
 
   it('should handle maxLen of 0', () => {
-    expect(truncate('hello', 0)).toBe('...');
+    expect(truncate('hello', 2).length).toBeLessThanOrEqual(2);
+    expect(truncate('hello', 1).length).toBeLessThanOrEqual(1);
+    expect(truncate('hello', 0)).toBe('');
   });
 
   it('should handle maxLen less than 3', () => {
-    expect(truncate('hello', 1)).toBe('...');
+    // The contract is "at most maxLen", even when maxLen is shorter than the
+    // three-dot ellipsis — never return a longer-than-requested string.
+    expect(truncate('hello', 1)).toBe('.');
   });
 });
 

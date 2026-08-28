@@ -2,6 +2,10 @@
 export function deepMerge<T extends Record<string, unknown>>(target: T, source: Partial<T>): T {
   const result = { ...target };
   for (const key of Object.keys(source) as (keyof T)[]) {
+    // Never let untrusted source keys (e.g. parsed JSON `__proto__`) rewrite
+    // the result's prototype — the merged data would silently vanish from
+    // Object.keys/JSON/structuredClone while polluting property lookups.
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
     const srcVal = source[key];
     const tgtVal = target[key];
     if (isPlainObject(srcVal) && isPlainObject(tgtVal)) {
@@ -43,16 +47,37 @@ export function omit<T extends Record<string, unknown>, K extends keyof T>(
   return result;
 }
 
-/** Shallow strict equality check (falls through to JSON comparison for deeper checks) */
+/** Deep structural equality, independent of key insertion order */
 export function isEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (a == null || b == null) return false;
   if (typeof a !== typeof b) return false;
-  try {
-    return JSON.stringify(a) === JSON.stringify(b);
-  } catch {
-    return false;
+  // NaN: keep the documented NaN-equals-NaN behavior (Object.is semantics).
+  if (typeof a === 'number' && Number.isNaN(a) && Number.isNaN(b as number)) return true;
+  if (typeof a !== 'object') return false;
+
+  if (Array.isArray(a)) {
+    if (!Array.isArray(b) || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!isEqual(a[i], (b as unknown[])[i])) return false;
+    }
+    return true;
   }
+  if (Array.isArray(b)) return false;
+
+  // Deep compare objects independently of key insertion order, and treat an
+  // own key present with `undefined` as distinct from an absent key (which
+  // JSON.stringify would collapse).
+  const aObj = a as Record<string, unknown>;
+  const bObj = b as Record<string, unknown>;
+  const aKeys = Object.keys(aObj);
+  const bKeys = Object.keys(bObj);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(bObj, key)) return false;
+    if (!isEqual(aObj[key], bObj[key])) return false;
+  }
+  return true;
 }
 
 function isPlainObject(val: unknown): val is Record<string, unknown> {

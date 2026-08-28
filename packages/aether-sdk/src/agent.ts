@@ -8,6 +8,7 @@
 import { ToolRegistry } from './tools.js';
 import type { AgentConfig, RunConfig, RunResult, OutputSchema } from './types.js';
 import type { ProviderInterface } from '@aether/providers';
+import { withTimeout } from '@aether/utils';
 
 /** Minimal provider registry interface */
 export interface ProviderRegistry {
@@ -89,24 +90,36 @@ export class AetherAgent {
   }
 
   private buildTools(): Tool[] {
-    return this.tools.list().map((toolDef) => {
-      return sdkTool({
-        name: toolDef.name,
-        description: toolDef.description,
-        parameters: toolDef.parameters as Record<string, unknown>,
-        execute: async (args: unknown) => {
-          if (!toolDef.handler) {
-            return `[tool: ${toolDef.name}] no handler registered`;
-          }
-          try {
-            const result = await toolDef.handler(args);
-            return typeof result === 'string' ? result : JSON.stringify(result);
-          } catch (err) {
-            return `[tool: ${toolDef.name}] error: ${err instanceof Error ? err.message : String(err)}`;
-          }
-        },
-      } as Parameters<typeof sdkTool>[0]);
-    });
+    return (
+      this.tools
+        .list()
+        // A disabled tool must not be exposed to the model.
+        .filter((toolDef) => toolDef.enabled !== false)
+        .map((toolDef) => {
+          return sdkTool({
+            name: toolDef.name,
+            description: toolDef.description,
+            parameters: toolDef.parameters as Record<string, unknown>,
+            execute: async (args: unknown) => {
+              if (!toolDef.handler) {
+                return `[tool: ${toolDef.name}] no handler registered`;
+              }
+              try {
+                const run = Promise.resolve(toolDef.handler(args));
+                // Honor the per-tool timeout so a hung handler cannot hang
+                // the whole agent run.
+                const result =
+                  toolDef.timeout !== undefined
+                    ? await withTimeout(run, toolDef.timeout, `Tool "${toolDef.name}" timed out`)
+                    : await run;
+                return typeof result === 'string' ? result : JSON.stringify(result);
+              } catch (err) {
+                return `[tool: ${toolDef.name}] error: ${err instanceof Error ? err.message : String(err)}`;
+              }
+            },
+          } as Parameters<typeof sdkTool>[0]);
+        })
+    );
   }
 
   toString(): string {

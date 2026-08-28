@@ -162,3 +162,26 @@ describe('isEqual', () => {
     expect(isEqual('1', 1)).toBe(false);
   });
 });
+describe('deepMerge prototype safety', () => {
+  it('ignores __proto__/constructor source keys instead of rewriting the prototype', () => {
+    const r = deepMerge(
+      {} as Record<string, unknown>,
+      JSON.parse('{"__proto__":{"admin":1},"ok":2}') as Record<string, unknown>,
+    );
+    // The inherited splice must not appear, and real keys must survive.
+    expect((r as { admin?: unknown }).admin).toBeUndefined();
+    expect(Object.keys(r)).toEqual(['ok']);
+    expect(JSON.stringify(r)).toBe('{"ok":2}');
+  });
+});
+
+describe('isEqual deep semantics', () => {
+  it('is insensitive to key insertion order', () => {
+    expect(isEqual({ a: 1, b: 2 }, { b: 2, a: 1 })).toBe(true);
+  });
+
+  it('distinguishes an own undefined key from an absent key', () => {
+    expect(isEqual({ a: 1, b: undefined }, { a: 1 })).toBe(false);
+    expect(isEqual({ a: 1 }, { a: 1, b: undefined })).toBe(false);
+  });
+});

@@ -338,6 +338,22 @@ Verification: **632 tests passing (was 623) across 43 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.11 Utility & Tooling Correctness
+
+Seven defects from a fresh-lens scout of the shared utilities layer (`@aether/utils`), the SDK tool handoff, and the graph visualizer/editor, each verified against the source before fixing:
+
+- **Graphviz DOT escaping** — `escapeDOT` applied the backslash-escape pass *after* the quote pass, re-doubling the backslashes it had just inserted (`say "hi"` → `say \\"hi\\"` — invalid DOT that broke every quoted label), and node/edge/entry/terminal ids were interpolated raw. Escaping now runs backslash-first and every id is escaped too.
+- **SDK tool metadata honored** — `AetherAgent.buildTools()` exposed every registered tool to the model regardless of `enabled: false` and ignored per-tool `timeout` (a hung handler hung the whole run). Disabled tools are now filtered out and handlers run under the configured timeout via `withTimeout` (the SDK now depends on `@aether/utils`).
+- **`isEqual` is depth-correct** — the JSON-stringify fallback returned `false` for deep-equal objects with different key insertion order and `true` for `{a, b: undefined}` vs `{a}`. Replaced with a recursive structural comparison (own-key sets must match; key order irrelevant) while preserving the documented NaN-equals-NaN behavior.
+- **`deepMerge` prototype safety** — a `__proto__`/`constructor`/`prototype` source key (e.g. from parsed untrusted JSON) rewrote the result's prototype, hiding merged data from `Object.keys`/`JSON`/`structuredClone` while polluting property lookups. Those keys are now skipped.
+- **GraphEditor id integrity** — `update-node`/`update-edge` patches could mutate `id`, orphaning every edge/entry/terminal while reporting success. Id-mutating patches are now rejected.
+- **`parallel()` concurrency guards** — `parallel(tasks, 0)` silently ran nothing and negative concurrency crashed with an opaque `RangeError`. Concurrency clamps to at least one worker so all tasks run.
+- **`truncate` respects `maxLen`** — `truncate(s, 2)` returned the 3-char `'...'`, violating its own "at most maxLen" contract. The result is now clamped to `maxLen` (the two tests that pinned the overshoot were corrected).
+
+Verification: **643 tests passing (was 632) across 45 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:
