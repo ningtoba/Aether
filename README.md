@@ -369,6 +369,26 @@ Verification: **656 tests passing (was 643) across 47 files, `tsc -b` clean, lin
 
 ---
 
+### Latest Iteration — v0.1.13 Async Tracing, RAG Retrieval & Routing Correctness
+
+Eleven defects from three fresh-lens scouts (orchestrator engine, SDK runner, memory + telemetry internals), each verified against source — and for the SDK/OTel findings, against the installed dependency dist — before fixing:
+
+- **Span context now propagates through async code** — `initTracer` installed no context manager, so `@opentelemetry/api`'s default NOOP manager made `context.active()` return ROOT_CONTEXT everywhere: `withSpan` activation (the v0.1.10 fix) and the logger's `traceId`/`spanId` mixin were dead in the real runtime. The tracer now installs an `AsyncLocalStorageContextManager` (new direct dep `@opentelemetry/context-async-hooks`); verified by a real-OTel (unmocked) test that asserts the active span survives `await` and is restored after nested spans.
+- **`injectTraceContext` carries the active span** — it injected `ROOT_CONTEXT`, which has no span, making W3C `traceparent` injection a guaranteed no-op (outbound calls shipped no trace context). It now injects `context.active()`, so the current trace/span ids reach downstream HTTP calls.
+- **Histogram out-of-range observations no longer read as zero data** — a value above the largest configured bucket matched no bucket while `sum`/`count` still incremented, collapsing `min`/`max`/percentiles to 0 / last-bound. A `+Inf` sentinel bucket (Prometheus-style) now captures out-of-range values while in-range statistics stay unchanged.
+- **Sentence chunking preserves terminators** — the sentence strategy split on `/[.!?]\s+/`, consuming the terminator, so stored/retrieved chunks silently dropped every sentence's `.`/`!`/`?` (context that altered the source). A lookbehind split keeps punctuation in the chunk.
+- **Hybrid scores stay in the documented 0–1 range** — keyword results were boosted `×1.2`, publishing scores > 1 that violate the `0-1, higher is better` contract. The boost is now clamped to 1.
+- **NaN chunking config can no longer silently index nothing** — `Math.max(1, Math.floor(NaN))` stayed `NaN`, so `chunkFixed`'s loop body never ran and `index()` returned `[]` with no error. Non-finite sizes/overlap now fall back to the defaults.
+- **Conditional edges honour their documented priority** — `EdgeDefinition.priority` ("lower = evaluated first") was declared but never applied; branch selection used array order. Conditional edges are now evaluated in priority order.
+- **`llm-route` edges are routed, not silently dropped** — the engine only wired `direct`/`conditional` edges, so a node whose only edge was `connectViaLLM` got zero outgoing edges: the LLM-routed target never ran while the workflow reported `completed` (silent wrong routing). LLM-routed edges are now branch candidates (an always-true branch in the absence of a live router).
+- **GraphEditor accepts the `END` early-exit sentinel the builder allows** — the builder validates `END`/`__end__` edge targets, but `GraphEditor.validate` flagged them as unknown, so a buildable conditional-early-exit workflow reported invalid (and the inert `terminalNodes.find(() => true)` clause is gone).
+- **`RunResult.toolCalls` actually reports tool calls** — `toRunResult` scanned `newItems` for `type === 'function_call'`, but SDK `newItems` are RunItem class wrappers with the protocol item at `.rawItem`, so tool calls were always `[]` in real runs (the unit test's raw-item mock made it false-green). The result now unwraps `.rawItem`; the test was corrected to the real RunItem shape.
+- **Object outputs serialize as JSON, not `[object Object]`** — a structured/object `finalOutput` was coerced with `String()`, producing `[object Object]`. Non-string outputs are now JSON-serialized.
+
+Verification: **667 tests passing (was 656) across 48 files, `tsc -b` clean, lint + format checks green**.
+
+---
+
 ## Roadmap
 
 Next iterations target the remaining control-plane and correctness work:

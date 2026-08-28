@@ -315,3 +315,43 @@ describe('vector-only retrieval', () => {
     store.dispose();
   });
 });
+describe('chunking & scoring correctness', () => {
+  it('preserves sentence terminators when chunking by sentence', async () => {
+    const { store, engine } = createEngine({
+      strategy: 'sentence',
+      maxChunkSize: 200,
+      overlap: 0,
+    });
+    const ids = await engine.index('First thought here. Second thought.', {});
+    expect(ids.length).toBeGreaterThan(0);
+    const chunks = await store.list();
+    expect(chunks.some((c) => c.content.includes('First thought here.'))).toBe(true);
+    store.dispose();
+  });
+
+  it('clamps hybrid scores to the documented 0-1 range', async () => {
+    const { store, engine } = createEngine({ strategy: 'fixed' });
+    await engine.index('cat dog bird apple', {});
+    const results = await engine.retrieve({
+      query: 'cat dog bird',
+      limit: 10,
+      threshold: 0,
+    });
+    expect(results.length).toBeGreaterThan(0);
+    for (const r of results) {
+      expect(r.score).toBeLessThanOrEqual(1);
+    }
+    store.dispose();
+  });
+
+  it('falls back to default sizes for a NaN maxChunkSize instead of indexing nothing', async () => {
+    const { store, engine } = createEngine({
+      strategy: 'fixed',
+      maxChunkSize: Number.NaN,
+      overlap: 5,
+    });
+    const ids = await engine.index('Some document text that would be chunked.', {});
+    expect(ids.length).toBeGreaterThan(0);
+    store.dispose();
+  });
+});

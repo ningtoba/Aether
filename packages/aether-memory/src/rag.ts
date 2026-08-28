@@ -22,10 +22,14 @@ export class RAGEngine {
     this.vectorStore = new InMemoryVectorStore(vectorConfig);
     // Sanitize chunking config: maxChunkSize < 1 and overlap >= maxChunkSize
     // would stall chunkFixed() in an infinite loop, so clamp them up front.
-    const maxChunkSize = Math.max(1, Math.floor(chunking?.maxChunkSize ?? 512));
+    const maxChunkSize = Number.isFinite(chunking?.maxChunkSize ?? 512)
+      ? Math.max(1, Math.floor(chunking?.maxChunkSize ?? 512))
+      : 512;
     this.chunking = {
       maxChunkSize,
-      overlap: Math.min(Math.max(0, Math.floor(chunking?.overlap ?? 64)), maxChunkSize - 1),
+      overlap: Number.isFinite(chunking?.overlap ?? 64)
+        ? Math.min(Math.max(0, Math.floor(chunking?.overlap ?? 64)), maxChunkSize - 1)
+        : 64,
       separator: chunking?.separator ?? '\n',
       strategy: chunking?.strategy ?? 'fixed',
     };
@@ -94,7 +98,7 @@ export class RAGEngine {
     const merged = new Map<string, MemorySearchResult>();
 
     for (const r of keywordResults) {
-      merged.set(r.entry.id, { ...r, score: r.score * 1.2 }); // keyword boost
+      merged.set(r.entry.id, { ...r, score: Math.min(1, r.score * 1.2) }); // keyword boost
     }
 
     for (const r of vectorResults) {
@@ -168,7 +172,7 @@ export class RAGEngine {
       return this.chunkFixed(text);
     }
     if (this.chunking.strategy === 'sentence') {
-      return this.chunkBySeparator(text, /[.!?]\s+/);
+      return this.chunkBySeparator(text, /(?<=[.!?])\s+/);
     }
     if (this.chunking.strategy === 'paragraph') {
       return this.chunkBySeparator(text, /\n\s*\n/);

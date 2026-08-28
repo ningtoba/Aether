@@ -24,6 +24,7 @@ import {
   ConsoleSpanExporter,
 } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
+import { AsyncLocalStorageContextManager } from '@opentelemetry/context-async-hooks';
 import {
   ATTR_SERVICE_NAME,
   ATTR_SERVICE_VERSION,
@@ -88,6 +89,11 @@ export function initTracer(config: TelemetryConfig): void {
 
   // Set W3C trace context propagator for distributed tracing
   propagation.setGlobalPropagator(new W3CTraceContextPropagator());
+  // Install a context manager. Without one, @opentelemetry/api's default NOOP
+  // context manager makes context.active() return ROOT_CONTEXT everywhere, so
+  // withSpan's activation and the logger mixin never see the active span in
+  // asynchronous code. AsyncLocalStorage propagates context across awaits.
+  context.setGlobalContextManager(new AsyncLocalStorageContextManager());
 
   provider.register();
 
@@ -211,7 +217,7 @@ export function getSpanLogContext(): SpanLogContext | null {
  * Inject W3C trace context into a carrier object (e.g., HTTP headers).
  */
 export function injectTraceContext(carrier: Record<string, string>): Record<string, string> {
-  propagation.inject(ROOT_CONTEXT, carrier);
+  propagation.inject(context.active(), carrier);
   return carrier;
 }
 

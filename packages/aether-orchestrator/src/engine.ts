@@ -238,7 +238,16 @@ export class LangGraphEngine {
         g.addEdge(s, hasNode(r) ? '_n_' + r : END);
       } else {
         // Build a routing function that handles fan-out and conditions
-        const condEdges = edges.filter((e) => e.kind === 'conditional');
+        // Conditional and LLM-routed edges are the branch candidates, evaluated in
+        // documented priority order (lower number = evaluated first). An
+        // llm-route edge has no conditions, so it reads as an always-true
+        // branch — it must not be silently dropped.
+        const condEdges = edges
+          .filter((e) => e.kind === 'conditional' || e.kind === 'llm-route')
+          .sort(
+            (a, b) =>
+              (a.priority ?? Number.POSITIVE_INFINITY) - (b.priority ?? Number.POSITIVE_INFINITY),
+          );
         const directEdges = edges.filter((e) => e.kind === 'direct');
 
         if (condEdges.length > 0) {

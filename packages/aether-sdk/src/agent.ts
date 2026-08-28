@@ -229,12 +229,33 @@ export class AetherRunner {
     const prompt = rawResponses.reduce((sum, resp) => sum + (resp.usage?.inputTokens ?? 0), 0);
     const completion = rawResponses.reduce((sum, resp) => sum + (resp.usage?.outputTokens ?? 0), 0);
     const total = rawResponses.reduce((sum, resp) => sum + (resp.usage?.totalTokens ?? 0), 0);
+    // A structured-output (or otherwise object) final output must be serialized
+    // as text, not coerced to "[object Object]".
+    const rawOutput = r.finalOutput ?? r.output;
+    const output =
+      rawOutput == null
+        ? ''
+        : typeof rawOutput === 'string'
+          ? rawOutput
+          : (JSON.stringify(rawOutput) ?? '');
 
     // Each model call is one turn.
     const turns = rawResponses.length;
 
     // { type: 'function_call', name, arguments } items carry the tool use.
     const toolCalls: RunResult['toolCalls'] = newItems
+      // SDK RunItems are class wrappers whose protocol item ({ type:
+      // 'function_call', callId, name, arguments }) sits at `.rawItem`; only
+      // the raw item carries the tool call this result surfaces.
+      .map((item) => {
+        const wrapped = item as { rawItem?: unknown } | null;
+        return wrapped &&
+          typeof wrapped === 'object' &&
+          wrapped.rawItem &&
+          typeof wrapped.rawItem === 'object'
+          ? (wrapped.rawItem as Record<string, unknown>)
+          : item;
+      })
       .filter((item): item is { name: string; arguments: string } => {
         if (typeof item !== 'object' || item === null) return false;
         return 'type' in item && item.type === 'function_call';
@@ -251,7 +272,7 @@ export class AetherRunner {
       });
 
     return {
-      output: String(r.finalOutput ?? r.output ?? ''),
+      output: output,
       turns,
       tokenUsage: { prompt, completion, total },
       toolCalls,

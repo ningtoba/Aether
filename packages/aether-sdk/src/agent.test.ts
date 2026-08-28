@@ -256,14 +256,23 @@ describe('AetherRunner result mapping (real SDK shape)', () => {
         { usage: { inputTokens: 20, outputTokens: 10, totalTokens: 30 }, output: [] },
       ],
       newItems: [
+        // Real SDK RunItems are class wrappers; the protocol item sits at
+        // `.rawItem` as a plain { type: 'function_call', callId, name,
+        // arguments } entry.
         {
-          type: 'function_call',
-          callId: 'call_1',
-          name: 'get_weather',
-          arguments: '{"city":"SF"}',
+          type: 'tool_call_item',
+          rawItem: {
+            type: 'function_call',
+            callId: 'call_1',
+            name: 'get_weather',
+            arguments: '{"city":"SF"}',
+          },
         },
-        { type: 'function_call_result', callId: 'call_1', output: '"sunny"' },
-        { type: 'message', role: 'assistant', content: [] },
+        {
+          type: 'tool_call_result_item',
+          rawItem: { type: 'function_call_result', callId: 'call_1', output: '"sunny"' },
+        },
+        { type: 'message_item', rawItem: { type: 'message', role: 'assistant', content: [] } },
       ],
     });
 
@@ -301,6 +310,28 @@ describe('AetherRunner result mapping (real SDK shape)', () => {
     expect(result.turns).toBe(0);
     expect(result.toolCalls).toEqual([]);
     expect(result.tokenUsage).toEqual({ prompt: 0, completion: 0, total: 0 });
+  });
+  it('stringifies an object finalOutput instead of emitting [object Object]', async () => {
+    const runner = new AetherRunner({ providerRegistry: mockProviderRegistry });
+    const agent = new AetherAgent({
+      name: 'obj',
+      model: 'gpt-4o',
+      instructions: 'Obj',
+      tools: [],
+      handoffs: [],
+      outputType: undefined,
+      guardrails: [],
+      maxTurns: 5,
+    });
+
+    vi.spyOn((runner as any).runner, 'run').mockResolvedValue({
+      finalOutput: { result: 'ok', count: 2 },
+      rawResponses: [],
+      newItems: [],
+    });
+
+    const result = await runner.run(agent, 'x');
+    expect(result.output).toBe('{"result":"ok","count":2}');
   });
 });
 describe('AetherAgent tool metadata handoff', () => {

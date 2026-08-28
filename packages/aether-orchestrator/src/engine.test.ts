@@ -244,3 +244,65 @@ describe('conditional routing to the workflow end', () => {
     expect(result.status).toBe('completed');
   }, 10_000);
 });
+describe('edge routing correctness', () => {
+  let engine: LangGraphEngine;
+  beforeEach(() => {
+    engine = new LangGraphEngine();
+  });
+
+  it('evaluates conditional edges in priority order (lower number wins)', async () => {
+    const wf = new WorkflowBuilder('priority-wf', '1.0.0', 'Priority')
+      .addNode({ id: 'r', kind: 'agent', agentName: 'router' })
+      .addNode({ id: 'lo', kind: 'agent', agentName: 'low-priority' })
+      .addNode({ id: 'hi', kind: 'agent', agentName: 'high-priority' })
+      .addNode({ id: 'f', kind: 'agent', agentName: 'final' })
+      .addEdge({
+        id: 'e-hi',
+        from: 'r',
+        to: 'hi',
+        kind: 'conditional',
+        conditions: [{ field: 'data.kind', operator: 'eq', value: 'x' }],
+        priority: 5,
+      })
+      .addEdge({
+        id: 'e-lo',
+        from: 'r',
+        to: 'lo',
+        kind: 'conditional',
+        conditions: [{ field: 'data.kind', operator: 'eq', value: 'x' }],
+        priority: 1,
+      })
+      .connect('lo', 'f')
+      .connect('hi', 'f')
+      .withEntry('r')
+      .withTerminal('f')
+      .build();
+
+    const r = await engine.execute(wf, { kind: 'x' });
+    expect(r.status).toBe('completed');
+    const lo = r.nodeHistory.find((n) => n.nodeId === 'lo');
+    const hi = r.nodeHistory.find((n) => n.nodeId === 'hi');
+    expect(lo?.status).toBe('completed');
+    expect(hi?.status).not.toBe('completed');
+  });
+
+  it('routes through an llm-route edge instead of silently dropping it', async () => {
+    const wf = new WorkflowBuilder('llmroute-wf', '1.0.0', 'LLM Route')
+      .addNode({ id: 'start', kind: 'agent', agentName: 'start' })
+      .addNode({ id: 'target', kind: 'agent', agentName: 'target' })
+      .addEdge({
+        id: 'e-llm',
+        from: 'start',
+        to: 'target',
+        kind: 'llm-route',
+        routePrompt: 'route to target',
+      })
+      .withEntry('start')
+      .withTerminal('target')
+      .build();
+
+    const r = await engine.execute(wf, {});
+    expect(r.status).toBe('completed');
+    expect(r.nodeHistory.find((n) => n.nodeId === 'target')?.status).toBe('completed');
+  });
+});

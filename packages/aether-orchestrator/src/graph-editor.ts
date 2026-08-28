@@ -192,11 +192,15 @@ export class GraphEditor {
       if (!this.workflow.nodes.some((n) => n.id === edge.from)) {
         errors.push(`Edge "${edge.id}" references unknown source node "${edge.from}"`);
       }
-      if (
-        edge.to !== this.workflow.terminalNodes.find(() => true) &&
-        !this.workflow.nodes.some((n) => n.id === edge.to) &&
-        !this.workflow.terminalNodes.includes(edge.to)
-      ) {
+      // Accept registered nodes, terminals, and the symbolic end sentinels the
+      // builder allows ('END'/'__end__'). The previous `find(() => true)` clause
+      // was inert and is gone.
+      const targetIsKnown =
+        this.workflow.nodes.some((n) => n.id === edge.to) ||
+        this.workflow.terminalNodes.includes(edge.to) ||
+        edge.to === 'END' ||
+        edge.to === '__end__';
+      if (!targetIsKnown) {
         errors.push(`Edge "${edge.id}" references unknown target node "${edge.to}"`);
       }
     }

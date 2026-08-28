@@ -33,4 +33,17 @@ describe('GraphEditor id integrity', () => {
     const res = ed.edit({ type: 'update-node', nodeId: 'a', patch: { label: 'Renamed' } });
     expect(res.success).toBe(true);
   });
+  it('accepts the symbolic END early-exit target the builder allows', () => {
+    const wf = new WorkflowBuilder('end-wf', '1.0.0')
+      .agentNode('a', 'A')
+      .agentNode('b', 'B')
+      .connect('a', 'b')
+      .addEdge({ id: 'exit', from: 'b', to: 'END', kind: 'direct' })
+      .withEntry('a')
+      .withTerminal('b')
+      .build();
+    const validation = new GraphEditor(wf).validate();
+    expect(validation.valid).toBe(true);
+    expect(validation.errors).toEqual([]);
+  });
 });

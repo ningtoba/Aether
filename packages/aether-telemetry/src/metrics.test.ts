@@ -251,4 +251,29 @@ describe('histogram statistics & labels (cumulative semantics)', () => {
       expect.objectContaining({ op: 'run' }),
     );
   });
+  it('does not read out-of-range observations as zero data', () => {
+    registry.histogram('h_out', [10, 20]);
+    registry.observe('h_out', 5);
+    registry.observe('h_out', 5);
+    registry.observe('h_out', 5);
+    registry.observe('h_out', 40); // exceeds the largest configured bucket (20)
+    const h = registry.snapshot().histograms['h_out'];
+    expect(h.count).toBe(4);
+    expect(h.sum).toBe(55);
+    // The +Inf sentinel bucket keeps min on the in-range observations while
+    // the out-of-range value is honestly reported as exceeding the range.
+    expect(h.min).toBe(10);
+    expect(h.max).toBe(Number.POSITIVE_INFINITY);
+    expect(h.p50).toBe(10);
+  });
+
+  it('keeps stats finite when every observation fits a configured bucket', () => {
+    registry.histogram('h_in', [10, 20]);
+    registry.observe('h_in', 5);
+    registry.observe('h_in', 15);
+    const h = registry.snapshot().histograms['h_in'];
+    expect(Number.isFinite(h.max)).toBe(true);
+    expect(h.max).toBe(20);
+    expect(h.p90).toBe(20);
+  });
 });

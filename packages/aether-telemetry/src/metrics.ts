@@ -158,7 +158,9 @@ class MetricsRegistry {
     this.histograms.set(name, {
       sum: 0,
       count: 0,
-      buckets: buckets.map((le) => ({ le, count: 0 })),
+      buckets: buckets
+        .map((le) => ({ le, count: 0 }))
+        .concat({ le: Number.POSITIVE_INFINITY, count: 0 }),
       def: { name, type: 'histogram', description: opts.description ?? '', unit: opts.unit },
       labels: { ...this.defaultLabels, ...opts.defaultLabels },
     });
