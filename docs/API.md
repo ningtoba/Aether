@@ -104,6 +104,25 @@ Create a session. Body: `{ "model": { "provider": "…", "modelId": "…" }, "cw
 
 Return one session's summary → `200 { session }` or `404`.
 
+### `GET /api/sessions/:id/transcript`
+
+Replay a live session's journal as rich entries — thinking, tool calls with args/results, and assistant text — for inspection (e.g. the loop inspector). → `200 { transcript: { id, entries: [{ kind, ... }] } }` or `404`.
+
+```jsonc
+{
+  "transcript": {
+    "id": "ses_1",
+    "entries": [
+      { "kind": "user", "text": "…" },
+      { "kind": "thinking", "text": "…" },
+      { "kind": "tool", "name": "bash", "args": "…" },
+      { "kind": "tool", "name": "bash", "result": "…", "isError": false },
+      { "kind": "assistant", "text": "…" },
+    ],
+  },
+}
+```
+
 ### `POST /api/sessions/:id/prompt`
 
 Run a prompt on the session. Body: `{ "message": "…" }` → `202 { accepted: true, sessionId }`. The prompt executes asynchronously; the assistant's streamed reply arrives as `session` frames on the realtime hub.
