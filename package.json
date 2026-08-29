@@ -1,11 +1,12 @@
 {
   "name": "aether",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Aether — Autonomous AI orchestration platform",
+  "description": "Aether — Autonomous AI orchestration platform (web)",
   "type": "module",
   "engines": {
-    "node": ">=22.0.0"
+    "node": ">=22.0.0",
+    "bun": ">=1.3.14"
   },
   "workspaces": [
     "packages/*"
@@ -21,12 +22,12 @@
     "test:watch": "vitest",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:coverage": "vitest run --coverage",
-    "dev:frontend": "npm run dev -w @aether/frontend",
-    "dev:backend": "npm run dev -w @aether/backend",
-    "dev:electron": "npm run dev -w @aether/electron",
-    "dev": "npm run dev:electron",
-    "start:backend": "npm run start -w @aether/backend",
-    "start": "npm run dev:electron"
+    "build:frontend": "npm run build -w @aether/frontend",
+    "dev:backend": "bun run --watch packages/aether-backend/src/main.ts",
+    "dev": "npm run dev:backend",
+    "start": "bun run packages/aether-backend/src/main.ts",
+    "docker:build": "docker compose build",
+    "docker:up": "docker compose up -d"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

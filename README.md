@@ -1,491 +1,179 @@
 # Aether
 
-> Autonomous AI orchestration platform — build, manage, and run multi-agent workflows at scale.
+> Autonomous AI orchestration platform — build, manage, and run multi-agent workflows, loops, and skills from a single web app.
 
-Aether is a full-stack platform for orchestrating autonomous AI agents. It provides a modular monorepo with provider abstraction, memory systems, workflow orchestration, sandboxed execution, and a React-based admin GUI — all wrapped in an Electron desktop application.
+Aether is a web-first platform for orchestrating autonomous AI agents. It embeds the [Oh My Pi](https://github.com/can1357/oh-my-pi) coding agent (a fork of [Pi](https://github.com/badlogic/pi-mono), MIT) behind a compact TypeScript monorepo, so you get a production-grade agent engine (sessions, tools, subagents, compaction, 60+ provider catalog) with a GUI that exposes **everything** — models, sessions, loops, skills, providers, agents, and settings — over one HTTP/WebSocket API.
 
----
-
-## Architecture
-
-Aether is organized into 17 npm workspace packages:
-
-```
-aether/
-├── packages/
-│   ├── aether-types/         # Core type definitions and interfaces
-│   ├── aether-core/          # Core runtime, event bus, lifecycle, config management
-│   ├── aether-providers/     # LLM provider abstraction (Anthropic, Gemini, Ollama, etc.)
-│   ├── aether-orchestrator/  # Orchestration engine (DAG, sequential, parallel, map-reduce)
-│   ├── aether-memory/        # Memory backend abstraction (vector stores, embeddings, RAG)
-│   ├── aether-tools/         # Built-in tool definitions, shell executor, tool registry
-│   ├── aether-sdk/           # Public SDK for building plugins and integrations
-│   ├── aether-utils/         # Shared utilities (async, config, validation, platform detection)
-│   ├── aether-telemetry/     # Logging, metrics, distributed tracing (OpenTelemetry)
-│   ├── aether-security/      # RBAC, authentication, authorization
-│   ├── aether-backend/       # HTTP API server with REST API & WebSocket streaming
-│   ├── aether-frontend/      # React-based admin GUI (Electron renderer)
-│   ├── aether-electron/      # Electron desktop shell with tray, auto-updater, crash reporter
-│   ├── docker/               # Docker sandbox for isolated code execution
-│   ├── ts-runtime/           # TypeScript runtime sandbox (isolated VM via tsx)
-│   ├── python-venv/          # Python virtual environment management
-│   └── playwright/           # Playwright browser automation
-├── tsconfig.json             # Root TypeScript configuration (project references)
-└── (electron-vite config lives in packages/aether-electron/electron.vite.config.ts)
-```
-
-### Package Dependency Flow
-
-```
-aether-types  →  aether-core  →  aether-orchestrator  →  aether-backend
-       ↑              ↕                  ↕                       ↑
-       |        aether-providers    aether-memory                 |
-       |              ↕                  ↕                        |
-       |        aether-tools  ─────  aether-sdk  ─────────────────|
-       |              ↕                                           |
-       |        aether-utils (shared everywhere)                  |
-       |                                                          |
-       └──── aether-telemetry ←── aether-security ────────────────┘
-```
-
-Dependency relationships:
-
-- `aether-types` is the leaf — no dependencies
-- `aether-utils` is shared everywhere (no deps on other workspace packages)
-- `aether-telemetry` depends on `aether-types` and `aether-utils`
-- `aether-security` depends on `aether-types` and `aether-utils`
-- `aether-core` depends on `aether-types`, `aether-utils`, `aether-telemetry`
-- `aether-providers` depends on `aether-types`, `aether-utils`, `aether-telemetry`, `aether-core`
-- `aether-memory` depends on `aether-types`, `aether-utils`
-- `aether-tools` depends on `aether-types`, `aether-utils`
-- `aether-sdk` depends on `aether-types`, `aether-utils`, `aether-providers`, `aether-tools`
-- `aether-orchestrator` depends on `aether-types`, `aether-utils`, `aether-core`, `aether-providers`, `aether-memory`
-- `aether-backend` depends on all lower layers
-- `aether-frontend` depends on `aether-types`
-- `aether-electron` depends on `aether-backend` and `aether-frontend`
-- Sandbox packages (`docker`, `ts-runtime`, `python-venv`, `playwright`) depend on `aether-types` and `aether-utils`
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|-----------|
-| **Runtime** | Node.js 22+ |
-| **Language** | TypeScript 5.9 (strict mode) |
-| **Build** | tsc (project references), electron-vite |
-| **Desktop** | Electron 35 |
-| **Backend** | Node.js http module (no framework), WebSocket |
-| **Frontend** | React 19, TailwindCSS 4, Framer Motion, Zustand |
-| **Orchestration** | LangGraph-compatible DAG engine (LangGraph v1) |
-| **LLM Providers** | Anthropic, Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible |
-| **Memory** | In-memory vector store (brute-force cosine); SQLite/Qdrant backends planned |
-| **Container** | Docker (sandboxed execution), Dockerode |
-| **Observability** | OpenTelemetry (OTLP), Pino structured logging |
-| **Testing** | Vitest (585+ tests across 40 test files) |
-| **CI/CD** | GitHub Actions, electron-builder |
+No desktop app. No separate services. Run one Docker command, open the browser, drive the platform.
 
 ---
 
 ## Quick Start
 
-### Prerequisites
+### One command — Docker
 
-- Node.js 22+
-- npm 10+
+```bash
+docker compose up -d
+# open http://localhost:3081  (GUI + API)
+# realtime engine events: ws://localhost:3082
+```
 
-### One Command to Run
+The image builds the whole monorepo, serves the React GUI statically from the backend, and embeds the agent engine (Bun + the omp SDK). Health check at `/health`.
+
+> Note: the host ports are remapped to **3081 (GUI/API)** and **3082 (realtime)** because port 3001 on typical dev hosts is held by other local services (e.g. the Hermes MCP gateway). The container itself listens on internal 3001/3002.
+
+### Local development
 
 ```bash
 npm install
-npm run dev:electron
+npm run build        # tsc -b --force over all packages
+npm run build:frontend   # vite build -> packages/aether-frontend/dist
+
+# Run the backend under Bun (the engine requires the Bun runtime):
+bun run packages/aether-backend/src/main.ts
+# → http://localhost:3001  (GUI + API)  ·  ws://localhost:3002 (realtime)
 ```
 
-This installs dependencies, builds all packages, and launches the Electron app.
+Set `PORT`, `HOST`, `REALTIME_PORT`, `AETHER_API_KEY` to taste. Leave `AETHER_API_KEY` unset for open local dev.
 
-> **Note:** For reproducible installs, a `.npmrc` with `engine-strict=true` and `save-exact=true` is recommended.
+---
 
-### Individual Commands
+## The one-paragraph architecture
+
+```
+Browser (React GUI)
+   │  HTTP/WS
+   ▼
+aether-backend (Bun)
+   ├── REST + WebSocket API (/api/*, /health)
+   ├── StaticFileServer  → serves the built frontend (same port)
+   ├── EngineService     → embeds @oh-my-pi/pi-coding-agent (sessions)
+   ├── LoopManager       → round→transition→round loop runner
+   ├── SkillsService     → discovers SKILL.md packs (.omp/skills, ~/.omp/agent/skills)
+   └── BunRealtimeHub    → ws://<host>:<REALTIME_PORT>/ live engine events
+```
+
+The backend runs on **Bun** (the omp SDK only runs under Bun). The plain-Node `node:http` server, router, and hardened WebSocket manager remain for the REST/API surface; a Bun-native `Bun.serve` websocket hub carries the live engine event stream to the GUI.
+
+### The 6 packages
+
+| Package           | Purpose                                                        |
+| ----------------- | -------------------------------------------------------------- |
+| `aether-core`     | Foundation: events, lifecycle, config, types, utils, telemetry (OTel/pino), RBAC |
+| `aether-memory`   | In-memory + vector memory stores, RAG engine, scoped stores   |
+| `aether-orchestrator` | LangGraph workflow graph engine, checkpointing, visualizer  |
+| `aether-tools`    | Tool registry, shell + Docker + Playwright + Python-venv + TS-runtime sandboxes |
+| `aether-backend`  | HTTP/WS server, embedded agent engine, loops, skills, models, static GUI |
+| `aether-frontend` | React + Vite web GUI (dashboard, sessions, loops, skills, models, providers, agents, settings) |
+
+Node 22+ for tooling/tests; **Bun ≥ 1.3.14** at runtime.
+
+---
+
+## The agent engine (sessions, loops, skills)
+
+Aether's engine is the embedded **Oh My Pi** coding agent — the same MIT harness omp ships — driven in-process via its Node SDK (`@oh-my-pi/pi-coding-agent`). That buys the full agent surface without writing a harness: provider/model catalog (60+ providers, custom `models.yml` entries), streaming tool use, subagents, compaction, retries, and session management.
+
+### Sessions
+
+A session is one persistent agent conversation with a chosen model. From the **Sessions** page you open a session against any model in the catalog, prompt it, and watch the assistant stream live (text, thinking, tool calls) over the realtime websocket. Compact and dispose are one click.
+
+### Loops — indefinite, workflow-controlled
+
+A Loop repeats a prompt on a persistent session, and after every round runs the **transition you configure** — the key workflow-control primitive:
+
+```
+[round N prompt] → [transition] → [round N+1 prompt] → ...
+```
+
+Transitions you can pick between rounds:
+
+| Transition | Effect                                                      |
+| ---------- | ----------------------------------------------------------- |
+| `none`     | straight to the next round                                   |
+| `compact`  | run `session.compact()` (housekeeping before the next round) |
+| `skill`    | invoke a discovered skill on the session                     |
+| `gate`     | pause; the user decides *continue / stop / edit* in the GUI  |
+
+Stop conditions: **maxRounds**, **maxTimeMs**, **manual stop** — or leave both unset for an **indefinite** loop. A `gate` transition makes a loop fully interactive: `[1st loop] → [⏸ gated — you decide] → [compact] → [2nd loop] → …`. Every loop emits a live event stream (`loop:start`, `round_start`, `round_end`, `transition`, `gated`, `stop`, `completed`) to the GUI.
+
+### Skills
+
+Skills are `SKILL.md` packs discovered from `<project>/.omp/skills/<name>/SKILL.md` and `~/.omp/agent/skills/<name>/SKILL.md` (standard agent-skill layout, frontmatter optional). Browse them in the **Skills** page and reference one as a loop transition (`skill:<name>`).
+
+---
+
+## API
+
+Everything the GUI does is available over the API.
+
+| Resource  | Endpoints                                                                                              |
+| --------- | ------------------------------------------------------------------------------------------------------ |
+| Health    | `GET /health` (includes `realtime.port` + `engine.available`)                                          |
+| Models    | `GET /api/models` — grouped model catalog from the omp registry                                       |
+| Sessions  | `GET/POST /api/sessions`, `GET /api/sessions/:id`, `POST /api/sessions/:id/prompt`, `POST /api/sessions/:id/compact`, `POST /api/sessions/:id/dispose` |
+| Loops     | `GET/POST /api/loops`, `GET/DELETE /api/loops/:id`, `POST /api/loops/:id/start`, `POST /api/loops/:id/stop`, `POST /api/loops/:id/advance` |
+| Skills    | `GET /api/skills`                                                                                      |
+| Agents    | `GET/POST /api/agents`, `PUT/DELETE /api/agents/:id`                                                   |
+| Providers | `GET/POST /api/providers`, `DELETE /api/providers/:id`, `GET /api/providers/:id/health`                 |
+
+Engine-backed routes return **501** when the backend runs without Bun/omp (so the API degrades cleanly). When `AETHER_API_KEY` is set, `/api/*` requires `Authorization: Bearer <key>` or `X-API-Key` and enforces RBAC (admin role).
+
+**Realtime:** connect to `ws://<host>:<REALTIME_PORT>/` and negotiate with `{ "filter": ["engine"] }`. Frames:
+
+```jsonc
+{ "type": "engine",
+  "payload": { "namespace": "session"|"loop", "sessionId"?, "event": { "kind": "...", ... } },
+  "timestamp": "..." }
+```
+
+---
+
+## Development
 
 ```bash
-# Install dependencies
-npm install
-
-# Build all packages
-npm run build
-
-# Type-check
-npm run typecheck
-
-# Run tests (585+ tests, 40 test files)
-npm run test
-
-# Launch Electron app (dev mode)
-npm run dev
-
-# Start the backend API server (tsx watch, live reload)
-npm run dev:backend
-
-# Start the built backend server (production entrypoint)
-npm run start:backend
+npm test                       # 579 vitest tests across the 6 packages
+npm run build                  # tsc -b --force over the monorepo
+npm run lint && npm run format:check
+npm run dev:frontend           # vite dev server (proxy → backend :3001)
 ```
 
-The API server runs on `http://localhost:3001` with health check at `/health`.
+### Adding a model
 
----
+The engine's model catalog comes from the omp registry — custom providers/models live in `~/.omp/agent/models.yml` (see omp's provider docs), e.g.:
 
-## Package Quick Reference
+```yaml
+providers:
+  spark:
+    baseUrl: http://127.0.0.1:8000/v1
+    api: openai-completions
+    models:
+      - id: my-model
+        name: My Model
+```
 
-| Package | Description |
-|---------|-------------|
-| `@aether/types` | Shared TypeScript type definitions (providers, agents, execution, memory, tools) |
-| `@aether/core` | Core runtime, event bus (typed EventEmitter), lifecycle manager, configuration manager |
-| `@aether/providers` | LLM provider abstraction with registry, vault (encrypted keychain), model capabilities |
-| `@aether/orchestrator` | Orchestration engine with WorkflowBuilder (DAG), LangGraph wrapper, Mermaid/DOT visualization |
-| `@aether/memory` | Pluggable memory backends (in-memory vector store, RAG with hybrid search, memory store) |
-| `@aether/tools` | Built-in tools, shell executor, tool registry |
-| `@aether/sdk` | Public SDK wrapping OpenAI Agents SDK (AetherAgent, AetherRunner, ToolRegistry) |
-| `@aether/utils` | Shared utilities: async helpers (retry, backoff, parallel), validation, string, object, platform detection |
-| `@aether/telemetry` | OpenTelemetry tracing (OTLP exporter), Pino structured logging, metrics collection (counters/gauges/histograms) |
-| `@aether/security` | Role-based access control (RBAC) with hierarchical roles, glob-based resource patterns |
-| `@aether/backend` | HTTP/WebSocket server with REST API for agent, provider, and execution management |
-| `@aether/frontend` | Placeholder package — the React admin GUI lives in `aether-electron`'s renderer |
-| `aether-electron` | Electron desktop shell + React admin GUI (renderer), tray, auto-updater, crash reporter |
-| `@aether/docker` | Docker sandbox container lifecycle, resource profiles, file injection |
-| `@aether/ts-runtime` | TypeScript runtime sandbox — isolated VM execution via tsx with timeouts and resource limits |
-| `@aether/python-venv` | Python virtual environment management — create, install packages, run scripts |
-| `@aether/playwright` | Browser automation — launch, navigate, screenshot, evaluate, interact |
+The **Models** page and both Session/Loop model pickers read this catalog live.
 
----
+### Docker
 
-## API Endpoints (Backend)
+```bash
+docker compose build
+docker compose up -d     # http://localhost:3081
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | System health check (version, uptime, memory) |
-| `GET` | `/api/agents` | List all agents |
-| `POST` | `/api/agents` | Create a new agent |
-| `GET` | `/api/agents/:id` | Get agent by ID |
-| `PUT` | `/api/agents/:id` | Update agent |
-| `DELETE` | `/api/agents/:id` | Delete agent |
-| `GET` | `/api/providers` | List configured providers |
-| `POST` | `/api/providers` | Add/configure a provider |
-| `GET` | `/api/providers/:id/health` | Check provider health |
-| `DELETE` | `/api/providers/:id` | Remove a provider |
-| `GET` | `/api/executions` | List executions |
-| `POST` | `/api/executions` | Start a new execution |
-| `GET` | `/api/executions/:id` | Get execution status |
-| `POST` | `/api/executions/:id/cancel` | Cancel an execution |
-
-WebSocket endpoint is available at `ws://localhost:3001/` (upgraded from the HTTP server).
-
----
-
-## Project Status
-
-Aether is v0.1.0 with the following implemented:
-
-### ✅ Complete
-- **Type System**: All type definitions across 9 domains (providers, agents, execution, graph, memory, tools, settings, sandbox, base)
-- **Core Runtime**: Event bus (typed pub/sub with async/retry modes), lifecycle manager (5-stage state machine), config manager
-- **Utilities**: Async helpers (retry with exponential/linear/fixed backoff, parallel with concurrency, timeout), validation, string manipulation, object deep merge/clone, ID generation, platform detection, structured logger
-- **LLM Providers**: Anthropic, Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible — all with chat, streaming, embeddings, model listing, and error handling
-- **Orchestration**: LangGraph engine, workflow builder (fluent API with agent/router/map/reduce nodes), checkpoint manager, graph editor, visualizer (Mermaid, DOT, text tree)
-- **Memory**: In-memory vector store (cosine similarity), memory store (TTL, keyword search), RAG engine (hybrid retrieval, 3 chunking strategies)
-- **Security**: RBAC with 5 built-in roles (admin, operator, developer, agent, viewer), hierarchical inheritance, glob resource matching
-- **Telemetry**: Pino structured logging with OTel trace context injection, OpenTelemetry tracing (console + OTLP exporters), metrics (counters, gauges, histograms with percentile support)
-- **Backend**: HTTP/WebSocket server (native, no framework), pattern-matched router, in-memory stores, CRUD routes, hardened native WebSocket (RFC 6455 frame reassembly, masked-frame enforcement, 1 MB frame/payload and per-socket memory bounds, outbound backlog cap, full teardown on protocol errors, Origin allow-list), request body size limit (1 MB default, per-server `maxBodySize` incl. chunked bodies)
-- **Electron Shell**: Main process with IPC handlers, tray, auto-updater (electron-updater), crash reporter, preload bridge
-- **Electron IPC Bridge**: Typed protocol with 12 channel groups (app, system, backend, agents, providers, executions, plugins, memory, window, update, maximize-changed), contextBridge preload API, `backend-bridge.ts` in-memory stores mirroring all REST API routes
-- **Frontend (React GUI)**: 8 complete pages — Dashboard, Providers, Agents, Workflows, Memory, Executions, Plugins, Settings — all connected to real data via IPC bridge (window.electronAPI). Zustand store with persist middleware for settings. Custom title bar with window controls. Sidebar navigation with active state. Components include: SettingsSection/SettingsRow, toggle switches, dropdown selects, text inputs, sliders, tag groups, key-value editors, buttons with danger/primary variants
-- **Docker Sandbox**: Container lifecycle (create/destroy), file copy, command execution with resource limits, profile-based presets
-- **TypeScript Runtime Sandbox** (`@aether/ts-runtime`): Isolated VM execution via tsx child process, timeouts, output size limits, eval helper with JSON result parsing
-- **Python Venv** (`@aether/python-venv`): Python virtual environment creation, package installation, script/code execution, package listing, full CRUD for venvs
-- **Playwright Browser** (`@aether/playwright`): Browser automation wrapper — launch (chromium/firefox/webkit), navigation, screenshot, content extraction, page evaluation, interaction helpers
-- **SDK**: AetherAgent wrapping OpenAI Agents SDK, AetherRunner with provider support, ToolRegistry, message conversion
-- **Docker Deployment**: Dockerfile + docker-compose.yml for containerized operation via `docker compose up --build`
-- **CI/CD**: GitHub Actions (lint, type-check, test with sharding, build), electron-builder config (Windows/macOS/Linux)
-- **Testing**: 585+ tests across 40 test files (14 packages; types/frontend/electron carry no test files yet)
-
-### Latest Iteration — v0.1.1 Security & Cross-Platform Hardening
-
-This iteration closed 10 evidence-backed defects found by three independent audit lenses (Windows cross-platform, async/reliability, security):
-
-- **Windows support** — `ts-runtime` resolves the tsx entry via `fileURLToPath` + `process.execPath` (works on Windows, where `.cmd` shims cannot be `execFile`'d); `execShell` now quotes args correctly for `cmd.exe` (POSIX single-quotes are inert there) and uses `windowsVerbatimArguments`.
-- **WebSocket hardening** — remote crash/OOM vectors removed: per-socket frame reassembly (fragmented and coalesced frames handled), strict length bounds before `Buffer.alloc`, masked-client-frame enforcement, control-frame ≤125 (RFC 6455 §5.5), bounded receive buffer, outbound write-backlog cap, and full socket teardown on protocol errors. Optional Origin allow-list wired from `setCorsOrigins`.
-- **Request body limits** — unbounded body accumulation replaced with a 1 MB default (`AetherServerOptions.maxBodySize`), enforced for both `Content-Length` and chunked requests (413).
-- **Conditional graph edges** — `gt/gte/lt/lte` operators in conditional workflow edges now actually evaluate (previously always `false`, so documented branches never fired).
-- **RAG chunking** — `chunkFixed` can no longer infinite-loop on misconfigured overlap/size (config clamped + guaranteed forward progress).
-- **Sandbox safety** — `copyFilesToSandbox` writes content via base64 (`printf %s '<b64>' | base64 -d > path`) and rejects path traversal; browser auto-install validates the browser name against an allow-list before running `npx playwright install`.
-- **Server lifecycle** — `stop()` clears its force-close timer and uses `closeIdleConnections()` so in-flight requests are not aborted at shutdown.
-
-
-### Latest Iteration — v0.1.2 Deployability, CI & Provider Wire Fixes
-
-This iteration made Aether actually runnable and fixed wire-level provider bugs found by three fresh-scope scouts (Electron layer, SDK/providers/core, docs-vs-code/CI):
-
-- **Production server entrypoint** — `packages/aether-backend/src/main.ts` reads `PORT`/`HOST`/`MAX_BODY_SIZE`, starts the HTTP/WebSocket server, and shuts down gracefully on SIGINT/SIGTERM. `npm run start:backend` runs it; Docker now boots a real server (previously the barrel export exited immediately).
-- **Electron IPC bridge wired** — the backend-bridge IPC handlers (`agents:*`, `providers:*`, `executions:*`, `plugins:*`, `memory:*`) were dead code (never imported); now registered in `app.whenReady`. The renderer's `window.electronAPI` calls no longer reject with "No handler registered".
-- **Quit fixed** — `app.isQuitting` is now set in `before-quit`; previously `app.quit()` was swallowed (window only hid to tray, process could not exit).
-- **CI repaired** — lint dependency `typescript-eslint` declared (lint previously crashed with `ERR_MODULE_NOT_FOUND`; now 0 errors after clearing 25 pre-existing ones + 19 renderer-page dead imports), `tsc -b --noEmit` replaced with `npm run typecheck` (the former fails TS6310 on fresh checkouts), a real coverage job added, and the circular-dep check wired to actually inspect files (`madge` pinned, globstar expansion).
-- **Docker build fixed** — `package-lock.json` no longer excluded from the build context; all 17 workspace manifests copied before `npm ci`; `CMD` points at the production entrypoint.
-- **Electron packaging fixed** — `electron-vite build` added before `electron-builder` in package/release jobs (installers previously shipped empty — `out/` was never produced); `electron-builder` is now a declared devDependency; release workflow migrated from deprecated `create-release@v1` to `gh release`.
-- **Provider wire fixes** — Gemini streaming URL no longer builds `?alt=sse?key=…` (double `?` — the API key was never sent, so authenticated streaming 403'd); `toolChoice: required` is mapped to the valid wire value `required` (was `any`); `getRetryAdvice` now honours the SDK's `{ suggested }` contract and never retries permanent errors; `ProviderRegistry.get()` shares one in-flight initialization and clears a provider whose `initialize()` failed.
-- **Docs made truthful** — README/ARCHITECTURE: dev-command semantics, SQLite/Qdrant backends marked planned (not implemented), `@aether/frontend` labeled a placeholder, test counts corrected.
-
-
-### Latest Iteration — v0.1.3 Tool-Loop Wire Fix
-
-Sequential multi-turn tool use now works on every provider. Previously the SDK converted assistant tool calls to a text placeholder (`[tool_call: name]`) and tool results to a `{role: 'tool'}` message **without `tool_call_id`** — OpenAI-compatible endpoints reject that with a 400, and Anthropic/Gemini lost the correlation id too, so every tool-using agent failed on its second model call.
-
-- `aether-providers` `Message` gained `toolCalls`/`toolCallId`; only the SDK's converter populates them (verified: the installed `@openai/agents` `FunctionCallItem`/`FunctionCallResultItem` use camelCase `callId`/`arguments`, matching the conversion — pinned at compile time by a test typed against the real SDK items).
-- **OpenAI-family** (OpenAI-compatible, vLLM, OpenRouter, Ollama, llama.cpp): assistant tool calls serialize as structured `tool_calls` (`{id, type: 'function', function: {name, arguments}}`), results carry `tool_call_id`.
-- **Anthropic**: `tool_use` blocks (+ companion text) and `tool_result` with `tool_use_id` in a user turn.
-- **Gemini**: `functionCall` / `functionResponse` parts (Gemini rejects bare text "function" parts).
-- New discriminating wire tests per provider family (OpenAI-compatible, Anthropic, Gemini) plus an SDK-level test exercising the real SDK item types.
-
-Verification: **590 tests passing (was 585) across 40 files, `tsc -b` clean, lint + format checks green**, and a dual-adversarial review loop including an independent settlement of the SDK item-schema question against the installed dependency.
-
----
-
-### Latest Iteration — v0.1.4 Streamed Tool/Text Completion
-
-Streamed runs now produce a correct final response. Previously `completeStream` dropped tool-call fragments and the trailing `done` was empty (OpenAI-family even `return`ed on `data: [DONE]` before emitting any `done`), so streamed tool runs and consolidated streamed text came back empty to the SDK.
-
-- **OpenAI family** (OpenAI-compatible, vLLM, OpenRouter, Ollama, llama.cpp): SSE chunks now fold into a per-stream accumulator — text deltas join into `content`, `tool_calls` fragments accumulate by `index` (id/name set on first sight, `arguments` concatenated), and exactly one final `done` carries the assembled `CompletionResponse` (content + parsed tool calls + `finishReason`) after `[DONE]` or stream end. llamacpp's non-chat `completions` endpoint streams `choices[0].text` and is folded too.
-- **Anthropic**: capture id/model from `message_start`, stop emitting the empty `message_delta` done, accumulate text + `input_json_delta` fragments by content-block index, and emit one `done` built from the accumulators with the correct `stop_reason` mapping.
-- Superseded per-fragment parsers removed from the OpenAI family; mid-stream provider `error` events now surface and terminate the stream instead of becoming a success-looking `done`; discriminating stream tests added for the OpenAI family and Anthropic (and the sequential tool-loop wire tests from v0.1.3 still pass).
-
-Verification: **594 tests passing (was 590) across 40 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
-
----
-
-### Latest Iteration — v0.1.5 Credential-Storage Hardening
-
-API keys and auth headers no longer land on disk in plaintext.
-
-- **Vault encryption reachable** — previously `getKeytar()`'s catch always substituted a plaintext JSON store (`~/.aether/keychain.json`) that reported `usingKeychain: true`, so the AES-256-GCM encrypted-file vault was unreachable dead code. Now a missing OS keychain means `null` (never plaintext): the encrypted vault (`~/.config/aether/vault.enc`, key derived from `/etc/machine-id` or hostname) is the real no-keychain backend, written atomically (temp + rename) with owner-only 0600/0700 perms, and read-modify-write cycles are serialized so concurrent writes cannot lose entries. The plaintext static store was deleted.
-- **Renderer secrets not persisted** — `sanitizePersistedSettings` strips `providers.apiKeys`/`customHeaders` from the zustand-persisted slice, so provider keys and auth headers never reach localStorage; they remain session-only in memory.
-- Threat model: the machine-id-derived key protects against casual disclosure and backup exfiltration on single-user hosts — not against same-user malware an attacker with the key file.
-
-Verification: **601 tests passing (was 594) across 42 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
-
----
-
-### Latest Iteration — v0.1.6 API Authentication & RBAC
-
-The HTTP/WebSocket API can now be authenticated and role-authorized instead of running open on `0.0.0.0:3001`.
-
-- **API-key auth** — `AetherServerOptions.auth.apiKey` accepts a single key (→ `admin` role) or a key→role map. Requests authenticate via `Authorization: Bearer <key>` or `X-API-Key` (constant-time digest comparison); `/health` stays open for container probes.
-- **RBAC enforcement** — `@aether/security`'s RBACGuard is wired into the server: every `/api/*` request must authenticate (401) and be authorized (403) against a route→(resource, action) mapping (agents read/write, providers read/write, executions read/execute) using the built-in roles (admin/operator/developer/agent/viewer).
-- **WebSocket gated** — upgrades are rejected without a valid key (header or `?apikey=`), matching the HTTP policy.
-- `AETHER_API_KEY` env enables auth (admin) in the production entrypoint; unset keeps open local dev.
-- `@aether/security` gained its missing `src/index.ts` barrel (the package was previously unimportable — `main` pointed at a nonexistent `dist/index.js`).
-
-Verification: **605 tests passing (was 601) across 42 files, `tsc -b` clean, lint + format checks green**, plus a dual-adversarial review loop.
-
----
-
-### Latest Iteration — v0.1.7 Reliability Parity
-
-Closed three documented-but-dead correctness gaps in core runtime packages:
-
-- **`MemoryStore` now honours `defaultTtlMs`** — the config option was previously dead: `add()` never stamped a TTL, so entries with a non-zero default never expired. Entries now get the store-wide default TTL at write time (a per-entry `ttl` still wins) and every read path (`get`/`search`/`list`/`stats`) treats an expired entry as absent immediately — no more serving stale data until the next (up to 60s late) auto-compact sweep.
-- **Event-bus per-subscriber isolation** — a throwing handler no longer starves the subscribers registered behind it: `publish` delivers to every subscriber, then surfaces the first error (default) or logs and continues (`retryFailed`). `asyncDelivery` rejections were silently swallowed even with `retryFailed: true`; they are now logged there too (the documented resolve-despite-rejection contract is unchanged).
-- **Gemini batch embeddings work** — `embed()` with an array input joined the texts with `\n`, called single-input `embedContent`, and returned **one** embedding for N inputs. Arrays now target `batchEmbedContents` with one `requests[]` entry per input and map one embedding each, in order; a single string still uses `embedContent`; an empty array short-circuits without an API call.
-
-Verification: **616 tests passing (was 605) across 42 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.8 Core-Contract Truth (SDK RunResult, engine state, RAG filters)
-
-Four findings from a fresh-lens scout of the least-audited core packages (SDK bridge, orchestrator engine, RAG), each verified against the installed dependency before fixing:
-
-- **`AetherRunner` now returns real run data** — `toRunResult` read `turns`/`usage` off the run result, but the installed `@openai/agents` `RunResult` exposes neither (verified in agents-core 0.11.1 `result.d.ts`): `turns` was always `0` and `tokenUsage` all zeros on every real run, and `toolCalls` was hardcoded `[]` (tool use never surfaced). It now derives `turns` from `rawResponses` (one model call per turn), sums `tokenUsage` from `rawResponses[].usage`, and extracts `{name, args}` from `newItems` `function_call` items. The SDK unit mock — which baked in the wrong `turns: 5` shape — now returns the real result shape, with discriminating tests.
-- **Engine `currentNode` no longer always null** — the node runner published the executing node id as an undeclared state key `nd`, so LangGraph dropped it and `WorkflowState.currentNode` was `null` on every run. The state schema now declares a `lastNode` channel (last-writer-wins) and the final state reads it.
-- **`signal` nodes report `paused`** — the runner sets a `'paused'` status for signal nodes, but `execute` derived the final status only from the error channel, silently reporting `'completed'` past a wait/human-input gate. The status channel is now honoured (and sticky once paused), so workflows that reach a signal node return `status: 'paused'`.
-- **RAG respects type/metadata filters for vector hits and hydrates content** — `InMemoryVectorStore` stores only vector + metadata, so vector-only hits surfaced with fabricated `type: 'semantic'`, empty `content`, and ignored the query's type/metadata filters (a semantic-filtered query could return task rows, and RAG context contained blank segments). `RAGEngine.retrieve` now resolves vector-only hits against the `MemoryStore`: out-of-type / out-of-filter rows are dropped and the real entry (content included) is returned.
-
-Verification: **621 tests passing (was 616) across 42 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.9 Conditional End Routing
-
-A workflow author could not express "conditionally end the workflow early", and a hand-built definition that tried to crashed the run:
-
-- **Builder now accepts `END`/`__end__` as an edge target** — `connectIf(node, 'END', …)` previously failed validation ("references unknown target node"), so conditional early-exit workflows were unrepresentable through the supported API.
-- **Engine routes conditional edges to `END` correctly** — the compiled router prefixed every target with `_n_` (returning `'_n_END'`), but the route map only registered `END` under the bare sentinel key, so LangGraph threw an unregistered-route error and the whole workflow reported `'failed'`. Both the router and the route map now resolve the symbolic end sentinels (`'END'`/`'__end__'`) to LangGraph's `END` via a shared `ref()` helper, so conditional early termination completes cleanly.
-
-Verification: **623 tests passing (was 621) across 42 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.10 API Resilience & Telemetry Correctness
-
-Seven defects from a fresh-lens scout of the least-audited surfaces (backend route handlers/router, telemetry metrics/tracer, `MemoryVectorStore`), each verified against the source before fixing:
-
-- **Malformed URLs now return 400** — `Router.match` called `decodeURIComponent` unguarded on path params; a request like `GET /api/agents/%zz` threw URIError outside the request try/catch and could crash/hang the handler. The server now answers 400 for malformed percent-encoding.
-- **Cancel-before-start respected** — `POST /api/executions` scheduled a `setImmediate` that unconditionally flipped `pending → running`, so cancelling a just-created execution let the deferred start resurrect it back to `running`/`completed`. The deferred start now only proceeds while the execution is still `pending`.
-- **Agent updates are validated** — `PUT /api/agents/:id` spread the raw request body onto the record, so a client could forge `status` and store non-object `config`/`name`. Updates are now whitelisted to type-checked `name`/`config`; forged statuses are ignored and invalid types return 400.
-- **Histogram statistics use cumulative buckets correctly** — `MetricsRegistry` stores bucket counts cumulatively (Prometheus-style) but computed `min`/`max`/percentiles as if per-interval: `max` was pinned to the top bucket (30 s) and p50/p90/p99 under-reported once lower buckets filled. Percentiles now take the smallest bucket whose cumulative count reaches the target; `max` is the smallest bucket covering every observation.
-- **Per-recording labels reach snapshots** — `extraLabels` passed to `increment`/`setGauge`/`observe` were only written to a trace log and never merged into stored labels, so dashboard snapshots lost each recording's label dimensions. They are merged into the metric's labels now.
-- **`withSpan` activates the span** — the new span was started but never made current in the OTel context, so log mixins and nested spans inside the callback carried a stale parent (broken traceId/spanId propagation and parent-child hierarchy). The span is now set active for the callback duration.
-- **`MemoryVectorStore` guards vector dimensions** — brute-force cosine similarity only looped over `a.length`; a dimension-mismatched query produced NaN scores that silently dropped results. Mismatched dimensions now score 0 (not similar).
-
-Verification: **632 tests passing (was 623) across 43 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.11 Utility & Tooling Correctness
-
-Seven defects from a fresh-lens scout of the shared utilities layer (`@aether/utils`), the SDK tool handoff, and the graph visualizer/editor, each verified against the source before fixing:
-
-- **Graphviz DOT escaping** — `escapeDOT` applied the backslash-escape pass *after* the quote pass, re-doubling the backslashes it had just inserted (`say "hi"` → `say \\"hi\\"` — invalid DOT that broke every quoted label), and node/edge/entry/terminal ids were interpolated raw. Escaping now runs backslash-first and every id is escaped too.
-- **SDK tool metadata honored** — `AetherAgent.buildTools()` exposed every registered tool to the model regardless of `enabled: false` and ignored per-tool `timeout` (a hung handler hung the whole run). Disabled tools are now filtered out and handlers run under the configured timeout via `withTimeout` (the SDK now depends on `@aether/utils`).
-- **`isEqual` is depth-correct** — the JSON-stringify fallback returned `false` for deep-equal objects with different key insertion order and `true` for `{a, b: undefined}` vs `{a}`. Replaced with a recursive structural comparison (own-key sets must match; key order irrelevant) while preserving the documented NaN-equals-NaN behavior.
-- **`deepMerge` prototype safety** — a `__proto__`/`constructor`/`prototype` source key (e.g. from parsed untrusted JSON) rewrote the result's prototype, hiding merged data from `Object.keys`/`JSON`/`structuredClone` while polluting property lookups. Those keys are now skipped.
-- **GraphEditor id integrity** — `update-node`/`update-edge` patches could mutate `id`, orphaning every edge/entry/terminal while reporting success. Id-mutating patches are now rejected.
-- **`parallel()` concurrency guards** — `parallel(tasks, 0)` silently ran nothing and negative concurrency crashed with an opaque `RangeError`. Concurrency clamps to at least one worker so all tasks run.
-- **`truncate` respects `maxLen`** — `truncate(s, 2)` returned the 3-char `'...'`, violating its own "at most maxLen" contract. The result is now clamped to `maxLen` (the two tests that pinned the overshoot were corrected).
-
-Verification: **643 tests passing (was 632) across 45 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.12 Provider-Resolution & Electron-Bridge Correctness
-
-Six defects from a fresh-lens scout of the providers package (`model-capabilities`, `provider-registry`) and the Electron bridge + renderer settings store, each verified against the source before fixing:
-
-- **Longest-prefix capability lookup** — prefix matching returned the first known key that was a prefix of the query (insertion-ordered), so a dated leaf like `gpt-4o-mini-2024-07-18` resolved to the higher-priced `gpt-4o` (2.5/10) instead of `gpt-4o-mini` (0.15/0.6). The most specific known id now wins.
-- **Provider-level defaults for every provider** — OpenAI, Anthropic and Gemini had no provider defaults, so any unregistered model id (e.g. the real `claude-3-5-haiku-latest`) fell to the 4096-token generic fallback with no tool use/vision. Unknown models of those providers now inherit realistic chat/streaming/tool/vision defaults.
-- **Capability results are defensive copies** — `get()`/`hasCapability()` returned the stored mutable `ModelCapabilities` (live `supported` Set), so a consumer mutating a result corrupted the registry globally. Lookup results are now cloned.
-- **Unknown provider types fail fast** — `register()`/`create()` resolved an unregistered/misspelled type by silently falling back to the OpenAI-compatible constructor (and crashed opaquely if that fallback was itself unregistered, via a non-null-asserted `.get('openai_compatible')!`). Resolution now throws a clear `No provider type … is registered` error and the crash path is gone.
-- **Cancel-before-start respected in the Electron bridge** — `backend-bridge.startExecution` scheduled a `setImmediate` that unconditionally flipped `pending → running` (the HTTP backend got this guard in v0.1.10; the Electron bridge did not), so cancelling a just-created execution resurrected it to `running` then `completed`. The deferred start now only proceeds while `pending`.
-- **Settings reset returns deep copies** — `resetCategory` shallow-cloned `DEFAULT_SETTINGS[category]`, so nested subtrees (`resourceLimits`, `retryPolicy`, `defaultViewport`, …) — including the very defaults the reset reverts to — aliased the shared `DEFAULT_SETTINGS` object for the rest of the session. Resets now deep-clone the category.
-
-Verification: **656 tests passing (was 643) across 47 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.13 Async Tracing, RAG Retrieval & Routing Correctness
-
-Eleven defects from three fresh-lens scouts (orchestrator engine, SDK runner, memory + telemetry internals), each verified against source — and for the SDK/OTel findings, against the installed dependency dist — before fixing:
-
-- **Span context now propagates through async code** — `initTracer` installed no context manager, so `@opentelemetry/api`'s default NOOP manager made `context.active()` return ROOT_CONTEXT everywhere: `withSpan` activation (the v0.1.10 fix) and the logger's `traceId`/`spanId` mixin were dead in the real runtime. The tracer now installs an `AsyncLocalStorageContextManager` (new direct dep `@opentelemetry/context-async-hooks`); verified by a real-OTel (unmocked) test that asserts the active span survives `await` and is restored after nested spans.
-- **`injectTraceContext` carries the active span** — it injected `ROOT_CONTEXT`, which has no span, making W3C `traceparent` injection a guaranteed no-op (outbound calls shipped no trace context). It now injects `context.active()`, so the current trace/span ids reach downstream HTTP calls.
-- **Histogram out-of-range observations no longer read as zero data** — a value above the largest configured bucket matched no bucket while `sum`/`count` still incremented, collapsing `min`/`max`/percentiles to 0 / last-bound. A `+Inf` sentinel bucket (Prometheus-style) now captures out-of-range values while in-range statistics stay unchanged.
-- **Sentence chunking preserves terminators** — the sentence strategy split on `/[.!?]\s+/`, consuming the terminator, so stored/retrieved chunks silently dropped every sentence's `.`/`!`/`?` (context that altered the source). A lookbehind split keeps punctuation in the chunk.
-- **Hybrid scores stay in the documented 0–1 range** — keyword results were boosted `×1.2`, publishing scores > 1 that violate the `0-1, higher is better` contract. The boost is now clamped to 1.
-- **NaN chunking config can no longer silently index nothing** — `Math.max(1, Math.floor(NaN))` stayed `NaN`, so `chunkFixed`'s loop body never ran and `index()` returned `[]` with no error. Non-finite sizes/overlap now fall back to the defaults.
-- **Conditional edges honour their documented priority** — `EdgeDefinition.priority` ("lower = evaluated first") was declared but never applied; branch selection used array order. Conditional edges are now evaluated in priority order.
-- **`llm-route` edges are routed, not silently dropped** — the engine only wired `direct`/`conditional` edges, so a node whose only edge was `connectViaLLM` got zero outgoing edges: the LLM-routed target never ran while the workflow reported `completed` (silent wrong routing). LLM-routed edges are now branch candidates (an always-true branch in the absence of a live router).
-- **GraphEditor accepts the `END` early-exit sentinel the builder allows** — the builder validates `END`/`__end__` edge targets, but `GraphEditor.validate` flagged them as unknown, so a buildable conditional-early-exit workflow reported invalid (and the inert `terminalNodes.find(() => true)` clause is gone).
-- **`RunResult.toolCalls` actually reports tool calls** — `toRunResult` scanned `newItems` for `type === 'function_call'`, but SDK `newItems` are RunItem class wrappers with the protocol item at `.rawItem`, so tool calls were always `[]` in real runs (the unit test's raw-item mock made it false-green). The result now unwraps `.rawItem`; the test was corrected to the real RunItem shape.
-- **Object outputs serialize as JSON, not `[object Object]`** — a structured/object `finalOutput` was coerced with `String()`, producing `[object Object]`. Non-string outputs are now JSON-serialized.
-
-Verification: **667 tests passing (was 656) across 48 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.14 Shell I/O, Provider Routes, Config & Server Hardening
-
-Ten defects from three fresh-lens scouts (core EventBus/lifecycle/config, RBAC + HTTP server/router, shell executor + backend stores/routes), each verified against source before fixing:
-
-- **Shell `stdin` is actually piped** — `ToolParams.stdin` ("Stdin to pipe (text or base64)") was documented but never written, and the child's stdin pipe was never closed, so any stdin-reading command (`cat`, `sort`, interactive) blocked on an empty open pipe until the timeout killed it. The payload is now written and stdin is ended with EOF (also for the Docker executor).
-- **Signal-killed commands report a stable exit chunk** — the streaming `exit` chunk serialized `String(exitCode)`, which is `null` on a signal kill, while the returned result said `-1`. The chunk now emits the same `-1`.
-- **Partial agent-config updates merge instead of replacing** — `updateAgent` shallow-spread a `{ config: { model } }` patch over the record, silently dropping every other config key (temperature, systemPrompt, …). Config patches now deep-merge with the existing map.
-- **Provider route accepts a null body with 400, not 500** — `parseBody` returns any JSON value, and a `null` (or non-object) body dereferenced `body.name` straight into the route handler, surfacing a leaked `TypeError` as a 500. Non-object bodies now return 400 alongside the existing name/type validation.
-- **Client-supplied provider ids are safe** — a duplicate `id` silently overwrote the existing record (on an unauthenticated API), and a non-string `id: 123` created a Map key no router param could ever address (orphan). Duplicates now return 409, non-string ids 400.
-- **`/health` reports real provider counts** — the payload hardcoded `providers {configured: 0, healthy: 0}` disconnected from the actual store, so dashboards/probes always showed zero. Health now reflects the live provider registry (delta-verified in the integration test).
-- **Server never leaks exception internals** — a throwing route handler echoed `err.message` (file paths, store keys) into the JSON response body, and a post-write throw crashed the response with `ERR_HTTP_HEADERS_SENT`. The client now always receives a fixed `Internal server error` (details logged server-side), guarded against already-sent headers.
-- **Bearer auth-scheme is case-insensitive** — `Authorization: bearer <key>` (valid per RFC 7235) was rejected because the prefix check was case-sensitive; lowercase `bearer` now authenticates.
-- **`ConfigManager.reset()` restores constructor defaults** — reset reverted to built-in defaults, silently discarding the overrides the manager was constructed with (`new ConfigManager({ port: 9000 })` → reset → `8456`). It now returns to the manager's own base defaults.
-- **`ConfigManager.load()` rejects prototype-polluting keys** — a JSON config carrying `__proto__` replaced the settings object's prototype (letting that key's properties be "known" to later loads). `__proto__`/`constructor`/`prototype` keys are skipped and only own settings keys are loadable.
-
-Verification: **676 tests passing (was 667) across 48 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.15 Sandbox Isolation, Vector Search & Docker/Playwright Correctness
-
-Ten defects from three fresh-lens scouts (memory-vector re-audit + type schemas, Docker/Playwright sandboxes, ts-runtime/python-venv executors), each verified against source before fixing:
-
-- **`createVenv` no longer deletes your data** — if the target path existed but wasn't a valid venv, it was `rmSync`'d recursively before `python -m venv` even ran: a typo'd path, a regular file, or any user directory without `bin/python` was silently destroyed. `createVenv` now only replaces an empty directory or a venv-marked (`pyvenv.cfg`) one, and throws without touching anything else.
-- **The TS sandbox runs in its own temp dir, not the caller's cwd** — `execFile` defaulted `cwd` to `process.cwd()`, so untrusted TS code had read/write access to the whole repo (source, `.env`, credentials) despite the documented "temp directory" contract. The sandbox now defaults to the temp dir it created.
-- **`timeout: 0` means "no timeout"** — Node's `execFile` treats 0 as disabled, but the supplementary kill timer fired at t=0 and SIGTERM'd every just-spawned script. The timer is now gated on `timeout > 0`.
-- **Kill timers are cleaned up** — the timeout/SIGKILL escalation timers were never cleared or unref'd, so a fast script still pinned the event loop for the full timeout window. They are cleared once the process settles.
-- **Vector search guards degenerate inputs** — an all-zero (empty/stopped-out) query used to return the entire store at score 0 (every entry "matches"); it now returns no results in both vector stores. Negative/NaN `topK`/`limit` (which silently returned all-but-last) are clamped to an empty set.
-- **`InMemoryVectorStore.search` validates the query dimension** — a wrong-length query crashed mid-loop with a generic `cosineSimilarity` error; it now throws a clear, store-aware error symmetric with `insert`'s guard.
-- **Search results carry a stable insert-time timestamp** — the entry timestamp was `Date.now()` per query, so every result appeared freshly created and TTL/recency logic misbehaved; it is now captured at insert.
-- **Playwright `type` honors `delay: 0`** — a zero delay was treated as "no delay" and silently switched to `fill()`, which skips keyboard input events (observably different for controlled inputs). `delay: 0` now stays on `type()`.
-- **Docker read-only sandboxes stay writable at the workspace** — `ReadonlyRootfs` (default profile) made the workdir unwritable, so the documented file-copy flow failed with `EROFS` out of the box. A tmpfs is now layered at the workdir whenever writes are forbidden.
-
-Verification: **689 tests passing (was 676) across 48 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.16 Lifecycle Safety, Utils Hardening & Scoped-Store Contracts
-
-Twelve defects from three fresh-lens scouts (Electron main-process helpers, utils + WebSocket manager, scoped memory stores + orchestration checkpoints), each verified against source before fixing:
-
-- **WebSocket `attach()` is now idempotent** — attaching twice registered two `upgrade` listeners (each wrote its own `101` handshake for one upgrade and shared the socket's buffers, corrupting the frame stream), and `detach()` left a stale `server` reference. A re-attach now removes the previous listener first and `detach()` nulls the server.
-- **Fragmented WebSocket frames are rejected coherently** — the first (non-FIN) fragment of a fragmented message was silently accepted (its truncated JSON swallowed) and then the mandatory continuation frame killed the connection: an incoherent state machine. Non-FIN frames are now rejected outright at the first fragment.
-- **`isPlainObject` is actually "plain"** — the guard (`typeof === object`) admitted `Date`/`Map`/`Set`/`Buffer`/`RegExp`, so `deepMerge` recursively spread a `Date` into `{}` and silently destroyed the value. Only real plain objects qualify now (both copies of the guard); the codified test that pinned `isPlainObject(new Date()) === true` was corrected.
-- **`pick()` copies own properties only** — `key in obj` copied inherited keys (`toString` etc.) and an own `__proto__` selection could rewrite the result's prototype. Uses `hasOwnProperty` and skips `__proto__`.
-- **`withTimeout` no longer leaks its timer** — the lose-the-race `setTimeout` was never cancelled when the promise won, keeping the event loop alive (and a live timer) for up to the full timeout on every quick tool call. The timer is cleared when either side settles.
-- **Logger is never the crash point** — JSON mode threw `TypeError` on `BigInt`/circular meta, and text mode silently dropped all structured `meta`. JSON stringification is now exception-safe and text lines include the serialized meta.
-- **Scoped memory stores enforce their scope** — `EpisodicStore`/`SemanticStore`/`TaskStore`/`ConversationStore` (one store per scope) accepted and served entries of any scope, so a store could write/read/update/delete/count across scopes. Writes now reject a mismatched scope and every read path filters to the store's own scope. (This uncovered the stores' first tests.)
-- **Whitespace-only text queries match nothing** — `'   '.split(/\s+/)` produced `['']`, and the empty term matched every entry. Terms are now filtered and an all-empty query returns no results.
-- **Failed executions leave a checkpoint** — the legacy `CheckpointManager` only captured happy-path runs; a thrown invocation returned a synthetic failed state with no trace. Failures are now persisted (label `failed`) for recovery/diagnostics.
-- **`engine.clear()` tolerates a manager without `clear()`** — the optional interface method was called with a hard cast, crashing on any injected manager that omits it. Now called safely with `?.`.
-- **Crash reporter exits after an uncaught exception** — the handler logged and then kept running on undefined process state (silent corruption). It now logs and exits non-zero so a supervisor can restart cleanly.
-- **`getCrashLogs` reads the rotated archive** — rotation renames the full log to `crash.log.old`, which the reader skipped; logs now include the archive in chronological order.
-
-Verification: **705 tests passing (was 689) across 50 files, `tsc -b` clean, lint + format checks green**.
-
----
-
-### Latest Iteration — v0.1.17 Graph Rendering & SDK Contract Wiring
-
-Nine defects from two fresh-lens scouts (workflow visualizer, SDK remainder wrappers), each verified against source before fixing:
-
-- **Mermaid output quotes/escapes every node/edge id** — labels were escaped but ids were interpolated raw, so an id like `bad"id` / `a[0]` / `with space` broke out of the node/edge strings and produced malformed (or injectable) diagrams in `toMermaid` and `toMermaidSequence`. Ids are now quoted + escaped everywhere (sequence participant aliases are sanitized to safe tokens).
-- **The conditional-edge highlight no longer recolors every edge** — `linkStyle default` turned direct/llm-route edges yellow too; it is now an indexed `linkStyle <n>` emitted once per conditional edge.
-- **`toTextTree` renders the `END`/`__end__` sentinel as a leaf** — the (builder-supported) early-exit sentinel was printed as a bogus `[?]` node; it is now `-> END (end)`, and a missing entry node renders `(no entry node)` instead of garbage.
-- **`llm-route` edges are visually distinct in DOT** — they fell through to the plain `->` style, losing the routing distinction the Mermaid renderer attempts; DOT now uses a dotted purple edge, and Mermaid uses the standard `==>` thick arrow (replacing the non-standard `==o`).
-- **Mermaid comment headers can no longer be broken out of** — `workflow.name`/`description` were interpolated into `%%` comments raw; an embedded newline terminated the comment and let the rest parse as diagram code. Newlines are now collapsed.
-- **A node that is both entry and terminal gets one merged style** — two conflicting `style` lines (blue then green) lost the entry marker; a combined style is emitted.
-- **DOT declares isolated nodes** — only entry/terminal nodes were styled and everything else implicitly declared via edges, so an orphan node vanished from output. Every node is now declared.
-- **SDK context actually reaches the model** — `AgentConfig.context` and `RunConfig.context` (both documented "injected into instructions") were dead: the docs' promise held but the LLM never saw the data the Electron UI ships (domain/languages/etc.). `toSdkAgent` now appends merged agent + per-run context to the instructions, and `run()`/`runWithAgents()` forward `config.context`.
-- **SDK barrel re-exports the bridge surface + tool names are validated** — `@aether/sdk` never re-exported `internal-types` (so consumers needed a direct `@openai/agents` dependency for `sdkTool`/`Runner`/`Agent`/types); it now does. `ToolRegistry.register` rejects empty/invalid names up front instead of deferring a confusing "Tool name cannot be empty" to agents-core.
-
-Verification: **715 tests passing (was 705) across 51 files, `tsc -b` clean, lint + format checks green**.
+The Dockerfile is a two-stage Bun image (`oven/bun`): build stage runs `npm ci` + `tsc -b` + `vite build`; the runtime stage ships Bun + compiled output + built frontend and runs `bun run packages/aether-backend/src/main.ts` under `dumb-init`, with a `/health` healthcheck.
 
 ---
 
 ## Roadmap
 
-Next iterations target the remaining control-plane and correctness work:
-
-- **Persist secrets via the vault** — route provider keys from the renderer to the vault through main-process IPC (safeStorage/keytar) so re-launch keeps keys without ever touching localStorage; replace session-only re-entry.
-- **Electron update surface** — auto-updater never emits renderer events and `update:check`/`update:install` are unregistered; wire the event stream.
-- **Auth polish** — per-user/session auth (JWT), key rotation via the vault, and role assignment for arbitrary API keys beyond the admin default.
-- **Signal-node resume** — stop executing downstream edges at a `signal` node (v0.1.8 reports `paused` but the graph still runs past it) and add a checkpoint-based resume path.
-
----
-
-## Docker Deployment
-
-```bash
-docker compose up --build
-```
-
-The service starts on port 3001 with the health check endpoint at `/health`.
+- Persist loop definitions + session transcripts to disk (currently in-memory).
+- Loop `skill`-transition skill picker with per-round argument templating.
+- RBAC role-based GUI access + per-route permissions beyond admin.
+- Provider CRUD wired to the engine registry (add a provider from the GUI).
 
 ---
 
 ## License
 
-MIT
+MIT.

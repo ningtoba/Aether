@@ -1,7 +1,7 @@
 {
   "name": "@aether/tools",
   "version": "0.1.0",
-  "description": "Tool runtime and sandbox execution",
+  "description": "Aether tool runtime, sandboxes, and execution: registry, shell, Docker, Playwright, Python venv, TS runtime",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -21,13 +21,15 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@aether/types": "*",
-    "@aether/utils": "*",
-    "@aether/core": "*"
+    "@aether/core": "*",
+    "dockerode": "^4.0.5",
+    "playwright-core": "^1.52.0",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
-    "typescript": "^5.8.0",
+    "@types/dockerode": "*",
     "@types/node": "^22.0.0",
+    "typescript": "^5.8.0",
     "vitest": "^3.0.0"
   }
 }

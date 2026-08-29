@@ -16,15 +16,6 @@
     },
     {
       "path": "../aether-memory"
-    },
-    {
-      "path": "../aether-providers"
-    },
-    {
-      "path": "../aether-types"
-    },
-    {
-      "path": "../aether-utils"
     }
   ]
 }

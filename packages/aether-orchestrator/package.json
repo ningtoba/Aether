@@ -23,9 +23,6 @@
   "dependencies": {
     "@aether/core": "*",
     "@aether/memory": "*",
-    "@aether/providers": "*",
-    "@aether/types": "*",
-    "@aether/utils": "*",
     "@langchain/langgraph": "^1.3.0"
   },
   "devDependencies": {

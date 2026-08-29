@@ -8,22 +8,11 @@
   "include": [],
   "exclude": ["node_modules", "dist"],
   "references": [
-    { "path": "./packages/aether-backend" },
     { "path": "./packages/aether-core" },
-    { "path": "./packages/aether-electron" },
-    { "path": "./packages/aether-frontend" },
     { "path": "./packages/aether-memory" },
     { "path": "./packages/aether-orchestrator" },
-    { "path": "./packages/aether-providers" },
-    { "path": "./packages/aether-sdk" },
-    { "path": "./packages/aether-security" },
-    { "path": "./packages/aether-telemetry" },
     { "path": "./packages/aether-tools" },
-    { "path": "./packages/aether-types" },
-    { "path": "./packages/aether-utils" },
-    { "path": "./packages/docker" },
-    { "path": "./packages/playwright" },
-    { "path": "./packages/python-venv" },
-    { "path": "./packages/ts-runtime" }
+    { "path": "./packages/aether-backend" },
+    { "path": "./packages/aether-frontend" }
   ]
 }

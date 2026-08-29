@@ -1,461 +1,102 @@
 # Aether Architecture
 
-**Version:** 0.1.0  
-**Last Updated:** 2026-05-20
+**Version:** 0.2.0 · **Last Updated:** 2026-08-29
 
 ## Overview
 
-Aether is a full-stack autonomous AI orchestration platform. It manages LLM provider connections, multi-agent workflows, memory systems, tool execution environments, and provides a desktop GUI for configuration and monitoring — all self-hosted with no external API dependencies by default.
+Aether is a web-first autonomous AI orchestration platform. It embeds the **Oh My Pi** coding agent (a fork of Pi, MIT) via its Node SDK behind a compact TypeScript monorepo, and exposes the whole control plane — models, sessions, loops, skills, providers, agents, settings — through one HTTP/WebSocket API with a React GUI served from the same backend.
 
----
+There is **no desktop shell and no separate services**: one backend process, one web UI, one Docker image.
 
-## System Architecture
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│                      aether-electron                          │
-│                    (Electron Shell)                           │
-│  ┌────────────────────────────────────────────────────────┐  │
-│  │                 aether-backend                          │  │
-│  │   HTTP Server (Node.js http module)                    │  │
-│  │   REST API + WebSocket for exec logs                   │  │
-│  │                                                        │  │
-│  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
-│  │  │  aether-core     │  │  aether-orchestrator     │    │  │
-│  │  │  Event bus       │  │  LangGraph DAG engine    │    │  │
-│  │  │  Lifecycle mgr   │  │  WorkflowBuilder API     │    │  │
-│  │  │  Config manager  │  │  Visualizer (Mermaid)    │    │  │
-│  │  └──────────────────┘  └─────────────────────────┘    │  │
-│  │                                                        │  │
-│  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
-│  │  │  aether-providers│  │  aether-memory           │    │  │
-│  │  │  Anthropic       │  │  In-memory vector store  │    │  │
-│  │  │  Gemini          │  │  Memory store (keyword)  │    │  │
-│  │  │  Ollama/vLLM/    │  │  RAG engine (hybrid)     │    │  │
-│  │  │  llama.cpp/OR    │  └─────────────────────────┘    │  │
-│  │  └──────────────────┘                                 │  │
-│  │                                                        │  │
-│  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
-│  │  │  aether-tools    │  │  aether-telemetry        │    │  │
-│  │  │  Tool registry   │  │  OpenTelemetry tracing   │    │  │
-│  │  │  Shell executor  │  │  Pino logging + metrics  │    │  │
-│  │  │  File editor     │  └─────────────────────────┘    │  │
-│  │  └──────────────────┘                                 │  │
-│  │                                                        │  │
-│  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
-│  │  │  aether-security │  │  aether-sdk              │    │  │
-│  │  │  RBAC (5 roles)  │  │  AetherAgent/Runner      │    │  │
-│  │  │  Hierarchical    │  │  ToolRegistry            │    │  │
-│  │  │  Glob resource   │  │  Handoff support         │    │  │
-│  │  └──────────────────┘  └─────────────────────────┘    │  │
-│  │                                                        │  │
-│  │  ┌──────────────────┐  ┌─────────────────────────┐    │  │
-│  │  │  aether-types    │  │  aether-utils            │    │  │
-│  │  │  Shared types    │  │  Helpers, validators     │    │  │
-│  │  └──────────────────┘  └─────────────────────────┘    │  │
-│  └────────────────────────────────────────────────────────┘  │
-│                                                              │
-│  ┌───────────────────────────────────────────────┐           │
-│  │          aether-frontend / React renderer      │           │
-│  │  React 19 with TailwindCSS 4 + Framer Motion  │           │
-│  │  8 pages tabbed via sidebar navigation:        │           │
-│  │  Dashboard, Providers, Agents, Workflows,      │           │
-│  │  Memory, Executions, Plugins, Settings         │           │
-│  └───────────────────────────────────────────────┘           │
-│                                                              │
-│  ┌───────────────────────────────────────────────┐           │
-│  │  Execution Sandboxes (outside backend)         │           │
-│  │  ┌──────┐  ┌──────────┐  ┌──────────┐ ┌────┐ │           │
-│  │  │Docker│  │ts-runtime│  │python-venv│ │PW  │ │           │
-│  │  └──────┘  └──────────┘  └──────────┘ └────┘ │           │
-│  └───────────────────────────────────────────────┘           │
-└──────────────────────────────────────────────────────────────┘
-```
-
----
-
-## Package Map
-
-### `@aether/core` — Runtime Foundation
-- Typed event bus (pub/sub with async/retry modes)
-- Configuration manager with generic type support and defaults
-- Lifecycle manager (5-stage state machine: init → ready → running → stopping → stopped)
-- Hook system for lifecycle transitions
-
-### `@aether/providers` — LLM Provider Abstraction
-- Provider registry with lazy initialization and dynamic type registration
-- Built-in providers: Anthropic (Messages API), Gemini, Ollama, vLLM, llama.cpp, OpenRouter, OpenAI-compatible
-- Unified interface: `complete()`, `completeStream()`, `embed()`, `listModels()`, `healthCheck()`
-- Encrypted vault for API key storage (OS keychain via keytar, AES-256-GCM file fallback)
-- Model capability registry for feature detection
-
-### `@aether/orchestrator` — Multi-Agent Workflows
-- LangGraph engine wrapper with StateGraph integration
-- Fluent WorkflowBuilder: agentNode, routerNode, mapNode, reduceNode, connect, connectIf, connectViaLLM
-- In-memory checkpointing with save/get/list/delete
-- Mutable graph editor for runtime modifications
-- Visualizer: Mermaid.js, DOT (Graphviz), and text tree representations
-- Execution state machine tracking node-level status, history, and accumulated data
-
-### `@aether/memory` — Memory & Knowledge
-- MemoryStore: In-memory key-value store with keyword scoring, type/metadata filtering, TTL expiry, max capacity compaction
-- InMemoryVectorStore: Map-based brute-force cosine search with configurable dimensions
-- RAGEngine: Document chunking (fixed/sentence/paragraph with overlap), hybrid retrieval (keyword + vector, 1.2x keyword boost), deduplication
-- Configurable embedding simulation for local-only operation
-
-### `@aether/tools` — Tool Execution
-
-- Tool registry with register/get/list/remove
-- Docker container sandbox via Dockerode SDK (create/destroy/exec with resource profiles)
-- Shell command executor with configurable timeouts
-- File editor tool (read/write/edit files within allowed paths)
-- Resource profiles: minimal/standard/high/unrestricted
-- Environment injection, timeout handling, output size limits
-
-### `@aether/telemetry` — Observability
-- OpenTelemetry tracing (BasicTracerProvider, console + OTLP exporters)
-- Pino structured logging with automatic OTel trace context injection
-- Metrics registry: counters, gauges, histograms with percentile computation
-- Semantic attributes and span names conventions
-- W3C trace context propagation for distributed tracing
-
-### `@aether/types` — Shared Type Definitions
-- `LLMProvider` — provider connection config with 8 provider types
-- `MemoryConfig` — vector store / embedding settings
-- `AgentConfig` — full agent definition (prompt, model, tools)
-- `WorkflowConfig` — DAG of nodes and edges
-- `OrchestrationConfig` — multi-agent orchestration plan
-- `Execution` — run state, logs, timestamps
-- `ToolConfig` — tool binding with typed parameters
-- `SandboxLimits` / `SandboxProfile` — sandbox resource constraints
-- `Base` types — UUID, SemVer, Timestamp, JSON, enums, pagination, error details
-
-### `@aether/utils` — Utilities
-- Cryptography (key generation, ID generation)
-- String manipulation (truncate, slugify, capitalize, escapeHtml, template)
-- Object deep merge / clone / pick / omit / equality
-- Async (delay, timeout, retry with 3 backoff strategies, parallel with concurrency, race)
-- JSON schema validation (URL, port, string, object)
-- Platform detection (Electron, Node.js, OS)
-- Structured logger (levels, formats, child loggers)
-
-### `@aether/sdk` — Public API for External Consumers
-
-- AetherAgent wrapping OpenAI Agents SDK Agent (instructions, model, tools, handoffs)
-- AetherRunner with AetherModelProvider bridging — execute agents with any configured LLM provider
-- ToolRegistry — register/lookup/execute tools, convert between Aether and SDK tool schemas
-- Handoff support between agents with type-safe handoff definitions
-- Message conversion utilities for cross-format compatibility
-
-### `@aether/security` — RBAC
-- Hierarchical roles with inheritance
-- 5 built-in roles: admin, operator, developer, agent, viewer
-- Glob-based resource pattern matching
-- Permission resolution with specificity sorting
-- Deny-by-default security model
-
-### `@aether/backend` — HTTP Server
-- Node.js built-in http module (no framework dependency)
-- Pattern-matched router with `:param` placeholders
-- Native WebSocket implementation (RFC 6455 frame encoding/decoding)
-- In-memory agent, provider, and execution stores
-- CORS support with configurable origins
-- Health check with memory/uptime/providers status
-
-### `@aether/frontend` — React Admin GUI (Electron Renderer)
-
-- React 19 with TypeScript, TailwindCSS 4, Framer Motion animations
-- **8 pages** routed via a simple page-state switch in `App.tsx`:
-  - `DashboardPage` — system info (platform, arch, version, CPU, memory, GPU), agent overview cards with status indicators, recent executions table, quick stats bar
-  - `ProviderPage` — list/add/configure LLM providers, health checks
-  - `AgentPage` — agent CRUD, model selection, prompt configuration
-  - `WorkflowPage` — visual workflow builder with DAG editing
-  - `MemoryPage` — memory stats, search/query interface, vector store browser
-  - `ExecutionPage` — execution listing, live status, logs viewer
-  - `PluginPage` — plugin install/uninstall, browse available plugins
-  - `SettingsPage` — 13 settings categories via Zustand persist store
-- **Components**: `SettingsSection`/`SettingsRow` containers, `SettingsToggle` (switch), `SettingsSelect` (dropdown), `SettingsInput` (text/password/number), `SettingsSlider` (range), `SettingsTagGroup` (multi-select chips), `SettingsKeyValueEditor`, `SettingsButton` (default/danger/primary variants)
-- **Navigation**: `Sidebar` component with 8 icon-labeled navigation items, active state highlighting, logo area
-- **Window chrome**: `TitleBar` component with custom minimize/maximize/close buttons using SVG icons, maximized state awareness via IPC
-- **State management**: Zustand store with `persist` middleware for settings persistence, local React state for page-specific data
-- **Data connections**: All pages wire to `window.electronAPI` IPC bridge methods (getSystemInfo, listAgents, listProviders, listExecutions, etc.), with fallback states when bridge is unavailable
-
-### `aether-electron` — Desktop Shell
-- Main process with single-instance lock and window management
-- System tray with context menu
-- Auto-updater with electron-updater (GitHub releases)
-- Crash reporter with log rotation (10MB max)
-- GPU feature flags for hardware acceleration
-- preload.ts contextBridge API
-- electron-vite build configuration
-
-### `@aether/docker` — Docker Sandbox
-- Container lifecycle management (create, destroy via CLI)
-- Resource-constrained execution with profile presets
-- File injection and command execution
-- Health check / availability verification
-
-### `@aether/ts-runtime` — TypeScript Runtime Sandbox
-- Isolated child process execution via tsx
-- Timeout-enforced execution with SIGTERM/SIGKILL cascade
-- Output size limits to prevent memory exhaustion
-- `execTypeScript()` — run code, capture stdout/stderr/exitCode
-- `evalTypeScript()` — run code and parse JSON result with context injection
-- Temp file cleanup on completion
-
-### `@aether/python-venv` — Python Virtual Environment Management
-- `createVenv()` — create Python 3 virtual environments
-- `installPackages()` — pip install within a venv
-- `runPython()` / `runPythonCode()` — execute files or inline code
-- `getInstalledPackages()` — list installed packages via pip JSON output
-- `deleteVenv()` — remove a virtual environment
-- Cross-platform (Windows/Unix) venv path resolution
-
-### `@aether/playwright` — Browser Automation
-- `launchBrowser()` — launch Chromium, Firefox, or WebKit (headless by default)
-- `createPage()` / `navigate()` — page creation and navigation
-- `screenshot()` — take page screenshots (file or Buffer)
-- `evaluate()` — execute JavaScript in page context
-- `click()` / `type()` / `getContent()` / `getPageTitle()` — interaction helpers
-- Lazy dynamic import of playwright-core (graceful without dependency)
-
----
-
-## Data Flow
+## High-level topology
 
 ```
-User Input
-    │
-    ▼
-aether-backend (REST / WS)
-    │
-    ├─► aether-security (RBAC auth check)
-    │
-    ▼
-aether-orchestrator
-    │
-    ├─► aether-core (event bus, lifecycle, config)
-    ├─► aether-providers (LLM calls)
-    ├─► aether-memory (retrieve / store)
-    ├─► aether-tools (sandbox execution)
-    │
-    ▼
-Response ──► aether-telemetry (log, trace)
-    │
-    ▼
-Admin GUI / Electron (display)
+Browser (React + Vite, aether-frontend)
+   │  same-origin HTTP (/,/api/*,/health)      ws://host:<port>/ (realtime)
+   ▼
+aether-backend (runs on Bun)
+   ├── Router + AetherServer (node:http baseline, REST + legacy WS)
+   ├── StaticFileServer  → hosts the built frontend (SPA fallback)
+   ├── EngineService     → embedded @oh-my-pi/pi-coding-agent sessions
+   ├── LoopManager/      → round→transition→round loop state machine
+   │   LoopRunner
+   ├── SkillsService     → SKILL.md discovery (.omp/skills, ~/.omp/agent/skills)
+   └── BunRealtimeHub    → Bun.serve websocket hub for live engine events
+        │
+        └─ domain packages: aether-core · aether-memory · aether-orchestrator · aether-tools
 ```
 
-### Execution Flow (detailed)
+### Why the runtime is Bun
 
-1. **API Layer** receives an agent execution request (`POST /api/executions`). Authentication/RBAC is planned, not yet implemented (see Security Model)
-2. **Orchestrator** resolves orchestration mode from workflow definition and agent configs
-3. **Provider** makes LLM calls with configured model (chat, stream, or embeddings)
-4. **Tool Execution** runs any tool calls the LLM generates (Docker sandbox or local)
-5. **Memory** retrieves relevant context via hybrid search before each step, stores results
-6. **Telemetry** records everything as structured spans and metrics
-7. **Response** streams back via WebSocket or returns as complete payload
+The omp SDK (`@oh-my-pi/pi-coding-agent`) only runs under the **Bun** runtime (its native N-API addon and tooling assume Bun). Decisions that follow:
 
----
+- The production backend (`packages/aether-backend/src/main.ts`) runs under `bun`.
+- The REST surface keeps the battle-tested `node:http` server implementation (works under Bun and Node; the node vitest suite exercises it without the Bun-only SDK).
+- Bun's `node:http` cannot host WebSockets (raw 101 writes on the upgrade socket never flush, and there is no `server.upgrade`), so live engine events flow through a **Bun-native `Bun.serve` hub** on `REALTIME_PORT` (advertised in `/health`). REST + realtime are two listeners in one process.
+- The omp SDK is loaded **lazily** (dynamic `import()` inside `EngineService`), so the module graph stays plain-Node-safe and the node test suite never pulls in the Bun addon.
 
-## Electron IPC Bridge
+## Package layout
 
-The Electron shell uses a typed IPC (Inter-Process Communication) protocol to bridge the renderer process (React GUI) with the main process (backend data).
+| Package | Depends on | Responsibilities |
+| ------- | ---------- | ---------------- |
+| `aether-core` | — | Events (`EventBus`), lifecycle, config, shared types, utils, telemetry (pino + OpenTelemetry), security (RBAC). Merged from the former types/utils/core/telemetry/security packages. |
+| `aether-memory` | `aether-core` | `MemoryStore`, `InMemoryVectorStore`, `RAGEngine`, scoped stores (episodic/semantic/task/conversation). |
+| `aether-orchestrator` | `aether-core` | LangGraph workflow graph engine, `WorkflowBuilder`, checkpoint manager, graph editor + DOT/Mermaid visualizer. |
+| `aether-tools` | `aether-core` | Tool registry, shell + Docker + Playwright + Python-venv + TS-runtime sandboxes (merged from tools/docker/playwright/python-venv/ts-runtime). |
+| `aether-backend` | all above + `@oh-my-pi/pi-coding-agent` | HTTP/WS server, engine service, loop manager, skills service, model catalog, static GUI hosting. |
+| `aether-frontend` | `aether-core` | React + Vite web GUI. |
 
-### Architecture
+Dependency flow is strictly leaf → root: `core → memory/orchestrator/tools → backend → frontend`.
 
-```
-┌─────────────────────────────────────────────────┐
-│             Renderer Process (React)             │
-│                                                  │
-│  window.electronAPI.getSystemInfo()               │
-│  window.electronAPI.listAgents()                  │
-│  window.electronAPI.listProviders()               │
-│  ...                                              │
-│         │                                         │
-│         ▼ (contextBridge + ipcRenderer)           │
-│  ┌─────────────────────────────────────────────┐  │
-│  │           Main Process                      │  │
-│  │                                             │  │
-│  │  ipc-main → ipc-handlers.ts                │  │
-│  │      (channel routing)                     │  │
-│  │         │                                   │  │
-│  │         ▼                                   │  │
-│  │  backend-bridge.ts                          │  │
-│  │  (in-memory stores, mirrors API routes)     │  │
-│  │  ─ agents, providers, executions,           │  │
-│  │    plugins, memory, health                  │  │
-│  └─────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
-```
+The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are gone: the SDK/provider layer is superseded by the embedded omp engine and its model registry; the Electron shell by the web GUI.
 
-### IPC Channels
+## Backend internals
 
-The protocol is defined in `packages/aether-electron/src/shared/ipc-protocol.ts` with typed handler signatures:
+### Request path
 
-| Channel | Direction | Purpose |
-|---------|-----------|---------|
-| `app:get-version` / `app:get-platform` | Renderer → Main | App metadata |
-| `system:get-info` / `gpu:get-info` | Renderer → Main | System diagnostics |
-| `backend:health` | Renderer → Main | Backend health check |
-| `agents:*` | Renderer → Main | CRUD for agent records |
-| `providers:*` | Renderer → Main | Provider management |
-| `executions:*` | Renderer → Main | Execution lifecycle |
-| `plugins:*` | Renderer → Main | Plugin install/uninstall |
-| `memory:*` | Renderer → Main | Memory stats, search, clear |
-| `window:*` | Renderer → Main | Window controls (minimize, maximize, close) |
-| `update:*` | Main → Renderer | Auto-updater events (available, downloading, error) |
-| `window:maximize-changed` | Main → Renderer | Maximize state events |
+1. `AetherServer` (node:http) handles `handleRequest`:
+   - CORS preflight → 204.
+   - Body-size cap → 413 before reading bytes.
+   - Optional API-key auth (`Authorization: Bearer`/`X-API-Key`, constant-time compare) + RBAC for `/api/*`; `/health` stays open.
+   - `Router.match` → route handler, or:
+   - non-`/api/` GET → `StaticFileServer` (real file → stream; otherwise SPA fallback to `index.html`), else JSON 404.
 
-### Data Flow (Electron)
+### Engine (sessions / loops / skills / models)
 
-1. **Renderers** invoke API via `window.electronAPI` (exposed through contextBridge preload script)
-2. **Main process** receives IPC messages via `ipcMain.handle()` / `ipcMain.on()`
-3. **backend-bridge.ts** provides in-memory data stores (agents, providers, etc.) mirroring the backend REST API routes
-4. **Responses** flow back through IPC to the renderer, which updates React state
-5. This design allows swapping the in-memory bridge for real HTTP calls to `aether-backend` when running in server mode
+- **`EngineService`** — owns the omp `ModelRegistry` + auth storage. `createSession()` resolves the model (a bare `{provider, modelId}` shape fails silently; the resolved `Model` object is required) and wraps an omp `AgentSession`. Session events are normalized to a small DTO set (`turn_start`, `message_update`, `message_end`, `tool_call`, `agent_end`, …) and pushed to the broadcast hook.
+- **`LoopManager` / `LoopRunner`** — a loop is `[round N] → [transition] → [round N+1]`. The transition (configured per loop) is one of `none | compact | skill | gate`. Stop conditions: `maxRounds`, `maxTimeMs`, manual. A `gate` transition parks the loop until the GUI calls `/advance continue|stop`. The transition never runs after the final round. Loop events (`loop:start|round_start|round_end|transition|gated|stop|completed`) stream to the GUI.
+- **`SkillsService`** — discovers `<root>/<name>/SKILL.md` packs (project `.omp/skills` first, then user `~/.omp/agent/skills`), parsing `name`/`description` frontmatter. A loop's `skill` transition reads the pack and runs its body as a session instruction.
+- **Models** — `GET /api/models` maps the omp registry's `getAvailable()` into grouped records; both Session and Loop pickers consume it.
 
----
+### Realtime
 
-## Configuration
+`BunRealtimeHub` is a `Bun.serve` websocket endpoint on `REALTIME_PORT`. Clients subscribe with `{ "filter": ["engine"] }` (mirrors the legacy WS manager contract). `broadcast()` fans engine frames to connected browsers; `/health` advertises `{ realtime: { port }, engine: { available } }`.
 
-Aether reads configuration from (in order of precedence):
-1. CLI flags
-2. Environment variables (`AETHER_*`)
-3. Config file (`aether.config.json` or `aether.config.yaml`)
-4. Defaults
+## Web GUI
 
-Key configuration domains:
-- `providers` — LLM provider definitions (type, API key, endpoint, model)
-- `agents` — agent definitions (instructions, model, tools, handoffs)
-- `orchestration` — orchestration plans (timeout, parallelism, retry policy)
-- `memory` — storage backend config (type, embedding, chunking)
-- `tools` — sandbox and tool config (Docker, browser)
-- `server` — HTTP server settings (port, host, CORS)
-- `logging` — telemetry and log level (Pino, OTel)
+`aether-frontend` is a Vite + React SPA (jsx, ES2022 target) with a sidebar over eight views: Dashboard, Sessions, Loops, Skills, Models, Providers, Agents, Settings. It talks to the backend through a typed `api.ts` client and a `RealtimeClient` that discovers the hub port from `/health`. The GUI is the only intended surface: every capability exposed by the API has a matching view.
 
----
+## Security
 
-## Security Model
+- API key auth with constant-time digest comparison; RBAC (hierarchical roles + glob resources) enforced on `/api/agents|providers|executions|sessions|loops`.
+- Static file serving rejects path traversal/absolute escapes; only GET/HEAD.
+- Engine routes return 501 (not 500) when the engine is unavailable.
 
-Current state (honest):
+## Testing & verification
 
-- **Sandboxed execution** — Tools run in Docker containers with resource limits
-- **WebSocket hardening** — RFC 6455 frame reassembly, length/memory bounds, masked-frame enforcement, Origin allow-list (see README v0.1.1)
-- **Request body limits** — 1 MB default, configurable `MAX_BODY_SIZE`, enforced for Content-Length and chunked bodies
-- **RBAC** — `aether-security` provides role-based access control with 5 built-in roles, but it is **not yet wired** into the HTTP API
-- **Provider key isolation** — OS keychain via keytar when available; otherwise an AES-256-GCM encrypted file at `~/.config/aether/vault.enc` (machine-key derived, owner-only perms, atomic writes). Legacy plaintext stores are migrated and removed on upgrade.
+- **579 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
+- `npm run build` = `tsc -b --force` (whole monorepo); `npm run lint` and `npm run format:check` gate CI.
+- CI: lint/format/madge, type-check, tests, then a Docker image build (`package.yml`).
 
-Planned (not yet implemented): per-request API authentication (JWT/API keys), per-API-key rate limiting, path allow-listing enforcement, encrypted provider-key storage. **Do not deploy the API on an untrusted network — it is unauthenticated.**
+## Operation
 
----
+- `docker compose up -d` → GUI at `http://localhost:3081`, realtime `ws://localhost:3082` (host ports remapped away from the common local 3001).
+- Env: `PORT` (default 3001), `REALTIME_PORT` (3002), `HOST` (`0.0.0.0`), `MAX_BODY_SIZE`, `AETHER_API_KEY`.
+- Model catalog: `~/.omp/agent/models.yml` + omp provider catalog; the GUI reads it live.
 
-## Extension Points
+## Roadmap
 
-### Plugins (planned)
-Plugins can hook into any lifecycle event:
-- `core:beforeInit` / `core:afterInit`
-- `provider:beforeChat` / `provider:afterChat`
-- `orchestrator:beforeStep` / `orchestrator:afterStep`
-- `tool:beforeExecute` / `tool:afterExecute`
-- `server:routeRegister`
-
-Plugin types:
-- **tool** — add new tool implementations
-- **provider** — add LLM provider backends
-- **hook** — attach to lifecycle events
-- **middleware** — intercept HTTP requests
-
-### SDK
-External applications can use `@aether/sdk` to create agents, run executions, and register webhooks programmatically.
-
----
-
-## Docker Deployment
-
-Aether ships with a production-ready `Dockerfile` and `docker-compose.yml` for containerized deployment:
-
-```yaml
-# docker-compose.yml
-services:
-  aether:
-    build: .
-    ports:
-      - "3001:3001"
-    volumes:
-      - ./data:/app/data
-      - /var/run/docker.sock:/var/run/docker.sock  # for sandbox execution
-    environment:
-      - PORT=3001
-      - HOST=0.0.0.0
-    restart: unless-stopped
-```
-
-```bash
-# Build and start
-docker compose up --build
-
-# Run headless (backend only, no Electron)
-docker compose up --build -d
-```
-
-The service starts on port 3001 with the health check endpoint at `/health`.
-
-The Docker image includes:
-- All 17 workspace packages compiled via `tsc -b`
-- The backend API server as the entry point (`packages/aether-backend/dist/main.js`, reads `PORT`/`HOST`)
-- `dumb-init` for proper signal handling
-
-Not yet included (roadmap): persistent volume mounts, optional Docker socket mounting, a non-root runtime user.
-
----
-
-## Testing
-
-The project uses Vitest with **585 test cases across 40 test files**:
-
-| Package | Tests | Coverage |
-|---------|-------|----------|
-| aether-utils | 140 | Async, IDs, logger, object, platform, string, validation |
-| aether-providers | 58 | All 6 providers (chat, stream, embed, errors) |
-| aether-backend | 53 | Router, server, store, websocket |
-| aether-memory | 53 | Store, vector, RAG |
-| aether-core | 46 | Event bus, lifecycle, config |
-| aether-telemetry | 43 | Logger, tracer, metrics |
-| aether-security | 38 | RBAC, roles, permissions |
-| aether-sdk | 30 | Agent, model provider, tools |
-| aether-orchestrator | 9 | Engine, builder, graph editor, visualizer |
-| docker | ~18 | Container lifecycle, exec, resource profiles |
-| ts-runtime | ~15 | VM execution, timeout, eval |
-| python-venv | ~12 | Venv CRUD, package install |
-| playwright | ~10 | Browser launch, navigation, eval |
-
----
-
-## Development
-
-```bash
-# Install
-npm install
-
-# Build all packages
-npm run build
-
-# Type-check
-npm run typecheck
-
-# Run all tests
-npm run test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Lint
-npm run lint
-
-# Format
-npm run format
-
-# Headless backend (no Electron, API only)
-npm run dev:backend
-```
+- Persist loop definitions and session transcripts to disk.
+- Per-round skill transition argument templating.
+- GUI-driven provider CRUD into the engine registry.
+- RBAC-scoped GUI access beyond admin.

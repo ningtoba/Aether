@@ -6,20 +6,27 @@
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createHash } from 'node:crypto';
-import { Router } from './router.js';
+import { Router, type RouteParams } from './router.js';
 import { WebSocketManager } from './websocket.js';
-import {
-  badRequest,
-  jsonResponse,
-  parseBody,
-  serverError,
-  DEFAULT_MAX_BODY_SIZE,
-} from './utils.js';
+import { badRequest, jsonResponse, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
 import { getHealthStatus } from './routes/health.js';
 import * as agentRoutes from './routes/agents.js';
 import * as providerRoutes from './routes/providers.js';
 import * as executionRoutes from './routes/executions.js';
-import { RBACGuard, type RoleId } from '@aether/security';
+import { RBACGuard, type RoleId } from '@aether/core';
+
+import * as engineRoutes from './routes/engine.js';
+import type { EngineService, LoopManager, SkillsService } from './engine/index.js';
+import { StaticFileServer, resolveFrontendDist } from './static/static-server.js';
+
+/** Optional engine/control-plane wiring supplied by main.ts when the engine is
+ *  available (Bun runtime). When absent the server runs without sessions/loops/
+ *  skills — the node-only test suite exercises that mode. */
+export interface EngineWiring {
+  engine: EngineService;
+  loops: LoopManager;
+  skills: SkillsService;
+}
 
 export interface AetherServerOptions {
   port?: number;
@@ -28,6 +35,10 @@ export interface AetherServerOptions {
   maxBodySize?: number;
   /** Optional API authentication + role-based authorization. */
   auth?: ServerAuthConfig;
+  /** Static file root for the web GUI (defaults to the built frontend dist). */
+  staticRoot?: string;
+  /** Optional engine control-plane (sessions/loops/skills/models). */
+  engine?: EngineWiring;
 }
 
 /** API auth for the HTTP/WebSocket server. */
@@ -52,6 +63,14 @@ export class AetherServer {
   private stopTimer: ReturnType<typeof setTimeout> | null = null;
   private rbac: RBACGuard | null = null;
   private apiKeys = new Map<string, RoleId>();
+  private engineWiring: EngineWiring | null = null;
+  private staticServer: StaticFileServer | null = null;
+
+  /** Extra fields merged into /health (realtime port, engine state, ...). */
+  healthExtras: Record<string, unknown> = {};
+
+  /** Extra realtime target injected by main.ts (the Bun-native hub). */
+  broadcastRealtime: ((type: string, payload: unknown) => void) | null = null;
 
   constructor(options: AetherServerOptions = {}) {
     this.port = options.port ?? 3001;
@@ -60,8 +79,11 @@ export class AetherServer {
     this.wsManager = new WebSocketManager();
     this.corsOrigins = ['*'];
     this.maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
+    this.engineWiring = options.engine ?? null;
     this.configureAuth(options.auth);
+    this.initStatic(options.staticRoot);
     this.registerRoutes();
+    this.wireEngineBroadcast();
   }
 
   /** Set up API keys and the RBAC guard from the auth config. */
@@ -79,9 +101,21 @@ export class AetherServer {
     }
   }
 
+  private initStatic(root?: string): void {
+    const dir = root ?? resolveFrontendDist();
+    if (dir) {
+      this.staticServer = new StaticFileServer(dir);
+    }
+  }
+
   /** True when API authentication is enabled. */
   get authEnabled(): boolean {
     return this.apiKeys.size > 0;
+  }
+
+  /** True when the embedded agent engine is wired and available. */
+  get hasEngine(): boolean {
+    return this.engineWiring !== null && this.engineWiring.engine.isAvailable;
   }
 
   /** Extract the API key supplied via Authorization: Bearer or X-API-Key. */
@@ -152,14 +186,36 @@ export class AetherServer {
     if (pathname.startsWith('/api/executions')) {
       return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'execute' };
     }
+    if (pathname.startsWith('/api/sessions')) {
+      return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'execute' };
+    }
+    if (pathname.startsWith('/api/loops')) {
+      return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'execute' };
+    }
     return null;
+  }
+
+  /** Bridge engine session/loop events to every realtime surface. */
+  private wireEngineBroadcast(): void {
+    if (!this.engineWiring) return;
+    const { engine, loops } = this.engineWiring;
+    engine.onBroadcast = (sessionId, ev) => {
+      const frame = { namespace: 'session', sessionId, event: ev };
+      this.wsManager.broadcast('engine', frame);
+      this.broadcastRealtime?.('engine', frame);
+    };
+    loops.onBroadcast = (ev) => {
+      const frame = { namespace: 'loop', event: ev };
+      this.wsManager.broadcast('engine', frame);
+      this.broadcastRealtime?.('engine', frame);
+    };
   }
 
   /** Register all API routes */
   private registerRoutes(): void {
     // Health
     this.router.get('/health', (_req, res) => {
-      jsonResponse(res, 200, getHealthStatus());
+      jsonResponse(res, 200, { ...getHealthStatus(), ...this.healthExtras });
     });
 
     // Agents
@@ -180,6 +236,40 @@ export class AetherServer {
     this.router.post('/api/executions', executionRoutes.startExecution);
     this.router.get('/api/executions/:id', executionRoutes.getExecution);
     this.router.post('/api/executions/:id/cancel', executionRoutes.cancelExecution);
+
+    // Engine control-plane (bound to the wiring when present, else 501)
+    const ctx = this.engineWiring;
+    const engineUnavailable = (_req: IncomingMessage, res: ServerResponse): void => {
+      jsonResponse(res, 501, { error: 'Agent engine not configured (requires Bun runtime)' });
+    };
+    // (req, res, params) → fn with its `ctx` argument bound
+    const bind =
+      <P extends RouteParams>(
+        fn: (
+          req: IncomingMessage,
+          res: ServerResponse,
+          params: P,
+          c: NonNullable<typeof ctx>,
+        ) => Promise<void>,
+      ) =>
+      (req: IncomingMessage, res: ServerResponse, params: P): Promise<void> =>
+        ctx ? fn(req, res, params, ctx) : Promise.resolve(engineUnavailable(req, res));
+
+    this.router.get('/api/models', bind(engineRoutes.listModels));
+    this.router.get('/api/sessions', bind(engineRoutes.listSessions));
+    this.router.post('/api/sessions', bind(engineRoutes.createSession));
+    this.router.get('/api/sessions/:id', bind(engineRoutes.getSessionInfo));
+    this.router.post('/api/sessions/:id/prompt', bind(engineRoutes.promptSession));
+    this.router.post('/api/sessions/:id/compact', bind(engineRoutes.compactSession));
+    this.router.post('/api/sessions/:id/dispose', bind(engineRoutes.disposeSession));
+    this.router.get('/api/loops', bind(engineRoutes.listLoops));
+    this.router.post('/api/loops', bind(engineRoutes.saveLoop));
+    this.router.get('/api/loops/:id', bind(engineRoutes.getLoop));
+    this.router.delete('/api/loops/:id', bind(engineRoutes.deleteLoop));
+    this.router.post('/api/loops/:id/start', bind(engineRoutes.startLoop));
+    this.router.post('/api/loops/:id/stop', bind(engineRoutes.stopLoop));
+    this.router.post('/api/loops/:id/advance', bind(engineRoutes.advanceLoop));
+    this.router.get('/api/skills', bind(engineRoutes.listSkills));
   }
 
   /** Set CORS allowed origins */
@@ -265,6 +355,9 @@ export class AetherServer {
         }
         serverError(res, 'Internal server error');
       }
+    } else if (this.staticServer && !url.startsWith('/api/')) {
+      // Non-API GET → serve the web GUI (SPA fallback handles client routes).
+      this.staticServer.serve(req, res);
     } else {
       jsonResponse(res, 404, {
         error: 'Not found',

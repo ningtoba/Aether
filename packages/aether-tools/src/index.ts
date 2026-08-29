@@ -7,6 +7,11 @@
  *
  * @module @aether/tools
  */
+// ── Sandbox executors (merged from docker / playwright / python-venv / ts-runtime) ──
+export * as docker from './sandbox-docker/index.js';
+export * as playwright from './sandbox-playwright/index.js';
+export * as python from './sandbox-python/index.js';
+export * as tsruntime from './sandbox-ts/index.js';
 
 export const VERSION = '0.1.0';
 

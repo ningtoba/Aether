@@ -12,12 +12,6 @@
   "references": [
     {
       "path": "../aether-core"
-    },
-    {
-      "path": "../aether-types"
-    },
-    {
-      "path": "../aether-utils"
     }
   ]
 }

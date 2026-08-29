@@ -22,15 +22,14 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@aether/security": "*",
-    "@aether/types": "*",
-    "@aether/utils": "*",
-    "@aether/core": "*"
+    "@aether/core": "*",
+    "@oh-my-pi/pi-coding-agent": "^18.0.10"
   },
   "devDependencies": {
+    "@types/bun": "1.4.0",
+    "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
-    "@types/node": "^22.0.0",
     "vitest": "^3.0.0"
   }
 }

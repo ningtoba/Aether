@@ -11,7 +11,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import net from 'node:net';
 import { AetherServer } from './server.js';
 import { WebSocketManager } from './websocket.js';
-import type { RoleId } from '@aether/security';
+import type { RoleId } from '@aether/core';
 
 // ---------------------------------------------------------------------------
 // Full HTTP server integration

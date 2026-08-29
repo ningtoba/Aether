@@ -1,24 +1,37 @@
 version: "3.9"
 
 services:
-  backend:
+  aether:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: aether-backend
+    container_name: aether
     ports:
-      - "3001:3001"
+      # Host 3001/3002 are commonly taken by local dev (Hermes MCP gateway on
+      # 3001). The container stays on internal 3001 (API+GUI) and 3002
+      # (realtime websocket); the host reaches the GUI at:
+      #   http://localhost:3081   (GUI + API)
+      #   ws://localhost:3082     (realtime engine events)
+      - "3081:3001"
+      - "3082:3002"
     environment:
       - NODE_ENV=production
       - PORT=3001
+      - REALTIME_PORT=3002
       - HOST=0.0.0.0
+    volumes:
+      - aether-data:/data
+      # Mount the host's omp agent config (models.yml + auth storage) into the
+      # container so the embedded engine sees your configured providers/models.
+      # Remove this line for a throwaway catalog instead.
+      - ${HOME}/.omp:/root/.omp
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3001/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-    # Mount Docker socket for container sandbox features (optional)
-    # volumes:
-    #   - /var/run/docker.sock:/var/run/docker.sock
+      start_period: 15s
+
+volumes:
+  aether-data:

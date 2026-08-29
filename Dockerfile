@@ -1,69 +1,59 @@
 # =============================================================================
-# Stage 1: Builder — full Node.js image for dependency install & TypeScript build
+# Aether — single image: backend (Bun + embedded omp engine) + web GUI.
+#
+# `docker compose up` → visit http://localhost:3081 (host port remapped;
+# the container stays on internal 3001/3002 per REALTIME_PORT).
 # =============================================================================
-FROM node:22-alpine AS builder
 
+# -----------------------------------------------------------------------------
+# Stage 1: build — Node image (has npm) for lockfile-faithful dep install +
+# tsc + vite build; artifacts are copied into the Bun runtime image.
+# -----------------------------------------------------------------------------
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 
-# Copy root manifests
+# Root + workspace manifests for layer-cached dependency resolution.
 COPY package.json package-lock.json tsconfig.json tsconfig.base.json ./
-
-# Copy workspace package manifests (for dependency resolution)
-COPY packages/aether-backend/package.json packages/aether-backend/package.json
 COPY packages/aether-core/package.json packages/aether-core/package.json
-COPY packages/aether-types/package.json packages/aether-types/package.json
-COPY packages/aether-utils/package.json packages/aether-utils/package.json
 COPY packages/aether-memory/package.json packages/aether-memory/package.json
 COPY packages/aether-orchestrator/package.json packages/aether-orchestrator/package.json
-COPY packages/aether-providers/package.json packages/aether-providers/package.json
-COPY packages/aether-sdk/package.json packages/aether-sdk/package.json
-COPY packages/aether-security/package.json packages/aether-security/package.json
-COPY packages/aether-telemetry/package.json packages/aether-telemetry/package.json
 COPY packages/aether-tools/package.json packages/aether-tools/package.json
-COPY packages/docker/package.json packages/docker/package.json
-COPY packages/playwright/package.json packages/playwright/package.json
-COPY packages/python-venv/package.json packages/python-venv/package.json
-COPY packages/ts-runtime/package.json packages/ts-runtime/package.json
-COPY packages/aether-electron/package.json packages/aether-electron/package.json
+COPY packages/aether-backend/package.json packages/aether-backend/package.json
 COPY packages/aether-frontend/package.json packages/aether-frontend/package.json
 
-# Install ALL dependencies (including devDependencies for build)
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 
-# Copy source code
 COPY packages/ packages/
 
-# Build all packages via project references
-RUN npm run build
+# Build all TypeScript packages (tsc -b --force), then the frontend bundle.
+RUN npm run build && npm run build:frontend
 
-# Prune devDependencies — keep only production deps
-RUN npm prune --omit=dev
-
-# =============================================================================
-# Stage 2: Runtime — minimal Node.js Alpine image
-# =============================================================================
-FROM node:22-alpine
-
+# -----------------------------------------------------------------------------
+# Stage 2: runtime — Bun runtime + compiled output, no toolchain.
+# The embedded omp SDK runs only under Bun.
+# -----------------------------------------------------------------------------
+FROM oven/bun:1.3.14 AS runtime
 WORKDIR /app
 
-# Install dumb-init for proper signal handling
-RUN apk add --no-cache dumb-init
+# dumb-init for clean signal handling (PID 1) + curl for the healthcheck.
+RUN apt-get update -qq && apt-get install -yqq dumb-init curl && rm -rf /var/lib/apt/lists/*
 
-# Copy built artifacts and production node_modules from builder
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=build /app/package.json ./package.json
+COPY --from=build /app/tsconfig.json ./tsconfig.json
+COPY --from=build /app/packages ./packages
+COPY --from=build /app/node_modules ./node_modules
 
-# Expose backend server port
-EXPOSE 3001
+# Envvars — the backend reads these.
+ENV NODE_ENV=production
+ENV PORT=3001
+ENV REALTIME_PORT=3002
+ENV HOST=0.0.0.0
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+EXPOSE 3001 3002
 
-# Use dumb-init to handle signals properly
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+  CMD curl --fail --silent http://127.0.0.1:3001/health || exit 1
+
 ENTRYPOINT ["dumb-init", "--"]
-
-# Start the backend server (production entrypoint, see packages/aether-backend/src/main.ts)
-CMD ["node", "packages/aether-backend/dist/main.js"]
+# Bun runtime (required by the embedded @oh-my-pi omp SDK).
+CMD ["bun", "run", "packages/aether-backend/src/main.ts"]
