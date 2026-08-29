@@ -54,7 +54,20 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
 
   const refresh = useCallback(() => {
     listLoops()
-      .then((r) => setLoops(r.loops))
+      .then((r) => {
+        setLoops(r.loops);
+        // Populate per-loop progress so the Inspect button / status tags are
+        // accurate even on a fresh page load (realtime events only fire for
+        // live activity).
+        for (const loop of r.loops) {
+          getLoop(loop.id)
+            .then((d) => {
+              const dp = d.progress;
+              if (dp) setProgress((m) => ({ ...m, [loop.id]: dp }));
+            })
+            .catch(() => {});
+        }
+      })
       .catch((e) => setError(e.message));
     listModels()
       .then((r) => setModels(r.groups))
@@ -131,7 +144,10 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
         }
         return;
       }
-      if (sid && inspect.sessionId && sid !== inspect.sessionId) return;
+      // Only fold session frames when we know which session to watch (the
+      // transcript replay covers anything already run). Without a sessionId
+      // (never-run loop) ignore all session frames.
+      if (!inspect.sessionId || !sid || sid !== inspect.sessionId) return;
       setInspectItems((it) => reduceChatFrame(it, frame));
     });
     return unsub;
@@ -564,7 +580,16 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                         </button>
                       ))}
                     <div style={{ marginTop: 8 }}>
-                      <button className="btn" onClick={() => openInspect(loop.id, p?.sessionId)}>
+                      <button
+                        className="btn"
+                        disabled={!p?.sessionId}
+                        title={
+                          p?.sessionId
+                            ? 'Inspect the loop session transcript'
+                            : 'Start the loop first'
+                        }
+                        onClick={() => openInspect(loop.id, p?.sessionId)}
+                      >
                         Inspect live chat
                       </button>
                     </div>
