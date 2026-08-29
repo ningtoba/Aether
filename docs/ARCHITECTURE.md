@@ -37,14 +37,14 @@ The omp SDK (`@oh-my-pi/pi-coding-agent`) only runs under the **Bun** runtime (i
 
 ## Package layout
 
-| Package | Depends on | Responsibilities |
-| ------- | ---------- | ---------------- |
-| `aether-core` | — | Events (`EventBus`), lifecycle, config, shared types, utils, telemetry (pino + OpenTelemetry), security (RBAC). Merged from the former types/utils/core/telemetry/security packages. |
-| `aether-memory` | `aether-core` | `MemoryStore`, `InMemoryVectorStore`, `RAGEngine`, scoped stores (episodic/semantic/task/conversation). |
-| `aether-orchestrator` | `aether-core` | LangGraph workflow graph engine, `WorkflowBuilder`, checkpoint manager, graph editor + DOT/Mermaid visualizer. |
-| `aether-tools` | `aether-core` | Tool registry, shell + Docker + Playwright + Python-venv + TS-runtime sandboxes (merged from tools/docker/playwright/python-venv/ts-runtime). |
-| `aether-backend` | all above + `@oh-my-pi/pi-coding-agent` | HTTP/WS server, engine service, loop manager, skills service, model catalog, static GUI hosting. |
-| `aether-frontend` | `aether-core` | React + Vite web GUI. |
+| Package               | Depends on                              | Responsibilities                                                                                                                                                                     |
+| --------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `aether-core`         | —                                       | Events (`EventBus`), lifecycle, config, shared types, utils, telemetry (pino + OpenTelemetry), security (RBAC). Merged from the former types/utils/core/telemetry/security packages. |
+| `aether-memory`       | `aether-core`                           | `MemoryStore`, `InMemoryVectorStore`, `RAGEngine`, scoped stores (episodic/semantic/task/conversation).                                                                              |
+| `aether-orchestrator` | `aether-core`                           | LangGraph workflow graph engine, `WorkflowBuilder`, checkpoint manager, graph editor + DOT/Mermaid visualizer.                                                                       |
+| `aether-tools`        | `aether-core`                           | Tool registry, shell + Docker + Playwright + Python-venv + TS-runtime sandboxes (merged from tools/docker/playwright/python-venv/ts-runtime).                                        |
+| `aether-backend`      | all above + `@oh-my-pi/pi-coding-agent` | HTTP/WS server, engine service, loop manager, skills service, model catalog, static GUI hosting.                                                                                     |
+| `aether-frontend`     | `aether-core`                           | React + Vite web GUI.                                                                                                                                                                |
 
 Dependency flow is strictly leaf → root: `core → memory/orchestrator/tools → backend → frontend`.
 
