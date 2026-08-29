@@ -87,6 +87,19 @@ export const createSession = (model: { provider: string; modelId: string }, cwd?
 
 export const getSession = (id: string) =>
   request<{ session: SessionSummary }>(`/api/sessions/${id}`);
+export interface SessionTranscriptEntry {
+  kind: 'user' | 'assistant' | 'thinking' | 'tool' | 'meta';
+  text?: string;
+  name?: string;
+  args?: string;
+  result?: string;
+  isError?: boolean;
+}
+
+export const getSessionTranscript = (id: string) =>
+  request<{ transcript: { id: string; entries: SessionTranscriptEntry[] } }>(
+    `/api/sessions/${id}/transcript`,
+  );
 
 export const promptSession = (id: string, message: string) =>
   request<{ accepted: boolean }>(`/api/sessions/${id}/prompt`, {
@@ -136,6 +149,8 @@ export interface LoopProgress {
   rounds: LoopRoundResult[];
   startedAt?: string;
   stopReason?: string;
+  /** Session the loop is running on — for live chat inspection. */
+  sessionId?: string;
 }
 
 export const listLoops = () => request<{ loops: LoopDefinition[] }>('/api/loops');

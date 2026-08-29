@@ -130,6 +130,16 @@ export async function getSessionInfo(
   if (!session) return notFound(res, 'Session not found');
   jsonResponse(res, 200, { session: sessionToSummary(session) });
 }
+export async function getSessionTranscript(
+  _req: IncomingMessage,
+  res: ServerResponse,
+  params: RouteParams,
+  ctx: EngineRouteContext,
+): Promise<void> {
+  const entries = ctx.engine.transcriptOf(params.id as string);
+  if (entries === null) return notFound(res, 'Session not found');
+  jsonResponse(res, 200, { transcript: { id: params.id as string, entries } });
+}
 
 export async function promptSession(
   req: IncomingMessage,

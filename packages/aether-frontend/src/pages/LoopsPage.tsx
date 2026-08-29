@@ -10,6 +10,7 @@ import {
   listModels,
   listSkills,
   listOmpSkills,
+  getSessionTranscript,
   type LoopDefinition,
   type LoopProgress,
   type LoopTransition,
@@ -17,6 +18,8 @@ import {
   type SkillRecord,
 } from '../lib/api';
 import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
+import { ChatConsole } from '../components/ChatConsole';
+import { reduceChatFrame, appendMeta, fromTranscriptEntries, type ChatItem } from '../lib/chat';
 import type { PageId } from '../App';
 
 const EMPTY: Partial<LoopDefinition> = {
@@ -45,6 +48,9 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [rt, setRt] = useState<RealtimeClient | null>(null);
+  /** Loop live-chat inspector: { loopId, sessionId } to stream. */
+  const [inspect, setInspect] = useState<{ loopId: string; sessionId?: string } | null>(null);
+  const [inspectItems, setInspectItems] = useState<ChatItem[]>([]);
 
   const refresh = useCallback(() => {
     listLoops()
@@ -108,6 +114,63 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
     });
     return unsub;
   }, [rt]);
+  // Loop live-chat inspector: stream the loop's session transcript live.
+  useEffect(() => {
+    if (!rt || !inspect) return;
+    const unsub = rt.subscribe((frame: RealtimeFrame) => {
+      const sid = frame.payload?.sessionId;
+      if (frame.payload?.namespace === 'loop') {
+        const ev = frame.payload.event as Record<string, unknown> & {
+          kind?: string;
+          loopId?: string;
+        };
+        if (ev.loopId !== inspect.loopId) return;
+        const kind = ev.kind ?? '';
+        if (/round_start|transition|gated|stop|completed|error/.test(kind)) {
+          setInspectItems((it) => appendMeta(it, `── ${kind} ──`));
+        }
+        return;
+      }
+      if (sid && inspect.sessionId && sid !== inspect.sessionId) return;
+      setInspectItems((it) => reduceChatFrame(it, frame));
+    });
+    return unsub;
+  }, [rt, inspect]);
+
+  const openInspect = (loopId: string, sessionId?: string) => {
+    setInspect({ loopId, sessionId });
+    setInspectItems([]);
+    // Replay the loop's session transcript — works even for already-completed
+    // loops on a fresh page where the progress map isn't loaded yet.
+    const loadSession = (sid: string | undefined) => {
+      if (!sid) {
+        setInspectItems((it) => [
+          ...it,
+          { id: `meta-${Date.now()}`, kind: 'meta', text: '(no run started yet — press Start)' },
+        ]);
+        return;
+      }
+      getSessionTranscript(sid)
+        .then((d) => setInspectItems(fromTranscriptEntries(d.transcript.entries)))
+        .catch(() => {});
+    };
+    if (sessionId) {
+      loadSession(sessionId);
+    } else {
+      getLoop(loopId)
+        .then((d) => {
+          const sid = d.progress?.sessionId;
+          setInspect((prev) => (prev ? { ...prev, sessionId: sid } : prev));
+          loadSession(sid);
+        })
+        .catch(() => {});
+    }
+  };
+
+  const closeInspect = () => {
+    setInspect(null);
+    setInspectItems([]);
+  };
 
   const modelOptions = models.flatMap((g) => g.models.map((m) => ({ g: g.provider, m })));
   const previewRounds = [1, 2, 3].map((n) => (form.prompt ?? '').replace(/\{round\}/g, String(n)));
@@ -500,6 +563,11 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                           Start
                         </button>
                       ))}
+                    <div style={{ marginTop: 8 }}>
+                      <button className="btn" onClick={() => openInspect(loop.id, p?.sessionId)}>
+                        Inspect live chat
+                      </button>
+                    </div>
                   </div>
                 );
               })}
@@ -530,6 +598,44 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
           </div>
         </div>
       </div>
+
+      {inspect && (
+        <div
+          className="fill"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 50,
+            background: 'var(--bg)',
+            padding: 18,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <div className="chat" style={{ minHeight: 0 }}>
+            <ChatConsole
+              items={inspectItems}
+              header={
+                <>
+                  <span style={{ fontWeight: 600 }}>Loop: {inspect.loopId}</span>
+                  {inspect.sessionId && (
+                    <span className="tag" style={{ borderColor: 'var(--green)' }}>
+                      session {inspect.sessionId}
+                    </span>
+                  )}
+                  <span className="muted" style={{ fontSize: 11 }}>
+                    streaming live
+                  </span>
+                  <div className="spacer" />
+                  <button className="btn" onClick={closeInspect}>
+                    Close
+                  </button>
+                </>
+              }
+            />
+          </div>
+        </div>
+      )}
     </>
   );
 }

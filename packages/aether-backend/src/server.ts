@@ -267,6 +267,7 @@ export class AetherServer {
     this.router.get('/api/sessions', bind(engineRoutes.listSessions));
     this.router.post('/api/sessions', bind(engineRoutes.createSession));
     this.router.get('/api/sessions/:id', bind(engineRoutes.getSessionInfo));
+    this.router.get('/api/sessions/:id/transcript', bind(engineRoutes.getSessionTranscript));
     this.router.post('/api/sessions/:id/prompt', bind(engineRoutes.promptSession));
     this.router.post('/api/sessions/:id/compact', bind(engineRoutes.compactSession));
     this.router.post('/api/sessions/:id/dispose', bind(engineRoutes.disposeSession));

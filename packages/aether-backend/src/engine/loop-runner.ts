@@ -83,6 +83,7 @@ export class LoopRunner {
     rounds: LoopRoundResult[];
     startedAt?: string;
     stopReason?: string;
+    sessionId?: string;
   } {
     return {
       id: this.definition.id,
@@ -91,6 +92,7 @@ export class LoopRunner {
       rounds: this.state.rounds,
       startedAt: this.state.startedAt,
       stopReason: this.state.reason,
+      sessionId: this.session.id,
     };
   }
 

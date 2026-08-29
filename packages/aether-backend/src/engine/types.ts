@@ -45,8 +45,8 @@ export type SessionTurnEvent =
   | { kind: 'message_start'; role: 'user' | 'assistant' | 'system'; turn: number }
   | { kind: 'message_update'; role: 'assistant' | 'thinking'; delta: string; turn: number }
   | { kind: 'message_end'; role: 'assistant'; text: string; stopReason?: string; turn: number }
-  | { kind: 'tool_call'; name: string; args?: string }
-  | { kind: 'tool_result'; name: string; isError?: boolean; content?: string }
+  | { kind: 'tool_call'; name: string; args?: string; turn?: number }
+  | { kind: 'tool_result'; name: string; isError?: boolean; content?: string; turn?: number }
   | { kind: 'agent_end'; isTerminal: boolean }
   | { kind: 'session_error'; message: string };
 
@@ -54,6 +54,19 @@ export interface SessionMessage {
   role: 'user' | 'assistant' | 'system';
   text: string;
   timestamp: string;
+}
+
+/** Rich transcript entry reconstructed from an omp session journal. */
+export type SessionTranscriptEntry =
+  | { kind: 'user'; text: string }
+  | { kind: 'assistant'; text: string }
+  | { kind: 'thinking'; text: string }
+  | { kind: 'tool'; name: string; args?: string; result?: string; isError?: boolean }
+  | { kind: 'meta'; text: string };
+
+export interface SessionTranscript {
+  id: string;
+  entries: SessionTranscriptEntry[];
 }
 
 /* ─── Loops ──────────────────────────────────────────────────────────── */
@@ -104,6 +117,8 @@ export interface LoopProgress {
   rounds: LoopRoundResult[];
   startedAt?: string;
   stopReason?: string;
+  /** Session the loop is running on (for live chat inspection). */
+  sessionId?: string;
 }
 
 /** Emitted by the LoopRunner to the broadcast hub. */

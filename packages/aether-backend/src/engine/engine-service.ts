@@ -19,6 +19,7 @@ import type {
   SessionTurnEvent,
   SessionMessage,
 } from './types.js';
+import type { SessionTranscriptEntry } from './types.js';
 
 /** Thrown when an engine operation is attempted but the omp SDK cannot run
  *  (e.g. backend running under plain Node, or install incomplete). */
@@ -34,6 +35,38 @@ export class EngineUnavailableError extends Error {
 /** Detect whether we are running under the Bun runtime (the omp SDK requires it). */
 export function isBunRuntime(): boolean {
   return typeof process.versions?.bun === 'string';
+}
+
+/** Compact JSON rendering of tool args (one line, truncated for the console). */
+function stringifyArgs(args: unknown): string {
+  if (args === undefined) return '';
+  if (typeof args === 'string') return args;
+  const s = safeStringify(args);
+  return s.length > 600 ? `${s.slice(0, 600)}…` : s;
+}
+
+/** JSON.stringify that never throws (BigInt, cycles, etc.). */
+function safeStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+  } catch {
+    return String(value);
+  }
+}
+/** Extract readable text from a message content: string or text blocks. */
+function extractContentText(content: unknown, includeToolJson: boolean): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const parts: string[] = [];
+    for (const block of content) {
+      if (!block || typeof block !== 'object') continue;
+      const b = block as Record<string, unknown>;
+      if (b?.type === 'text' && typeof b?.text === 'string') parts.push(b.text);
+      else if (includeToolJson) parts.push(safeStringify(block));
+    }
+    return parts.join('\n');
+  }
+  return '';
 }
 
 interface OmpModelLike {
@@ -60,6 +93,8 @@ interface OmpSessionLike {
   };
   getAllToolNames?(): string[];
   getEnabledToolNames?(): string[];
+  /** Journaled messages (AgentMessage[]): stable chronological order. */
+  messages?: unknown[];
 }
 
 /** A live agent session handle exposed to the API layer. */
@@ -115,6 +150,54 @@ export class EngineSession {
       modelId: (m.modelId ?? m.id ?? '') as string,
     };
   }
+  /**
+   * Reconstruct a rich transcript from the session's message journal.
+   * Returns the same entry shape the realtime frames use, so a GUI can replay
+   * an already-run session (e.g. loop inspection) before live frames arrive.
+   */
+  listTranscript(): SessionTranscriptEntry[] {
+    const omp = this.omp;
+    const messages = omp?.messages;
+    if (!Array.isArray(messages)) return [];
+    const out: SessionTranscriptEntry[] = [];
+    for (const raw of messages) {
+      if (!raw || typeof raw !== 'object') continue;
+      const m = raw as Record<string, unknown>;
+      const role = m?.role;
+      const content = m?.content;
+      if (role === 'user') {
+        out.push({ kind: 'user', text: extractContentText(content, false) });
+      } else if (role === 'assistant') {
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            const b = block as Record<string, unknown>;
+            const btype = b?.type;
+            if (btype === 'thinking') {
+              out.push({ kind: 'thinking', text: String(b?.thinking ?? b?.text ?? '') });
+            } else if (btype === 'text') {
+              out.push({ kind: 'assistant', text: String(b?.text ?? '') });
+            } else if (btype === 'toolCall' || btype === 'toolCallBlock') {
+              out.push({
+                kind: 'tool',
+                name: String(b?.toolName ?? b?.name ?? 'tool'),
+                args: safeStringify(b?.args),
+              });
+            }
+          }
+        } else if (typeof content === 'string') {
+          out.push({ kind: 'assistant', text: content });
+        }
+      } else if (role === 'toolResult') {
+        out.push({
+          kind: 'tool',
+          name: String(m?.toolName ?? 'tool'),
+          result: extractContentText(content, true),
+          isError: m?.isError === true,
+        });
+      }
+    }
+    return out;
+  }
 
   get messageCount(): number {
     return this.count;
@@ -145,12 +228,49 @@ export class EngineSession {
         break;
       }
       case 'message_update': {
-        const delta = (e?.assistantMessageEvent as Record<string, unknown>)?.delta;
-        const block = (e?.assistantMessageEvent as Record<string, unknown>)?.block;
-        const kind = block === 'thinking' ? 'thinking' : 'assistant';
+        const ame = (e?.assistantMessageEvent ?? {}) as Record<string, unknown>;
+        const delta = ame?.delta;
+        // omp streams separate thinking_delta vs text_delta blocks; the block
+        // kind lives in `.type`, not `.block`.
+        const kind = ame?.type === 'thinking_delta' ? 'thinking' : 'assistant';
         if (typeof delta === 'string') {
           this.onEvent({ kind: 'message_update', role: kind, delta, turn: 0 });
         }
+        break;
+      }
+      case 'tool_execution_start': {
+        const args = e?.args;
+        this.onEvent({
+          kind: 'tool_call',
+          name: String(e?.toolName ?? 'unknown'),
+          args: stringifyArgs(args),
+          turn: 0,
+        });
+        break;
+      }
+      case 'tool_execution_update': {
+        // Optional live partial output while a tool runs.
+        const partial = e?.partialResult;
+        if (partial !== undefined) {
+          this.onEvent({
+            kind: 'tool_result',
+            name: String(e?.toolName ?? 'unknown'),
+            isError: false,
+            content: typeof partial === 'string' ? partial : safeStringify(partial),
+            turn: 0,
+          });
+        }
+        break;
+      }
+      case 'tool_execution_end': {
+        const result = e?.result;
+        this.onEvent({
+          kind: 'tool_result',
+          name: String(e?.toolName ?? 'unknown'),
+          isError: e?.isError === true,
+          content: typeof result === 'string' ? result : safeStringify(result),
+          turn: 0,
+        });
         break;
       }
       case 'message_end': {
@@ -380,5 +500,12 @@ export class EngineService {
     const session = this.sessions.get(id);
     if (!session) throw new Error(`Session not found: ${id}`);
     return [];
+  }
+
+  /** Rich transcript from a live session's journal (loop/session inspection). */
+  transcriptOf(id: string): SessionTranscriptEntry[] | null {
+    const session = this.sessions.get(id);
+    if (!session) return null;
+    return session.listTranscript();
   }
 }
