@@ -1,3 +1,37 @@
+# Aether
+
+Autonomous AI orchestration platform — a complete web GUI for the [Oh My Pi](https://github.com/can1357/oh-my-pi) coding agent (a fork of [Pi](https://github.com/badlogic/pi-mono), MIT).
+
+One command, open a browser, drive the platform. No desktop app, no separate services: sessions, loops, skills, every AI provider, and all of omp's configuration behind a single web app and one HTTP/WebSocket API.
+
+---
+
+## Quick Start
+
+### Docker (recommended)
+
+```bash
+docker compose up -d
+# GUI + API  → http://localhost:3081
+# realtime   → ws://localhost:3082
+```
+
+> Host ports are remapped to `3081`/`3082` because port `3001` on typical dev hosts is held by other local services (e.g. the Hermes MCP gateway). The container itself listens on internal `3001`/`3002`, and mounts your host omp config (`~/.omp`) so the engine sees your models.
+
+### Local development
+
+```bash
+npm install
+npm run build             # tsc -b --force
+npm run build:frontend    # vite build
+bun run packages/aether-backend/src/main.ts
+# → http://localhost:3001  ·  ws://localhost:3002
+```
+
+Requires **Bun ≥ 1.3.14** at runtime (the agent engine only runs under Bun) and **Node 22+** for tooling/tests.
+
+---
+
 ## What you get
 
 | Capability    | What it does                                                                                                                                                                                                                                                |
@@ -10,6 +44,18 @@
 | **Agents**    | omp's real agent definitions (bundled `task`/`scout`/`reviewer`/… + user/project agent markdown) with source, description, and inspectable bodies.                                                                                                          |
 | **Settings**  | Schema-driven editor generated from omp's own `SETTINGS_SCHEMA` — every config knob across all 10 tabs, written back to your user config.                                                                                                                   |
 | **Web GUI**   | Dashboard, Sessions, Loops, Skills, Models, Providers, Agents, Settings — every API capability has a view.                                                                                                                                                  |
+
+---
+
+## Screenshots
+
+| Dashboard                                                                                                                                                                             | Sessions                                                                                                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/dashboard.jpg" width="420" alt="Aether dashboard showing live counts of sessions, models, providers and skills, plus omp version and engine capabilities"> | <img src="docs/screenshots/sessions.jpg" width="270" alt="Aether sessions console with model picker, live streaming transcript, and persisted on-disk session browser"> |
+
+| Settings (schema-driven editor)                                                                                                                    |
+| -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| <img src="docs/screenshots/settings.jpg" width="300" alt="Aether settings page rendering omp's full configuration schema as an editable web form"> |
 
 ---
 
