@@ -36,10 +36,12 @@ export interface HealthStatus {
   status: string;
   version: string;
   uptime: number;
+  memory?: { rss: number; heapTotal: number; heapUsed: number; external: number };
   providers: { configured: number; healthy: number };
   timestamp: string;
   realtime?: { port: number };
   engine?: { available: boolean; error?: string | null };
+  omp?: { version?: string };
 }
 
 export const getHealth = () => request<HealthStatus>('/health');
@@ -227,3 +229,97 @@ export const startExecution = (data: Record<string, unknown>) =>
   });
 export const cancelExecution = (id: string) =>
   request<{ execution: ExecutionRecord }>(`/api/executions/${id}/cancel`, { method: 'POST' });
+
+/* ── Omp facade (settings / providers / agents / skills / disk sessions) ── */
+
+export interface FacadeCapability {
+  name: string;
+  available: boolean;
+  error?: string;
+}
+
+export interface FacadeStatus {
+  available: boolean;
+  runtime: 'bun' | 'node';
+  version?: string;
+  error?: string;
+  capabilities: FacadeCapability[];
+}
+
+export const getFacadeStatus = () => request<{ status: FacadeStatus }>('/api/omp/status');
+
+export interface SettingDef {
+  path: string;
+  type: string;
+  label?: string;
+  description?: string;
+  tab?: string;
+  group?: string;
+  defaultValue?: unknown;
+  enumValues?: string[];
+  options?: Array<{ value: string; label: string; description?: string }>;
+  credential?: boolean;
+}
+
+export interface SettingsSchema {
+  tabs: Array<{ id: string; label: string }>;
+  groups: Record<string, string[]>;
+  settings: SettingDef[];
+}
+
+export const getSettingsSchema = () => request<{ schema: SettingsSchema }>('/api/omp/settings');
+export const getSettingsValues = () =>
+  request<{ values: Record<string, unknown> }>('/api/omp/settings/values');
+export const setSetting = (path: string, value: unknown) =>
+  request<{ ok: boolean }>('/api/omp/settings', {
+    method: 'PUT',
+    body: JSON.stringify({ path, value }),
+  });
+
+export interface FacadeProvider {
+  id: string;
+  name: string;
+  baseUrl?: string;
+  modelCount: number;
+  models: string[];
+  authenticated: boolean;
+  discoverable: boolean;
+}
+
+export const listFacadeProviders = () =>
+  request<{ providers: FacadeProvider[] }>('/api/omp/providers');
+
+export interface AgentDef {
+  name: string;
+  description?: string;
+  source: 'bundled' | 'user' | 'project';
+  path?: string;
+  body?: string;
+  frontmatter?: Record<string, unknown>;
+}
+
+export const listOmpAgents = () => request<{ agents: AgentDef[] }>('/api/omp/agents');
+export const listOmpSkills = () =>
+  request<{ skills: SkillRecord[]; warnings?: string }>('/api/omp/skills');
+
+export interface DiskSessionInfo {
+  id: string;
+  path: string;
+  cwd: string;
+  name: string;
+  displayName?: string;
+  modified?: string;
+  status?: string;
+  firstUserMessage?: string;
+}
+
+export const listDiskSessions = () => request<{ sessions: DiskSessionInfo[] }>('/api/omp/sessions');
+export const readDiskSession = (path: string) =>
+  request<{
+    transcript: {
+      id: string;
+      path: string;
+      name?: string;
+      messages: Array<{ role: string; text: string; timestamp?: string }>;
+    };
+  }>(`/api/omp/sessions/read?path=${encodeURIComponent(path)}`);

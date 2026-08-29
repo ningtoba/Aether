@@ -110,5 +110,18 @@ describe('AetherServer', () => {
       const router = (server as any).router;
       expect(router.match('GET', '/api/nonexistent')).toBeNull();
     });
+
+    it('should register all omp facade routes', () => {
+      const router = (server as any).router;
+      expect(router.match('GET', '/api/omp/status')).not.toBeNull();
+      expect(router.match('GET', '/api/omp/settings')).not.toBeNull();
+      expect(router.match('GET', '/api/omp/settings/values')).not.toBeNull();
+      expect(router.match('PUT', '/api/omp/settings')).not.toBeNull();
+      expect(router.match('GET', '/api/omp/providers')).not.toBeNull();
+      expect(router.match('GET', '/api/omp/agents')).not.toBeNull();
+      expect(router.match('GET', '/api/omp/skills')).not.toBeNull();
+      expect(router.match('GET', '/api/omp/sessions')).not.toBeNull();
+      expect(router.match('GET', '/api/omp/sessions/read')).not.toBeNull();
+    });
   });
 });

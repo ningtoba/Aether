@@ -6,8 +6,11 @@ import {
   promptSession,
   compactSession,
   listModels,
+  listDiskSessions,
+  readDiskSession,
   type SessionSummary,
   type ModelGroup,
+  type DiskSessionInfo,
 } from '../lib/api';
 import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
 
@@ -25,12 +28,15 @@ const COLORS: Record<string, string> = {
 
 export function SessionsPage() {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  const [diskSessions, setDiskSessions] = useState<DiskSessionInfo[]>([]);
   const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [model, setModel] = useState('local-server/deepseek-ai/DeepSeek-V4-Flash-0731');
   const [current, setCurrent] = useState<string | null>(null);
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState('');
   const [rt, setRt] = useState<RealtimeClient | null>(null);
+  const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed'>('connecting');
+  const [viewingDisk, setViewingDisk] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const consoleRef = useRef<HTMLDivElement>(null);
   const accRef = useRef<Record<string, string>>({});
@@ -39,6 +45,11 @@ export function SessionsPage() {
     listSessions()
       .then((r) => setSessions(r.sessions))
       .catch((e) => setError(e.message));
+    listDiskSessions()
+      .then((r) => setDiskSessions(r.sessions))
+      .catch(() => {
+        /* disk-session browsing is optional (non-Bun mode) */
+      });
   }, []);
 
   useEffect(() => {
@@ -59,25 +70,30 @@ export function SessionsPage() {
       .catch(() => {});
   }, []);
 
+  // Patch a client-side connection-state echo into the realtime client.
+  useEffect(() => {
+    if (!rt) return;
+    const iv = setInterval(() => {
+      setWsState(rt.connected ? 'open' : 'connecting');
+    }, 500);
+    return () => clearInterval(iv);
+  }, [rt]);
+
   useEffect(() => {
     if (!rt) return;
     const unsub = rt.subscribe((frame: RealtimeFrame) => {
       if (frame.payload?.namespace !== 'session') return;
       const sid = frame.payload.sessionId;
-      if (current && current !== sid) return;
+      if (!current || current !== sid) return;
       const ev = frame.payload.event;
       const kind = ev?.kind;
-      if (kind === 'message_end') {
-        const text = String(ev.text ?? '');
-        setMsgs((m) => [...m, { who: 'assistant', text }]);
-      } else if (kind === 'message_update') {
+      if (kind === 'message_update') {
         const role = ev.role === 'thinking' ? 'thinking' : 'assistant';
         const acc = accRef.current;
         const key = `${sid}:${role}`;
         const prev = acc[key] ?? '';
         acc[key] = prev + String(ev.delta ?? '');
-        // Throttle: only flush when the delta ends a block or 200ms lapsed.
-        // Simple approach: update an accumulator message live.
+        // Flush the accumulated text into the live console message.
         setMsgs((m) => {
           const next = [...m];
           const last = next[next.length - 1];
@@ -87,16 +103,32 @@ export function SessionsPage() {
           }
           return [...next, { who: role, text: acc[key] }];
         });
+      } else if (kind === 'message_end') {
+        // Finalize: replace the streamed accumulator with the authoritative
+        // full text (the model may emit a single end with the whole reply).
+        const text = String(ev.text ?? '');
+        const role = 'assistant';
+        const acc = accRef.current;
+        acc[`${sid}:assistant`] = '';
+        setMsgs((m) => {
+          const next = [...m];
+          const last = next[next.length - 1];
+          if (last && last.who === role) {
+            next[next.length - 1] = { ...last, text: text || last.text };
+            return next;
+          }
+          return [...next, { who: role, text: text || '(empty reply)' }];
+        });
       } else if (kind === 'tool_call') {
-        setMsgs((m) => [...m, { who: 'tool', text: `🔧 call ${ev.name}` }]);
+        setMsgs((m) => [...m, { who: 'tool', text: `🔧 call ${String(ev.name ?? '')}` }]);
       } else if (kind === 'tool_result') {
-        setMsgs((m) => [...m, { who: 'tool', text: `↩ result ${ev.name}` }]);
+        setMsgs((m) => [...m, { who: 'tool', text: `↩ result ${String(ev.name ?? '')}` }]);
       } else if (kind === 'turn_start') {
         setMsgs((m) => [...m, { who: 'meta', text: '── turn start ──' }]);
       } else if (kind === 'agent_end') {
         setMsgs((m) => [...m, { who: 'meta', text: '── agent end ──' }]);
       } else if (kind === 'session_error') {
-        setMsgs((m) => [...m, { who: 'meta', text: `⚠ error: ${ev.message}` }]);
+        setMsgs((m) => [...m, { who: 'meta', text: `⚠ error: ${String(ev.message ?? '')}` }]);
       }
     });
     return unsub;
@@ -113,8 +145,34 @@ export function SessionsPage() {
     try {
       const { session } = await createSession({ provider, modelId });
       setCurrent(session.id);
+      setViewingDisk(null);
       setMsgs([]);
+      accRef.current = {};
       refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  const openHistory = async (s: SessionSummary) => {
+    setCurrent(s.id);
+    setViewingDisk(null);
+    setMsgs([]);
+    accRef.current = {};
+  };
+
+  const openDiskSession = async (info: DiskSessionInfo) => {
+    try {
+      const { transcript } = await readDiskSession(info.path);
+      setMsgs(
+        transcript.messages.map((m) => ({
+          who: (m.role === 'user' ? 'user' : 'assistant') as Msg['who'],
+          text: m.text,
+        })),
+      );
+      setViewingDisk(info.path);
+      setCurrent(null);
+      accRef.current = {};
     } catch (e) {
       setError((e as Error).message);
     }
@@ -143,9 +201,12 @@ export function SessionsPage() {
     await disposeSession(current).catch(() => {});
     accRef.current = {};
     setCurrent(null);
+    setViewingDisk(null);
     setMsgs([]);
     refresh();
   };
+
+  const wsColor = wsState === 'open' ? 'var(--green)' : 'var(--yellow)';
 
   return (
     <>
@@ -159,17 +220,19 @@ export function SessionsPage() {
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: '260px 1fr' }}>
+      <div className="grid" style={{ gridTemplateColumns: '300px 1fr' }}>
         <div className="card">
           <h3>New session</h3>
           <div className="field">
             <label>Model</label>
             <select className="select" value={model} onChange={(e) => setModel(e.target.value)}>
-              {groups.flatMap((g) => g.models.map((m) => ({ g: g.provider, m }))).map(({ g, m }) => (
-                <option key={`${g}/${m.id}`} value={`${g}/${m.id}`}>
-                  {g}/{m.id}
-                </option>
-              ))}
+              {groups
+                .flatMap((g) => g.models.map((m) => ({ g: g.provider, m })))
+                .map(({ g, m }) => (
+                  <option key={`${g}/${m.id}`} value={`${g}/${m.id}`}>
+                    {g}/{m.id}
+                  </option>
+                ))}
             </select>
           </div>
           <button className="btn primary" onClick={openSession}>
@@ -183,10 +246,7 @@ export function SessionsPage() {
                 <button
                   className={`btn ${current === s.id ? 'primary' : ''}`}
                   style={{ flex: 1 }}
-                  onClick={() => {
-                    setCurrent(s.id);
-                    setMsgs([]);
-                  }}
+                  onClick={() => openHistory(s)}
                 >
                   {s.id}
                 </button>
@@ -195,13 +255,41 @@ export function SessionsPage() {
                 </span>
               </div>
             ))}
-            {sessions.length === 0 && <span className="muted">No sessions yet</span>}
+            {sessions.length === 0 && <span className="muted">No live sessions yet</span>}
+          </div>
+
+          <h3 style={{ marginTop: 18 }}>Persisted (omp on disk)</h3>
+          <div className="stack">
+            {diskSessions.slice(0, 30).map((s) => (
+              <button
+                key={s.path}
+                className={`btn ${viewingDisk === s.path ? 'primary' : ''}`}
+                style={{ textAlign: 'left' }}
+                onClick={() => openDiskSession(s)}
+                title={s.path}
+              >
+                <span style={{ display: 'block' }}>{s.displayName || s.name || s.id}</span>
+                <span className="muted" style={{ display: 'block', fontSize: 11 }}>
+                  {s.cwd}
+                </span>
+              </button>
+            ))}
+            {diskSessions.length === 0 && <span className="muted">No persisted sessions</span>}
           </div>
         </div>
 
         <div className="card">
           <div className="row" style={{ marginBottom: 10 }}>
-            <h3 style={{ margin: 0 }}>{current ?? 'No active session'}</h3>
+            <h3 style={{ margin: 0 }}>{current ?? viewingDisk ?? 'No active session'}</h3>
+            <span
+              className="tag"
+              style={{
+                borderColor: wsColor,
+                color: wsState === 'open' ? 'var(--green)' : 'var(--yellow)',
+              }}
+            >
+              realtime {wsState}
+            </span>
             <div className="spacer" />
             {current && (
               <>
@@ -213,13 +301,28 @@ export function SessionsPage() {
                 </button>
               </>
             )}
+            {current && (
+              <button className="btn" onClick={close}>
+                Close
+              </button>
+            )}
           </div>
           <div className="console" ref={consoleRef}>
             {msgs.length === 0 && <div className="meta">(open a session and prompt it)</div>}
             {msgs.map((m, i) => (
               <div key={i} className="eq">
                 <span className="who">{m.who}</span>
-                <span className={m.who}>{m.text}</span>
+                <pre
+                  style={{
+                    margin: 0,
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                    fontFamily: 'inherit',
+                    fontSize: 13,
+                  }}
+                >
+                  {m.text}
+                </pre>
               </div>
             ))}
           </div>

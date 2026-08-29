@@ -646,3 +646,49 @@ describe('AetherServer resilience', () => {
     expect(badName.status).toBe(400);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Omp facade routes (node mode → engine unreachable → 501, never a crash)
+// ---------------------------------------------------------------------------
+describe('omp facade routes in node mode', () => {
+  let server: AetherServer;
+  beforeEach(() => {
+    server = new AetherServer({ port: 0, host: '127.0.0.1' });
+  });
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  it('degrades every facade route to a 501 when the engine is absent', async () => {
+    await server.start();
+    const base = `http://127.0.0.1:${server.getPort()}`;
+    const cases: Array<[string, string]> = [
+      ['GET', '/api/omp/status'],
+      ['GET', '/api/omp/settings'],
+      ['GET', '/api/omp/settings/values'],
+      ['GET', '/api/omp/providers'],
+      ['GET', '/api/omp/agents'],
+      ['GET', '/api/omp/skills'],
+      ['GET', '/api/omp/sessions'],
+    ];
+    for (const [method, path] of cases) {
+      const res = await fetch(`${base}${path}`, { method });
+      expect(res.status).toBe(501);
+      const body = (await res.json()) as { error?: string };
+      expect(body.error).toMatch(/engine not configured/i);
+    }
+  });
+
+  it('degrades a settings write to 501 before body validation in node mode', async () => {
+    // With no engine wiring, the facade route is 501 (unavailable), matching
+    // the degradation contract of every other engine-bound route.
+    await server.start();
+    const base = `http://127.0.0.1:${server.getPort()}`;
+    const res = await fetch(`${base}/api/omp/settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: true }),
+    });
+    expect(res.status).toBe(501);
+  });
+});

@@ -49,7 +49,7 @@ In production the backend serves the compiled frontend from `packages/aether-fro
 ## Tests & checks
 
 ```bash
-npm test                 # 579 vitest tests across the 6 packages
+npm test                 # 582 vitest tests across the 6 packages
 npm run test:e2e         # e2e tests (backend integration, WS frames)
 npm run build            # full monorepo typecheck
 npm run lint             # eslint (0 errors)

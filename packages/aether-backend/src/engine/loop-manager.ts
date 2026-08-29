@@ -9,16 +9,60 @@ import type { LoopDefinition, LoopEvent, LoopProgress } from './types.js';
 import { LoopRunner } from './loop-runner.js';
 import type { EngineService, EngineSession } from './engine-service.js';
 import type { SkillsService } from './skills.js';
+import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+
+export interface LoopManagerOptions {
+  /** Directory for persistent loop definitions (JSON). Omit for in-memory only. */
+  storeDir?: string;
+}
 
 export class LoopManager {
   private definitions = new Map<string, LoopDefinition>();
   private runners = new Map<string, LoopRunner>();
   private engine: EngineService;
   private skills: SkillsService;
+  private storeFile: string | null = null;
 
-  constructor(engine: EngineService, skills: SkillsService) {
+  constructor(engine: EngineService, skills: SkillsService, opts: LoopManagerOptions = {}) {
     this.engine = engine;
     this.skills = skills;
+    if (opts.storeDir) {
+      try {
+        mkdirSync(opts.storeDir, { recursive: true });
+        this.storeFile = join(opts.storeDir, 'loops.json');
+        this.loadFromDisk();
+      } catch {
+        // Persistence is best-effort; fall back to in-memory.
+        this.storeFile = null;
+      }
+    }
+  }
+
+  /** Load loop definitions persisted on disk (e.g. from a previous boot). */
+  private loadFromDisk(): void {
+    if (!this.storeFile || !existsSync(this.storeFile)) return;
+    try {
+      const parsed = JSON.parse(readFileSync(this.storeFile, 'utf8')) as unknown;
+      const arr = Array.isArray(parsed) ? parsed : [];
+      for (const raw of arr) {
+        if (isLoopDefinition(raw)) {
+          this.definitions.set(raw.id, raw);
+        }
+      }
+    } catch {
+      /* corrupt store — keep in-memory only */
+    }
+  }
+
+  /** Write all loop definitions to disk (best-effort). */
+  private persist(): void {
+    if (!this.storeFile) return;
+    try {
+      writeFileSync(this.storeFile, JSON.stringify(Array.from(this.definitions.values()), null, 2));
+    } catch {
+      /* best-effort */
+    }
   }
 
   /** Broadcast consumer installed by the API layer. */
@@ -37,6 +81,7 @@ export class LoopManager {
     const id = definition.id || crypto.randomUUID();
     const saved: LoopDefinition = { ...definition, id };
     this.definitions.set(id, saved);
+    this.persist();
     return saved;
   }
 
@@ -46,7 +91,9 @@ export class LoopManager {
       return false; // cannot delete a running loop
     }
     this.runners.delete(id);
-    return this.definitions.delete(id);
+    const removed = this.definitions.delete(id);
+    if (removed) this.persist();
+    return removed;
   }
 
   /** Start (or resume) a defined loop on a fresh session. */
@@ -122,4 +169,22 @@ export class LoopManager {
   private broadcast(ev: LoopEvent): void {
     if (this.onBroadcast) this.onBroadcast(ev);
   }
+}
+
+/** Runtime shape guard for loop definitions loaded from the on-disk store. */
+function isLoopDefinition(value: unknown): value is LoopDefinition {
+  if (!value || typeof value !== 'object') return false;
+  const v = value as Record<string, unknown>;
+  return typeof v.id === 'string' && typeof v.prompt === 'string' && isProviderModel(v.model);
+}
+
+function isProviderModel(value: unknown): value is { provider: string; modelId: string } {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    'provider' in value &&
+    typeof value.provider === 'string' &&
+    'modelId' in value &&
+    typeof value.modelId === 'string'
+  );
 }

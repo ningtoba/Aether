@@ -68,8 +68,12 @@
   flex-shrink: 0;
 }
 
-.nav-item .dot.engine { background: var(--green); }
-.nav-item .dot.experiment { background: var(--accent); }
+.nav-item .dot.engine {
+  background: var(--green);
+}
+.nav-item .dot.experiment {
+  background: var(--accent);
+}
 
 .main {
   flex: 1;
@@ -99,9 +103,20 @@
   margin: 0 0 10px;
   font-size: 14px;
 }
+.card .big {
+  font-size: 34px;
+  font-weight: 600;
+  line-height: 1.1;
+  margin-bottom: 4px;
+}
 
-.muted { color: var(--muted); }
-.mono { font-family: var(--mono); font-size: 12px; }
+.muted {
+  color: var(--muted);
+}
+.mono {
+  font-family: var(--mono);
+  font-size: 12px;
+}
 
 .btn {
   background: var(--panel-2);
@@ -113,12 +128,25 @@
   cursor: pointer;
 }
 
-.btn:hover { border-color: var(--accent-2); }
-.btn.primary { background: var(--accent-2); border-color: var(--accent-2); color: #fff; }
-.btn.danger { color: var(--red); }
-.btn:disabled { opacity: 0.5; cursor: default; }
+.btn:hover {
+  border-color: var(--accent-2);
+}
+.btn.primary {
+  background: var(--accent-2);
+  border-color: var(--accent-2);
+  color: #fff;
+}
+.btn.danger {
+  color: var(--red);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
 
-.input, .select, .textarea {
+.input,
+.select,
+.textarea {
   background: var(--panel-2);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -128,9 +156,20 @@
   font-family: inherit;
 }
 
-.textarea { resize: vertical; min-height: 90px; }
-.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
-.field label { font-size: 12px; color: var(--muted); }
+.textarea {
+  resize: vertical;
+  min-height: 90px;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 12px;
+}
+.field label {
+  font-size: 12px;
+  color: var(--muted);
+}
 
 .tag {
   display: inline-block;
@@ -141,14 +180,40 @@
   border: 1px solid var(--border);
 }
 
-.tag.running { color: var(--accent-2); border-color: var(--accent-2); }
-.tag.gated { color: var(--yellow); border-color: var(--yellow); }
-.tag.completed { color: var(--green); border-color: var(--green); }
-.tag.stopped, .tag.error { color: var(--red); border-color: var(--red); }
+.tag.running {
+  color: var(--accent-2);
+  border-color: var(--accent-2);
+}
+.tag.gated {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+.tag.completed {
+  color: var(--green);
+  border-color: var(--green);
+}
+.tag.stopped,
+.tag.error {
+  color: var(--red);
+  border-color: var(--red);
+}
 
-.table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.table th, .table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); }
-.table th { color: var(--muted); font-weight: 500; font-size: 12px; }
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.table th {
+  color: var(--muted);
+  font-weight: 500;
+  font-size: 12px;
+}
 
 .status-line {
   position: sticky;
@@ -162,10 +227,20 @@
   gap: 16px;
 }
 
-.stack { display: flex; flex-direction: column; gap: 10px; }
-.row { display: flex; gap: 10px; align-items: center; }
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
 
-.spacer { flex: 1; }
+.spacer {
+  flex: 1;
+}
 
 .console {
   background: #0b0f14;
@@ -179,10 +254,28 @@
   line-height: 1.55;
 }
 
-.console .assistant { color: #d7e3f8; }
-.console .user { color: #b7e1bf; }
-.console .thinking { color: #7d8794; font-style: italic; }
-.console .tool { color: #d6a0f5; }
-.console .meta { color: #5c6672; }
-.console .eq { display: flex; gap: 6px; }
-.console .eq .who { flex-shrink: 0; width: 70px; color: #8b949e; }
+.console .assistant {
+  color: #d7e3f8;
+}
+.console .user {
+  color: #b7e1bf;
+}
+.console .thinking {
+  color: #7d8794;
+  font-style: italic;
+}
+.console .tool {
+  color: #d6a0f5;
+}
+.console .meta {
+  color: #5c6672;
+}
+.console .eq {
+  display: flex;
+  gap: 6px;
+}
+.console .eq .who {
+  flex-shrink: 0;
+  width: 70px;
+  color: #8b949e;
+}

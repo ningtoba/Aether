@@ -84,7 +84,7 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 
 ## Testing & verification
 
-- **579 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
+- **582 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
 - `npm run build` = `tsc -b --force` (whole monorepo); `npm run lint` and `npm run format:check` gate CI.
 - CI: lint/format/madge, type-check, tests, then a Docker image build (`package.yml`).
 

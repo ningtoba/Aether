@@ -12,8 +12,10 @@
  * the browser — Bun's node:http layer cannot host WebSockets itself.
  */
 import { AetherServer } from './server.js';
-import { EngineService, LoopManager, SkillsService } from './engine/index.js';
+import { EngineService, LoopManager, OmpFacade, SkillsService } from './engine/index.js';
 import { BunRealtimeHub } from './realtime/bun-realtime.js';
+import { join } from 'node:path';
+import { homedir } from 'node:os';
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -26,13 +28,24 @@ const PORT = parseIntEnv('PORT', 3001);
 const HOST = process.env.HOST ?? '0.0.0.0';
 const MAX_BODY_SIZE = parseIntEnv('MAX_BODY_SIZE', 1_000_000);
 const REALTIME_PORT = parseIntEnv('REALTIME_PORT', 3002);
+// Externally-reachable realtime port. Under Docker the host remaps the
+// container's REALTIME_PORT (e.g. 3082->3002), so the browser can't connect
+// to the raw container port — compose sets this to the host-side port and
+// /health advertises it. Local dev (no remap) leaves it == REALTIME_PORT.
+const REALTIME_PUBLIC_PORT = parseIntEnv('REALTIME_PUBLIC_PORT', REALTIME_PORT);
 
 const API_KEY = process.env.AETHER_API_KEY;
 
 // ── Engine wiring (Bun runtime only) ────────────────────────────────────
 const engine = new EngineService();
 const skills = new SkillsService({ projectRoot: process.cwd() });
-const loops = new LoopManager(engine, skills);
+// Loop definitions persist across restarts. Prefer the omp agent data dir
+// (~/.omp/agent/aether), which persists in Docker via the ~/.omp mount and
+// locally without creating stray root dirs. LOOP_STORE_DIR overrides it.
+const DEFAULT_LOOP_STORE = join(homedir(), '.omp', 'agent', 'aether', 'loops');
+const LOOP_STORE_DIR = process.env.LOOP_STORE_DIR ?? DEFAULT_LOOP_STORE;
+const loops = new LoopManager(engine, skills, { storeDir: LOOP_STORE_DIR });
+const facade = new OmpFacade();
 
 let realtime: BunRealtimeHub | null = null;
 if (engine.isAvailable) {
@@ -44,6 +57,19 @@ if (engine.isAvailable) {
 } else {
   console.warn('[AetherServer] Agent engine unavailable; sessions/loops/skills disabled');
 }
+// Preload the omp facade (defers the SDK import to the Bun path only).
+if (engine.isAvailable) {
+  void facade.ensure().then((ok) => {
+    console.log(
+      `[AetherServer] Omp facade ${ok ? 'ready' : 'unavailable'} (${facade.statusOf().version ?? 'no version'})`,
+    );
+    // Reflect the resolved omp version in /health (healthExtras is captured at
+    // startup while ensure() is still running).
+    if (ok && server.healthExtras && typeof server.healthExtras === 'object') {
+      server.healthExtras.omp = { version: facade.statusOf().version ?? null };
+    }
+  });
+}
 
 const server = new AetherServer({
   port: PORT,
@@ -52,18 +78,19 @@ const server = new AetherServer({
   // When AETHER_API_KEY is set, the API requires it (Bearer or X-API-Key)
   // and authorizes via RBAC (admin role). Leave unset for open local dev.
   ...(API_KEY ? { auth: { apiKey: API_KEY } } : {}),
-  engine: { engine, loops, skills },
+  engine: { engine, loops, skills, facade },
 });
 
 // Wire the Bun WebSocket hub as the realtime engine-event target.
 if (realtime) {
   server.broadcastRealtime = (type, payload) => realtime.broadcast(type, payload);
   server.healthExtras = {
-    realtime: { port: REALTIME_PORT },
+    realtime: { port: REALTIME_PUBLIC_PORT, internalPort: REALTIME_PORT },
     engine: {
       available: engine.isAvailable,
       error: engine.availabilityError,
     },
+    omp: { version: facade.statusOf().version ?? null },
   };
 }
 

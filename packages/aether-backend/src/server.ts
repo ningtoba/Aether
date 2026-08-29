@@ -17,6 +17,8 @@ import { RBACGuard, type RoleId } from '@aether/core';
 
 import * as engineRoutes from './routes/engine.js';
 import type { EngineService, LoopManager, SkillsService } from './engine/index.js';
+import { OmpFacade } from './engine/index.js';
+import * as facadeRoutes from './routes/facade.js';
 import { StaticFileServer, resolveFrontendDist } from './static/static-server.js';
 
 /** Optional engine/control-plane wiring supplied by main.ts when the engine is
@@ -26,6 +28,9 @@ export interface EngineWiring {
   engine: EngineService;
   loops: LoopManager;
   skills: SkillsService;
+  /** Defensive omp capability/facade surface (settings, providers, agents,
+   *  skills, persisted sessions). Constructed by main.ts when the engine runs. */
+  facade: OmpFacade;
 }
 
 export interface AetherServerOptions {
@@ -192,6 +197,9 @@ export class AetherServer {
     if (pathname.startsWith('/api/loops')) {
       return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'execute' };
     }
+    if (pathname.startsWith('/api/omp/settings')) {
+      return { resource: 'settings:*', action: method === 'GET' ? 'read' : 'write' };
+    }
     return null;
   }
 
@@ -270,6 +278,31 @@ export class AetherServer {
     this.router.post('/api/loops/:id/stop', bind(engineRoutes.stopLoop));
     this.router.post('/api/loops/:id/advance', bind(engineRoutes.advanceLoop));
     this.router.get('/api/skills', bind(engineRoutes.listSkills));
+
+    // Omp facade control-plane (engine-wired: status, settings, providers,
+    // agents, skills, persisted sessions — else 501 like the rest).
+    const fakerCtx = ctx ? { facade: ctx.facade } : null;
+    const bindF =
+      <P extends RouteParams>(
+        fn: (
+          req: IncomingMessage,
+          res: ServerResponse,
+          params: P,
+          c: NonNullable<typeof fakerCtx>,
+        ) => Promise<void>,
+      ) =>
+      (req: IncomingMessage, res: ServerResponse, params: P): Promise<void> =>
+        fakerCtx ? fn(req, res, params, fakerCtx) : Promise.resolve(engineUnavailable(req, res));
+
+    this.router.get('/api/omp/status', bindF(facadeRoutes.facadeStatus));
+    this.router.get('/api/omp/settings', bindF(facadeRoutes.settingsSchema));
+    this.router.get('/api/omp/settings/values', bindF(facadeRoutes.settingsGet));
+    this.router.put('/api/omp/settings', bindF(facadeRoutes.settingsSet));
+    this.router.get('/api/omp/providers', bindF(facadeRoutes.listFacadeProviders));
+    this.router.get('/api/omp/agents', bindF(facadeRoutes.listFacadeAgents));
+    this.router.get('/api/omp/skills', bindF(facadeRoutes.listFacadeSkills));
+    this.router.get('/api/omp/sessions', bindF(facadeRoutes.listDiskSessions));
+    this.router.get('/api/omp/sessions/read', bindF(facadeRoutes.readDiskSession));
   }
 
   /** Set CORS allowed origins */

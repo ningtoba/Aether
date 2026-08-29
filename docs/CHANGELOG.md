@@ -6,6 +6,50 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.0 — Full omp GUI: settings, providers, agents, skills & persisted sessions (2026-08-30)
+
+Made Aether a true GUI for the embedded omp engine — everything omp can do is
+now reachable from the web app, wrapped in a defensive facade so omp upgrades
+degrade gracefully instead of breaking the GUI.
+
+**Omp facade (`OmpFacade`) + API**
+
+- New `/api/omp/*` surface: `status` (runtime/version/per-feature capability),
+  `settings` (full omp schema + values + write), `providers` (every omp
+  provider with model counts), `agents` (bundled + user/project definitions),
+  `skills` (all sources incl. managed-skills), `sessions` (persisted on-disk
+  transcripts).
+- Update-safe by design: lazy SDK import (Bun only), feature-detected exports,
+  try/catch per call → missing exports surface as capability "unavailable",
+  never a 500. Settings schema is generated from omp's own `SETTINGS_SCHEMA`
+  (loaded via the `config/settings-schema` subpath).
+
+**Web GUI**
+
+- Dashboard: real aggregates (model/provider counts, skill count, persisted
+  sessions, omp version + capabilities, memory, realtime state).
+- Settings: schema-driven editor — all 10 omp config tabs, per-type controls,
+  search, live save.
+- Providers: searchable catalog of every omp provider + custom provider form.
+- Agents: omp's real agent definitions (bundled + user/project `.md`).
+- Skills: every discovered `SKILL.md` (65 on host) with expandable bodies.
+- Sessions: fixed realtime streaming (port remap + message dedup), plus a
+  persisted-session browser for omp's on-disk transcripts.
+- Loops: advanced editor with `{round}` preview, model picker, full transition
+  set; loop definitions now persist across restarts.
+
+**Fixes**
+
+- Realtime sessions now work under Docker: backend advertises the host-facing
+  `REALTIME_PUBLIC_PORT` (3082) in `/health` instead of the container-internal
+  port, so the browser connects to the reachable WS endpoint.
+
+**Verification:** 582 vitest tests (+3 facade-route tests, 92 backend), `tsc -b`
+clean, lint 0 errors, prettier clean; browser-driven E2E across all 8 pages
+(including a live session prompt and a settings write) against the built image.
+
+---
+
 ## v0.2.0 — Web-first restructure with an embedded omp agent engine (2026-08-29)
 
 Abolished the Electron desktop shell and made Aether a single-image web platform.

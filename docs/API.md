@@ -183,27 +183,59 @@ Resolve a paused `gate`. Body: `{ "action": "continue" | "stop" }` → `200 { pr
 
 ---
 
-## Skills
+## Omp facade (engine capabilities)
 
-### `GET /api/skills`
+The facade exposes everything the embedded omp engine can do beyond the session
+surface — capabilities, settings, providers, agents, skills, and persisted
+sessions — read from the SDK defensively so a future omp upgrade degrades to
+"unavailable" instead of breaking the GUI. Routes return `501` when the engine
+isn't running under Bun.
 
-Discover `SKILL.md` packs from `<project>/.omp/skills/<name>/SKILL.md` and `~/.omp/agent/skills/<name>/SKILL.md`.
+### `GET /api/omp/status`
+
+Engine capability report: runtime, omp version, and per-feature availability.
 
 ```jsonc
-{
-  "skills": [
-    {
-      "name": "review",
-      "description": "Run an adversarial review…",
-      "path": "/…/SKILL.md",
-      "body": "…",
-      "source": "/…/.omp/skills",
-    },
-  ],
-}
+{ "status": { "available": true, "runtime": "bun", "version": "18.0.10",
+  "capabilities": [ { "name": "createAgentSession", "available": true }, … ] } }
 ```
 
+### Settings (schema-driven)
+
+- `GET /api/omp/settings` → the full omp settings schema (tabs, groups, and
+  every setting with type/label/description/enum) — generated from omp's own
+  `SETTINGS_SCHEMA` so the GUI editor tracks omp releases.
+- `GET /api/omp/settings/values` → `{ values: { "<setting.path>": <current> } }`
+  for every schema path.
+- `PUT /api/omp/settings` with `{ "path": "…", "value": … }` → writes one setting
+  through the SDK's `Settings.set()/flush()` to the user config.
+
+### `GET /api/omp/providers`
+
+Every AI provider omp knows (bundled + custom in `models.yml` + discoverable),
+with model counts, base URLs, auth status, and sample model ids.
+
+### `GET /api/omp/agents`
+
+Agent definitions: bundled subagents (`task`, `scout`, `reviewer`,
+`security-reviewer`, `librarian`, `designer`, `init`) plus user/project agent
+markdown from `~/.omp/agent/agents/*.md` and `<project>/.omp/agents/*.md`.
+
+### `GET /api/omp/skills`
+
+Every `SKILL.md` pack omp discovers (user, project, and managed-skills
+sources), with full bodies — a superset of `GET /api/skills`.
+
+### Persisted sessions
+
+- `GET /api/omp/sessions` → persisted omp sessions on disk across projects
+  (id, path, cwd, display name, modified).
+- `GET /api/omp/sessions/read?path=<url-encoded jsonl path>` → a parsed
+  transcript (`{ messages: [{ role, text, timestamp }] }`).
+
 ---
+
+## Agents & Executions
 
 ## Agents & Executions
 

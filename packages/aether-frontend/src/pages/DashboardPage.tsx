@@ -1,100 +1,202 @@
 import React, { useEffect, useState } from 'react';
-import { getHealth, listSessions, listLoops, type HealthStatus } from '../lib/api';
+import {
+  getHealth,
+  listSessions,
+  listLoops,
+  listModels,
+  listDiskSessions,
+  listOmpSkills,
+  listFacadeProviders,
+  getFacadeStatus,
+  type HealthStatus,
+  type FacadeStatus,
+} from '../lib/api';
 import type { PageId } from '../App';
 
+interface Agg {
+  health: HealthStatus | null;
+  facade: FacadeStatus | null;
+  sessions: number;
+  diskSessions: number;
+  loops: number;
+  loopsRunning: number;
+  models: number;
+  providers: number;
+  skills: number;
+  error: string | null;
+}
+
 export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void }) {
-  const [health, setHealth] = useState<HealthStatus | null>(null);
-  const [sessions, setSessions] = useState<number>(0);
-  const [loops, setLoops] = useState<number>(0);
-  const [error, setError] = useState<string | null>(null);
+  const [agg, setAgg] = useState<Agg>({
+    health: null,
+    facade: null,
+    sessions: 0,
+    diskSessions: 0,
+    loops: 0,
+    loopsRunning: 0,
+    models: 0,
+    providers: 0,
+    skills: 0,
+    error: null,
+  });
 
   useEffect(() => {
+    let dead = false;
+    const patch = (p: Partial<Agg>) => {
+      if (!dead) setAgg((a) => ({ ...a, ...p }));
+    };
+
     getHealth()
-      .then((h) => setHealth(h))
-      .catch((e) => setError(e.message));
+      .then((h) => patch({ health: h }))
+      .catch((e) => patch({ error: e.message }));
     listSessions()
-      .then((r) => setSessions(r.sessions.length))
+      .then((r) => patch({ sessions: r.sessions.length }))
       .catch(() => {});
     listLoops()
-      .then((r) => setLoops(r.loops.length))
+      .then((r) =>
+        patch({
+          loops: r.loops.length,
+          // loop run statuses stream live via the realtime hub, not the list
+        }),
+      )
       .catch(() => {});
+    listModels()
+      .then((r) => {
+        const models = r.groups.reduce((n, g) => n + g.models.length, 0);
+        patch({ models, providers: r.groups.length });
+      })
+      .catch(() => {});
+    listDiskSessions()
+      .then((r) => patch({ diskSessions: (r.sessions ?? []).length }))
+      .catch(() => {});
+    listOmpSkills()
+      .then((r) => patch({ skills: (r.skills ?? []).length }))
+      .catch(() => {});
+    listFacadeProviders()
+      .then((r) => patch({ providers: (r.providers ?? []).length }))
+      .catch(() => {});
+    getFacadeStatus()
+      .then((r) => patch({ facade: r.status }))
+      .catch(() => {});
+
+    return () => {
+      dead = true;
+    };
   }, []);
 
+  const { health, facade, error } = agg;
   const engineLive = health?.engine?.available;
-  const realtimePort = health?.realtime?.port;
+  const ompReady = facade?.available === true;
 
   return (
     <>
       <h2>Dashboard</h2>
-      {error && <div className="muted">Backend unreachable: {error}</div>}
+      {error && <div className="muted">Some data unreachable: {error}</div>}
 
-      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))' }}>
-        <div className="card">
-          <h3>Engine</h3>
-          <div className="row">
-            <span className={`tag ${engineLive ? 'running' : 'stopped'}`}>
-              {engineLive ? 'available' : 'unavailable'}
-            </span>
-            {health?.engine?.error && <span className="muted">{health.engine.error}</span>}
-          </div>
-          <div className="muted" style={{ marginTop: 8 }}>
-            {engineLive ? 'Agent sessions, loops & skills are wired' : 'Requires the Bun runtime + omp SDK'}
-          </div>
-        </div>
-        <div className="card">
+      <div className="grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+        <button
+          className="card"
+          style={{ textAlign: 'left' }}
+          onClick={() => onNavigate('sessions')}
+        >
           <h3>Sessions</h3>
-          <div className="row">
-            <span style={{ fontSize: 26 }}>{sessions}</span>
-            <button className="btn" onClick={() => onNavigate('sessions')}>
-              Open
-            </button>
-          </div>
-        </div>
-        <div className="card">
+          <div className="big">{agg.sessions}</div>
+          <div className="muted">live · {agg.diskSessions} persisted on disk</div>
+        </button>
+        <button className="card" style={{ textAlign: 'left' }} onClick={() => onNavigate('loops')}>
           <h3>Loops</h3>
-          <div className="row">
-            <span style={{ fontSize: 26 }}>{loops}</span>
-            <button className="btn" onClick={() => onNavigate('loops')}>
-              Open
-            </button>
-          </div>
-        </div>
-        <div className="card">
-          <h3>Realtime hub</h3>
-          <div className="muted">ws://…:{realtimePort ?? '?'}</div>
-          <div className="muted" style={{ marginTop: 8 }}>
-            Live engine events stream here to the GUI
-          </div>
-        </div>
+          <div className="big">{agg.loops}</div>
+          <div className="muted">definitions saved</div>
+        </button>
+        <button className="card" style={{ textAlign: 'left' }} onClick={() => onNavigate('models')}>
+          <h3>Models</h3>
+          <div className="big">{agg.models}</div>
+          <div className="muted">across {agg.providers} providers</div>
+        </button>
+        <button className="card" style={{ textAlign: 'left' }} onClick={() => onNavigate('skills')}>
+          <h3>Skills</h3>
+          <div className="big">{agg.skills}</div>
+          <div className="muted">discoverable SKILL.md packs</div>
+        </button>
       </div>
+
+      {(engineLive || ompReady) && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <h3>Engine</h3>
+          <div className="stack">
+            <div className="row">
+              <span
+                className="tag"
+                style={{ borderColor: ompReady ? 'var(--green)' : 'var(--yellow)' }}
+              >
+                omp {facade?.version ?? 'unknown'}
+              </span>
+              <span className="muted">runtime {facade?.runtime}</span>
+            </div>
+            {facade?.capabilities && facade.capabilities.length > 0 && (
+              <div className="row" style={{ flexWrap: 'wrap' }}>
+                {facade.capabilities.map((c) => (
+                  <span
+                    key={c.name}
+                    className="tag"
+                    style={{ borderColor: c.available ? 'var(--green)' : 'var(--red)' }}
+                    title={c.error ?? ''}
+                  >
+                    {c.name} {c.available ? '✓' : '✗'}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {health && (
         <div className="card" style={{ marginTop: 16 }}>
           <h3>Backend health</h3>
           <div className="stack">
             <div className="row">
-              <span className="muted" style={{ width: 90 }}>
-                Version
+              <span
+                className="tag"
+                style={{ borderColor: engineLive ? 'var(--green)' : 'var(--red)' }}
+              >
+                {health.status}
               </span>
-              <span className="mono">{health.version}</span>
+              <span className="tag">v{health.version}</span>
+              <span className="tag">up {health.uptime}s</span>
             </div>
+            {health.memory && (
+              <div className="row">
+                <span className="muted">
+                  heap {(health.memory.heapUsed / 1048576).toFixed(1)} MB · rss{' '}
+                  {(health.memory.rss / 1048576).toFixed(1)} MB
+                </span>
+              </div>
+            )}
             <div className="row">
-              <span className="muted" style={{ width: 90 }}>
-                Uptime
-              </span>
-              <span className="mono">{health.uptime}s</span>
-            </div>
-            <div className="row">
-              <span className="muted" style={{ width: 90 }}>
-                Providers
-              </span>
-              <span className="mono">
-                {health.providers.configured} configured / {health.providers.healthy} healthy
+              <span className="muted">
+                realtime ws://…:{health.realtime?.port} · providers {health.providers?.configured}{' '}
+                configured / {health.providers?.healthy} healthy
               </span>
             </div>
           </div>
         </div>
       )}
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <h3>Quick actions</h3>
+        <div className="row">
+          <button className="btn primary" onClick={() => onNavigate('sessions')}>
+            New session
+          </button>
+          <button className="btn primary" onClick={() => onNavigate('loops')}>
+            New loop
+          </button>
+          <button className="btn" onClick={() => onNavigate('settings')}>
+            Settings
+          </button>
+        </div>
+      </div>
     </>
   );
 }

@@ -16,9 +16,10 @@ services:
       - "3082:3002"
     environment:
       - NODE_ENV=production
-      - PORT=3001
-      - REALTIME_PORT=3002
-      - HOST=0.0.0.0
+      # Browser-facing realtime port (host remap of REALTIME_PORT) — /health
+      # advertises this so the GUI connects to ws://localhost:3082, not the
+      # container-internal 3002.
+      - REALTIME_PUBLIC_PORT=3082
     volumes:
       - aether-data:/data
       # Mount the host's omp agent config (models.yml + auth storage) into the
