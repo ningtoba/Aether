@@ -432,6 +432,17 @@ button.card:hover {
   height: auto;
   min-height: 0;
 }
+/* Generic scrollable log/console panel (e.g. the Loops live event stream). */
+.console {
+  background: #0b0f14;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow-y: auto;
+  padding: 12px;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
 
 .console .assistant {
   color: #d7e3f8;

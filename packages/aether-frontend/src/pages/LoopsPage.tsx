@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   listLoops,
   saveLoop,
@@ -45,6 +45,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   const [models, setModels] = useState<ModelGroup[]>([]);
   const [skillOptions, setSkillOptions] = useState<SkillRecord[]>([]);
   const [eventLog, setEventLog] = useState<string[]>([]);
+  const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [rt, setRt] = useState<RealtimeClient | null>(null);
@@ -127,6 +128,11 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
     });
     return unsub;
   }, [rt]);
+  // Keep the live event stream pinned to the newest line.
+  useEffect(() => {
+    eventLogRef.current?.scrollTo({ top: eventLogRef.current.scrollHeight });
+  }, [eventLog]);
+
   // Loop live-chat inspector: stream the loop's session transcript live.
   useEffect(() => {
     if (!rt || !inspect) return;
@@ -611,7 +617,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
             {eventLog.length > 0 && (
               <div className="card" style={{ marginTop: 16 }}>
                 <h3>Live event stream</h3>
-                <div className="console" style={{ height: 180 }}>
+                <div className="console" style={{ height: 180 }} ref={eventLogRef}>
                   {eventLog.map((line, i) => (
                     <div key={i} className="meta">
                       {line}
