@@ -14,7 +14,7 @@ import {
   type WorkspaceRoot,
   type WorkspaceDirEntry,
 } from '../lib/api';
-
+import { Icon } from './ui';
 export interface CwdPickerProps {
   /** Currently selected working directory (shown in the header). */
   value?: string;
@@ -71,15 +71,25 @@ export function CwdPicker({ value, onSelect, placeholder }: CwdPickerProps) {
       <div className="field">
         <label>Working directory {value ? '' : '(optional)'}</label>
         <div className="row" style={{ alignItems: 'center' }}>
-          <span className="mono muted" style={{ flex: 1, wordBreak: 'break-all' }}>
+          <div
+            className="code-preview"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+            title={value || undefined}
+          >
             {value || placeholder || 'default (first workspace root)'}
-          </span>
+          </div>
           <button className="btn" onClick={openBrowser}>
-            Browse…
+            <Icon name="folder" size={14} /> Browse
           </button>
         </div>
         {error && (
-          <span className="muted" style={{ fontSize: 11, color: 'var(--red)' }}>
+          <span className="help" role="alert" style={{ color: 'var(--error)' }}>
             {error}
           </span>
         )}
@@ -90,29 +100,22 @@ export function CwdPicker({ value, onSelect, placeholder }: CwdPickerProps) {
   return (
     <div className="field">
       <label>Working directory</label>
-      <div className="card" style={{ padding: '8px 10px' }}>
+      <div className="card" style={{ padding: 'var(--s-2) 10px' }}>
         <div className="row" style={{ marginBottom: 6, flexWrap: 'wrap' }}>
           <span className="muted" style={{ fontSize: 11 }}>
             Roots:
           </span>
           {roots.map((r) => (
-            <button
-              key={r.path}
-              className="btn"
-              style={{ padding: '2px 8px', fontSize: 11 }}
-              onClick={() => jumpRoot(r.path)}
-            >
+            <button key={r.path} className="btn sm" onClick={() => jumpRoot(r.path)}>
               {r.label}
             </button>
           ))}
           <div className="spacer" />
-          <button
-            className="btn"
-            style={{ padding: '2px 8px', fontSize: 11 }}
-            onClick={goUp}
-            disabled={!parent}
-          >
-            ↑ up
+          <button className="btn sm" onClick={goUp} disabled={!parent} title="Go up one level">
+            <span style={{ display: 'inline-flex', transform: 'rotate(-90deg)' }}>
+              <Icon name="chevron-right" size={12} />
+            </span>{' '}
+            up
           </button>
         </div>
         <div
@@ -122,16 +125,30 @@ export function CwdPicker({ value, onSelect, placeholder }: CwdPickerProps) {
           {current}
         </div>
         <div className="console" style={{ height: 140 }}>
-          {entries.length === 0 && <div className="meta">(no subdirectories)</div>}
+          {entries.length === 0 && (
+            <div className="meta" style={{ textAlign: 'center', padding: '8px 0' }}>
+              No subdirectories
+            </div>
+          )}
           {entries.map((e) => (
             <div key={e.path} className="row" style={{ padding: '1px 0' }}>
               <button
-                className="btn"
-                style={{ flex: 1, textAlign: 'left', padding: '2px 8px', fontSize: 12 }}
+                className="btn ghost"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  textAlign: 'left',
+                  justifyContent: 'flex-start',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: 12,
+                }}
                 onClick={() => void load(e.path)}
                 title={e.path}
               >
-                📁 {e.name}
+                <Icon name="folder" size={13} />{' '}
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {e.name}
+                </span>
               </button>
             </div>
           ))}
@@ -140,13 +157,13 @@ export function CwdPicker({ value, onSelect, placeholder }: CwdPickerProps) {
           <button className="btn primary" onClick={choose} disabled={!current}>
             Use this directory
           </button>
-          <button className="btn" onClick={() => setOpen(false)}>
+          <button className="btn ghost" onClick={() => setOpen(false)}>
             Cancel
           </button>
         </div>
       </div>
       {error && (
-        <span className="muted" style={{ fontSize: 11, color: 'var(--red)' }}>
+        <span className="help" role="alert" style={{ color: 'var(--error)' }}>
           {error}
         </span>
       )}

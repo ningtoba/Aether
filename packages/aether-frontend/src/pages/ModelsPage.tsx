@@ -1,40 +1,132 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * Models — grouped model catalog served by the embedded engine (/api/models).
+ * One Card per provider; token/context numbers are compacted (full value in title).
+ */
+import React, { useCallback, useEffect, useState } from 'react';
 import { listModels, type ModelGroup } from '../lib/api';
+import {
+  Card,
+  CopyButton,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusPill,
+  fmtCompact,
+} from '../components/ui';
 
 export function ModelsPage() {
   const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [provider, setProvider] = useState<string>('all');
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
+    setLoading(true);
     listModels()
-      .then((r) => setGroups(r.groups))
-      .catch((e) => setError(e.message));
+      .then((r) => {
+        setGroups(r.groups);
+        setError(null);
+      })
+      .catch((e: Error) => setError(e.message))
+      .finally(() => setLoading(false));
   }, []);
 
-  const filtered = provider === 'all' ? groups : groups.filter((g) => g.provider === provider);
+  useEffect(refresh, [refresh]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = (provider === 'all' ? groups : groups.filter((g) => g.provider === provider))
+    .map((g) =>
+      q
+        ? {
+            ...g,
+            models: g.models.filter((m) =>
+              [m.id, m.name, m.baseUrl ?? ''].some((s) => s.toLowerCase().includes(q)),
+            ),
+          }
+        : g,
+    )
+    .filter((g) => g.models.length > 0);
+
+  const totalModels = groups.reduce((n, g) => n + g.models.length, 0);
+  const filtering = q !== '' || provider !== 'all';
 
   return (
     <>
-      <h2>Models</h2>
-      {error ? (
-        <div className="muted">Engine unavailable: {error}</div>
-      ) : (
-        <>
-          <div className="row" style={{ marginBottom: 16 }}>
-            <span className="muted">Provider</span>
-            <select className="select" value={provider} onChange={(e) => setProvider(e.target.value)}>
-              <option value="all">All providers</option>
+      <PageHeader
+        title="Models"
+        subtitle={
+          loading && groups.length === 0
+            ? 'Loading the engine model catalog…'
+            : `${totalModels} model${totalModels === 1 ? '' : 's'} across ${groups.length} provider${groups.length === 1 ? '' : 's'}`
+        }
+        actions={
+          <>
+            <input
+              className="input"
+              style={{ width: 220 }}
+              placeholder="Search model id, name or URL…"
+              aria-label="Search models"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+            <select
+              className="select"
+              aria-label="Filter by provider"
+              value={provider}
+              onChange={(e) => setProvider(e.target.value)}
+            >
+              <option value="all">All providers ({groups.length})</option>
               {groups.map((g) => (
                 <option key={g.provider} value={g.provider}>
                   {g.provider} ({g.models.length})
                 </option>
               ))}
             </select>
-          </div>
-          {filtered.map((group) => (
-            <div className="card" key={group.provider} style={{ marginBottom: 16 }}>
-              <h3>{group.provider}</h3>
+          </>
+        }
+      />
+
+      {error && (
+        <ErrorState message={`Engine model catalog unavailable: ${error}`} onRetry={refresh} />
+      )}
+
+      {!error && loading && groups.length === 0 && <Skeleton rows={6} />}
+
+      {!error && !loading && filtered.length === 0 && (
+        <EmptyState
+          icon="models"
+          title="No models found"
+          message={
+            filtering
+              ? 'No models match the current provider filter or search term.'
+              : 'The engine reported an empty model catalog.'
+          }
+          action={
+            filtering ? (
+              <button
+                className="btn ghost"
+                onClick={() => {
+                  setQuery('');
+                  setProvider('all');
+                }}
+              >
+                Clear filters
+              </button>
+            ) : undefined
+          }
+        />
+      )}
+
+      <div className="stack">
+        {filtered.map((group) => (
+          <Card
+            key={group.provider}
+            title={group.provider}
+            actions={<StatusPill tone="idle">{group.models.length} models</StatusPill>}
+          >
+            <div style={{ maxHeight: 440, overflowY: 'auto' }}>
               <table className="table">
                 <thead>
                   <tr>
@@ -47,18 +139,37 @@ export function ModelsPage() {
                 <tbody>
                   {group.models.map((m) => (
                     <tr key={m.id}>
-                      <td className="mono">{m.id}</td>
-                      <td>{m.contextWindow}</td>
-                      <td>{m.maxTokens}</td>
-                      <td className="mono muted">{m.baseUrl ?? '—'}</td>
+                      <td>
+                        <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                          <span className="mono" title={m.name || m.id}>
+                            {m.id}
+                          </span>
+                          <CopyButton text={m.id} title="Copy model id" />
+                        </div>
+                      </td>
+                      <td className="num" title={m.contextWindow.toLocaleString()}>
+                        {fmtCompact(m.contextWindow)}
+                      </td>
+                      <td className="num" title={m.maxTokens.toLocaleString()}>
+                        {fmtCompact(m.maxTokens)}
+                      </td>
+                      <td className="mono muted">
+                        <span
+                          className="truncate"
+                          style={{ maxWidth: 280 }}
+                          title={m.baseUrl ?? undefined}
+                        >
+                          {m.baseUrl ?? '—'}
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
-          ))}
-        </>
-      )}
+          </Card>
+        ))}
+      </div>
     </>
   );
 }

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listLoops,
   saveLoop,
@@ -24,6 +24,16 @@ import type { ChatStats } from '../components/ChatConsole';
 import { CwdPicker } from '../components/CwdPicker';
 import { reduceChatFrame, appendMeta, fromTranscriptEntries, type ChatItem } from '../lib/chat';
 import type { PageId } from '../App';
+import {
+  Card,
+  ConfirmButton,
+  CopyButton,
+  EmptyState,
+  Icon,
+  PageHeader,
+  StatusPill,
+  type StatusTone,
+} from '../components/ui';
 
 const EMPTY: Partial<LoopDefinition> = {
   name: 'My loop',
@@ -32,7 +42,18 @@ const EMPTY: Partial<LoopDefinition> = {
   transition: { kind: 'none' },
 };
 
+// Machine default only as the last-resort fallback: once the model catalog
+// loads, a selection missing from it is auto-corrected to a real model.
 const DEFAULT_MODEL = 'local-server/deepseek-ai/DeepSeek-V4-Flash-0731';
+
+const LOOP_TONE: Record<string, StatusTone> = {
+  running: 'running',
+  gated: 'warn',
+  completed: 'ok',
+  stopped: 'idle',
+  error: 'error',
+  idle: 'idle',
+};
 
 function fmtTime(iso?: string): string {
   if (!iso) return '—';
@@ -57,6 +78,8 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   const [inspect, setInspect] = useState<{ loopId: string; sessionId?: string } | null>(null);
   const [inspectItems, setInspectItems] = useState<ChatItem[]>([]);
   const [inspectStats, setInspectStats] = useState<ChatStats | null>(null);
+  const [loopQuery, setLoopQuery] = useState('');
+  const closeInspectRef = useRef<HTMLButtonElement>(null);
 
   const refresh = useCallback(() => {
     listLoops()
@@ -94,6 +117,14 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Once the catalog is loaded, never leave a non-existent model selected —
+  // pick the first available one (payload shapes unchanged).
+  useEffect(() => {
+    const opts = models.flatMap((g) => g.models.map((m) => `${g.provider}/${m.id}`));
+    const first = opts[0];
+    if (first && !opts.includes(selectedModel)) setSelectedModel(first);
+  }, [models, selectedModel]);
 
   // Discover the realtime port from /health (SessionsPage pattern).
   useEffect(() => {
@@ -164,6 +195,12 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
     return unsub;
   }, [rt, inspect]);
 
+  // Focus management for the inspector dialog: autofocus its Close button so
+  // Escape (handled on the overlay) and keyboard use work immediately.
+  useEffect(() => {
+    if (inspect) closeInspectRef.current?.focus();
+  }, [inspect]);
+
   const openInspect = (loopId: string, sessionId?: string) => {
     setInspect({ loopId, sessionId });
     setInspectStats(null);
@@ -205,6 +242,16 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
 
   const modelOptions = models.flatMap((g) => g.models.map((m) => ({ g: g.provider, m })));
   const previewRounds = [1, 2, 3].map((n) => (form.prompt ?? '').replace(/\{round\}/g, String(n)));
+
+  // Client-side filter over the already-loaded saved-loops list only.
+  const filteredLoops = useMemo(() => {
+    const q = loopQuery.trim().toLowerCase();
+    return q
+      ? loops.filter((l) =>
+          `${l.name} ${l.description ?? ''} ${l.prompt}`.toLowerCase().includes(q),
+        )
+      : loops;
+  }, [loops, loopQuery]);
 
   const reset = () => {
     setForm({ ...EMPTY });
@@ -291,9 +338,16 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
 
   return (
     <>
-      <h2>Loops</h2>
+      <PageHeader
+        title="Loops"
+        subtitle="Round-based autonomous runs with transitions, gates and limits."
+      />
       {error && (
-        <div className="card" style={{ marginBottom: 12, borderColor: 'var(--red)' }}>
+        <div
+          className="card"
+          role="alert"
+          style={{ marginBottom: 12, borderColor: 'var(--error)' }}
+        >
           <span className="muted">{error}</span>
           <button className="btn" style={{ marginLeft: 8 }} onClick={() => setError(null)}>
             dismiss
@@ -301,84 +355,145 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
         </div>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: '300px 1fr' }}>
+      <div className="grid" style={{ gridTemplateColumns: '300px 1fr', alignItems: 'start' }}>
         {/* Saved-loop list */}
-        <div className="card">
-          <div className="row" style={{ marginBottom: 8 }}>
-            <h3 style={{ margin: 0 }}>Saved loops</h3>
-            <div className="spacer" />
-            <button className="btn" onClick={reset}>
-              New
+        <Card
+          title={`Saved loops (${loops.length})`}
+          actions={
+            <button className="btn sm" onClick={reset}>
+              <Icon name="plus" size={13} /> New
             </button>
+          }
+        >
+          <div style={{ position: 'relative', marginBottom: 'var(--s-2)' }}>
+            <span
+              style={{
+                position: 'absolute',
+                left: 8,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--text-faint)',
+                display: 'inline-flex',
+                pointerEvents: 'none',
+              }}
+            >
+              <Icon name="search" size={13} />
+            </span>
+            <input
+              className="input"
+              style={{ paddingLeft: 28 }}
+              placeholder="Search loops…"
+              aria-label="Search saved loops"
+              value={loopQuery}
+              onChange={(e) => setLoopQuery(e.target.value)}
+            />
           </div>
           <div className="stack">
-            {loops.map((loop) => (
-              <div key={loop.id} className="row">
+            {filteredLoops.map((loop) => (
+              <div key={loop.id} className="row" style={{ alignItems: 'center' }}>
                 <button
-                  className={`btn ${editingId === loop.id ? 'primary' : ''}`}
-                  style={{ flex: 1, textAlign: 'left' }}
+                  className="selectable-row"
+                  style={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}
+                  aria-pressed={editingId === loop.id}
                   onClick={() => loadIntoForm(loop)}
                   title={loop.prompt}
                 >
-                  <span style={{ display: 'block' }}>{loop.name}</span>
-                  <span className="muted" style={{ display: 'block', fontSize: 11 }}>
+                  <span
+                    style={{
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontWeight: 600,
+                      fontSize: 12.5,
+                    }}
+                  >
+                    {loop.name}
+                  </span>
+                  <span
+                    className="muted"
+                    style={{
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 11,
+                    }}
+                  >
                     {loop.prompt.length > 42 ? `${loop.prompt.slice(0, 42)}…` : loop.prompt}
                   </span>
                 </button>
-                <button className="btn danger" onClick={() => del(loop.id)}>
-                  Delete
-                </button>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {progress[loop.id]?.status === 'running' && (
+                    <StatusPill tone="running" dot>
+                      running
+                    </StatusPill>
+                  )}
+                  <ConfirmButton onConfirm={() => del(loop.id)} title={`Delete “${loop.name}”`}>
+                    <Icon name="trash" size={13} />
+                  </ConfirmButton>
+                </div>
               </div>
             ))}
-            {loops.length === 0 && <span className="muted">No saved loops yet</span>}
+            {filteredLoops.length === 0 &&
+              (loops.length === 0 ? (
+                <EmptyState
+                  icon="loops"
+                  title="No saved loops"
+                  message="Use New to define your first loop."
+                />
+              ) : (
+                <EmptyState
+                  icon="search"
+                  title="No matches"
+                  message={`Nothing matches “${loopQuery.trim()}”.`}
+                  action={
+                    <button className="btn ghost sm" onClick={() => setLoopQuery('')}>
+                      Clear search
+                    </button>
+                  }
+                />
+              ))}
           </div>
-        </div>
+        </Card>
 
         {/* Editor + runners */}
         <div className="stack">
-          <div className="card">
-            <div className="row" style={{ marginBottom: 8 }}>
-              <h3 style={{ margin: 0 }}>{editingId ? 'Edit loop' : 'Define loop'}</h3>
-              {editingId && <span className="tag">editing {editingId}</span>}
-            </div>
+          {/* Identity */}
+          <Card
+            title={editingId ? 'Edit loop · Identity' : 'Define loop · Identity'}
+            actions={
+              editingId ? (
+                <span className="mono muted" style={{ fontSize: 11 }} title={editingId}>
+                  editing {editingId}
+                </span>
+              ) : undefined
+            }
+          >
             <div className="field">
-              <label>Name</label>
+              <label htmlFor="loop-name">
+                Name <span style={{ color: 'var(--error)' }}>*</span>
+              </label>
               <input
+                id="loop-name"
                 className="input"
                 value={form.name ?? ''}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </div>
             <div className="field">
-              <label>Description</label>
+              <label htmlFor="loop-desc">Description</label>
               <input
+                id="loop-desc"
                 className="input"
                 value={form.description ?? ''}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
               />
             </div>
             <div className="field">
-              <label>
-                Prompt (runs every round; `{'{round}'}` is replaced with the round number)
-              </label>
-              <textarea
-                className="textarea"
-                rows={5}
-                value={form.prompt ?? ''}
-                onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-              />
-              <div className="muted" style={{ fontSize: 11 }}>
-                Preview rounds 1-3:
-                {previewRounds.map((text, i) => (
-                  <div key={i} className="mono" style={{ marginTop: 2 }}>
-                    Round {i + 1}: {text.length > 90 ? `${text.slice(0, 90)}…` : text || '(empty)'}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="field">
-              <label>Model</label>
+              <label htmlFor="loop-model">Model</label>
               <select
+                id="loop-model"
                 className="select"
                 value={selectedModel}
                 onChange={(e) => setSelectedModel(e.target.value)}
@@ -391,9 +506,44 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
               </select>
             </div>
             <CwdPicker value={cwd} onSelect={setCwd} placeholder="workspace root (host)" />
+          </Card>
+
+          {/* Prompt */}
+          <Card title="Prompt">
             <div className="field">
-              <label>Transition between rounds</label>
+              <label htmlFor="loop-prompt">
+                Prompt <span style={{ color: 'var(--error)' }}>*</span>
+              </label>
+              <div className="help">
+                Runs every round; <code>{'{round}'}</code> is replaced with the round number.
+              </div>
+              <textarea
+                id="loop-prompt"
+                className="textarea"
+                rows={5}
+                value={form.prompt ?? ''}
+                onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+              />
+              <div className="code-preview" style={{ marginTop: 'var(--s-2)' }}>
+                <div className="muted" style={{ marginBottom: 4 }}>
+                  Preview rounds 1-3:
+                </div>
+                {previewRounds.map((text, i) => (
+                  <div key={i} style={{ marginTop: 2 }}>
+                    Round {i + 1}:{' '}
+                    {text.length > 90 ? `${text.slice(0, 90)}…` : text || '(empty)'}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </Card>
+
+          {/* Schedule & limits */}
+          <Card title="Schedule & limits">
+            <div className="field">
+              <label htmlFor="loop-transition">Transition between rounds</label>
               <select
+                id="loop-transition"
                 className="select"
                 value={form.transition?.kind ?? 'none'}
                 onChange={(e) =>
@@ -411,8 +561,9 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
             </div>
             {form.transition?.kind === 'skill' && (
               <div className="field">
-                <label>Skill</label>
+                <label htmlFor="loop-skill">Skill</label>
                 <select
+                  id="loop-skill"
                   className="select"
                   value={form.transition?.skillName ?? ''}
                   onChange={(e) =>
@@ -428,10 +579,11 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                 </select>
               </div>
             )}
-            <div className="grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+            <div className="grid cols-2">
               <div className="field">
-                <label>Max rounds (blank = indefinite)</label>
+                <label htmlFor="loop-max-rounds">Max rounds (blank = indefinite)</label>
                 <input
+                  id="loop-max-rounds"
                   className="input"
                   type="number"
                   min={1}
@@ -445,8 +597,9 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                 />
               </div>
               <div className="field">
-                <label>Max time ms (blank = indefinite)</label>
+                <label htmlFor="loop-max-time">Max time ms (blank = indefinite)</label>
                 <input
+                  id="loop-max-time"
                   className="input"
                   type="number"
                   min={1}
@@ -461,21 +614,19 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                 />
               </div>
             </div>
-            <div className="row">
+            {/* Actions pinned at the bottom of the form */}
+            <div className="row" style={{ marginTop: 'var(--s-4)' }}>
               <button className="btn primary" onClick={save}>
                 {editingId ? 'Update loop' : 'Save loop'}
               </button>
-              <button className="btn" onClick={reset}>
+              <button className="btn ghost" onClick={reset}>
                 Reset
               </button>
             </div>
-            <p className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-              Loop model:{' '}
-              <span className="mono">
-                [round N] → [{form.transition?.kind ?? 'none'}] → [round N+1] …
-              </span>
-            </p>
-          </div>
+            <div className="code-preview" style={{ marginTop: 'var(--s-3)' }}>
+              Loop model: [round N] → [{form.transition?.kind ?? 'none'}] → [round N+1] …
+            </div>
+          </Card>
 
           <div>
             <div
@@ -486,33 +637,37 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                 const p = progress[loop.id];
                 const gated = p?.status === 'gated';
                 return (
-                  <div className="card" key={loop.id}>
-                    <div className="row">
-                      <h3 style={{ margin: 0 }}>{loop.name}</h3>
-                      <div className="spacer" />
-                      {p ? (
-                        <span className={`tag ${p.status}`}>{p.status}</span>
-                      ) : (
-                        <span className="tag">idle</span>
-                      )}
-                    </div>
+                  <Card
+                    key={loop.id}
+                    title={<span style={{ fontSize: 14 }}>{loop.name}</span>}
+                    actions={
+                      <StatusPill tone={LOOP_TONE[p?.status ?? 'idle'] ?? 'idle'} dot={p?.status === 'running'}>
+                        {p?.status ?? 'idle'}
+                      </StatusPill>
+                    }
+                  >
                     {loop.description && (
                       <div className="muted" style={{ fontSize: 12, margin: '2px 0 6px' }}>
                         {loop.description}
                       </div>
                     )}
-                    <div className="row" style={{ marginBottom: 8 }}>
-                      <span className="tag">transition: {loop.transition.kind}</span>
+                    <div
+                      className="row"
+                      style={{ marginBottom: 8, flexWrap: 'wrap', gap: 'var(--s-2)' }}
+                    >
+                      <StatusPill tone="idle">transition: {loop.transition.kind}</StatusPill>
                       {loop.transition.kind === 'skill' && (
-                        <span className="tag">{loop.transition.skillName}</span>
+                        <StatusPill tone="info">{loop.transition.skillName}</StatusPill>
                       )}
-                      <span className="tag">
-                        {loop.maxRounds ? `max ${loop.maxRounds}` : 'unlimited'}
+                      <span className="mono muted" style={{ fontSize: 11 }}>
+                        {loop.maxRounds ? `max ${loop.maxRounds} rounds` : 'unlimited rounds'}
+                        {loop.maxTimeMs ? ` · max ${Math.round(loop.maxTimeMs / 1000)}s` : ''}
                       </span>
-                      {loop.maxTimeMs ? (
-                        <span className="tag">max {Math.round(loop.maxTimeMs / 1000)}s</span>
-                      ) : null}
-                      <span className="tag mono">
+                      <span
+                        className="mono"
+                        style={{ fontSize: 11, color: 'var(--text-faint)' }}
+                        title={`${loop.model.provider}/${loop.model.modelId}`}
+                      >
                         {loop.model.provider}/{loop.model.modelId}
                       </span>
                     </div>
@@ -520,7 +675,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                     {p && (
                       <>
                         <div className="muted" style={{ fontSize: 12, marginBottom: 6 }}>
-                          current round: <span className="tag">{p.currentRound}</span>
+                          current round: <span className="mono">{p.currentRound}</span>
                           {p.startedAt && <span> · started {fmtTime(p.startedAt)}</span>}
                           {p.stopReason && <span> · {p.stopReason}</span>}
                         </div>
@@ -544,7 +699,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                             )}
                             {p.rounds.map((r) => (
                               <tr key={r.round}>
-                                <td>r{r.round}</td>
+                                <td className="num">r{r.round}</td>
                                 <td>{fmtTime(r.startedAt)}</td>
                                 <td>{fmtTime(r.finishedAt)}</td>
                                 <td className="muted">
@@ -554,7 +709,13 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                                       : r.summary
                                     : '—'}
                                 </td>
-                                <td>{r.errored ? 'yes' : 'ok'}</td>
+                                <td>
+                                  {r.errored ? (
+                                    <StatusPill tone="error">errored</StatusPill>
+                                  ) : (
+                                    <StatusPill tone="ok">ok</StatusPill>
+                                  )}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -566,14 +727,16 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                       <div
                         className="card"
                         style={{
-                          borderColor: 'var(--yellow)',
-                          background: 'rgba(210, 153, 34, 0.08)',
+                          borderColor: 'var(--warn)',
+                          background: 'var(--warn-soft)',
                           padding: '10px 12px',
                           marginBottom: 10,
                         }}
                       >
-                        <div className="row">
-                          <span className="tag gated">gated after round {p?.currentRound}</span>
+                        <div className="row" style={{ alignItems: 'center' }}>
+                          <StatusPill tone="warn" dot>
+                            gated after round {p?.currentRound}
+                          </StatusPill>
                           <div className="spacer" />
                           <button className="btn primary" onClick={() => gate(loop.id, 'continue')}>
                             Continue
@@ -588,11 +751,11 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                     {!gated &&
                       (p?.status === 'running' ? (
                         <button className="btn danger" onClick={() => stop(loop.id)}>
-                          Stop
+                          <Icon name="stop" size={13} /> Stop
                         </button>
                       ) : (
                         <button className="btn primary" onClick={() => run(loop.id)}>
-                          Start
+                          <Icon name="play" size={13} /> Start
                         </button>
                       ))}
                     <div style={{ marginTop: 8 }}>
@@ -609,24 +772,25 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                         Inspect live chat
                       </button>
                     </div>
-                  </div>
+                  </Card>
                 );
               })}
               {loops.length === 0 && (
-                <div className="card">
-                  <span className="muted">No loops defined yet — create one on the left.</span>
-                  <div>
+                <EmptyState
+                  icon="loops"
+                  title="No loops defined yet"
+                  message="Create one with the form above, or start from an existing skill."
+                  action={
                     <button className="btn" onClick={() => onNavigate?.('skills')}>
                       Browse skills
                     </button>
-                  </div>
-                </div>
+                  }
+                />
               )}
             </div>
 
             {eventLog.length > 0 && (
-              <div className="card" style={{ marginTop: 16 }}>
-                <h3>Live event stream</h3>
+              <Card title="Live event stream">
                 <div className="console" style={{ height: 180 }} ref={eventLogRef}>
                   {eventLog.map((line, i) => (
                     <div key={i} className="meta">
@@ -634,7 +798,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                     </div>
                   ))}
                 </div>
-              </div>
+              </Card>
             )}
           </div>
         </div>
@@ -643,12 +807,18 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
       {inspect && (
         <div
           className="fill"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Live chat for loop ${inspect.loopId}`}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') closeInspect();
+          }}
           style={{
             position: 'fixed',
             inset: 0,
             zIndex: 50,
             background: 'var(--bg)',
-            padding: 18,
+            padding: 'var(--s-5)',
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -659,18 +829,26 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
               stats={inspectStats}
               header={
                 <>
-                  <span style={{ fontWeight: 600 }}>Loop: {inspect.loopId}</span>
-                  {inspect.sessionId && (
-                    <span className="tag" style={{ borderColor: 'var(--green)' }}>
-                      session {inspect.sessionId}
-                    </span>
-                  )}
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    streaming live
+                  <span style={{ fontWeight: 600 }}>
+                    Loop: <span className="mono">{inspect.loopId}</span>
                   </span>
+                  {inspect.sessionId && (
+                    <>
+                      <StatusPill tone="info">session</StatusPill>
+                      <CopyButton text={inspect.sessionId} title="Copy session id" />
+                    </>
+                  )}
+                  <StatusPill tone="running" dot>
+                    streaming live
+                  </StatusPill>
                   <div className="spacer" />
-                  <button className="btn" onClick={closeInspect}>
-                    Close
+                  <button
+                    ref={closeInspectRef}
+                    className="btn"
+                    onClick={closeInspect}
+                    aria-label="Close loop inspector"
+                  >
+                    <Icon name="close" size={14} /> Close
                   </button>
                 </>
               }

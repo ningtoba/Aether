@@ -6,6 +6,73 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.4 — GUI redesign + security hardening (2026-08-30)
+
+An audit-driven iteration: the web GUI was redesigned against a proper design
+system, and two CRITICAL security defects found by adversarial review were
+closed.
+
+Security (backend):
+
+- `GET /api/omp/sessions/read?path=…` previously passed the raw query value to
+  `readFileSync` — any host file could be read or probed (the old 404 body even
+  echoed `ENOENT`/`EACCES`/`EISDIR` plus absolute paths), on a route with no
+  RBAC mapping, in a deployment that published the API on all LAN interfaces.
+  Reads are now confined to regular `.jsonl` files whose realpath resolves
+  inside omp's session roots; every other path returns a fixed
+  `session not found` 404 with zero filesystem detail.
+- CORS was hardcoded `*` with no way to close it: any web page left open in the
+  developer's browser could drive `POST /api/sessions` + prompt — i.e. drive-by
+  agent execution with the user's tools. CORS is now same-origin-only by
+  default (no `Access-Control-Allow-Origin` at all unless the request `Origin`
+  exactly matches `AETHER_CORS_ORIGINS`); the same list now actually gates
+  legacy WebSocket upgrade origins, and starting unauthenticated on a
+  non-loopback bind prints a loud warning.
+- `docker-compose.yml` publishes `127.0.0.1:3081`/`127.0.0.1:3082`; LAN
+  exposure is an explicit opt-in (documented alongside `AETHER_API_KEY`).
+- API-key comparison now uses `crypto.timingSafeEqual` (the digest compare
+  claimed constant-time but `Buffer.equals` short-circuits).
+- `shell`/`sandbox-ts` child runs now settle on `exit` after a 250 ms drain
+  window: Bun never closes stdio pipes for signal-killed children, so
+  `def.timeoutMs` was silently ignored and dangling handles pinned the loop.
+
+GUI (all eight views):
+
+- Real design-token layer (`src/tokens.css`): layered surfaces, hairline
+  borders, AA text ramp, status hues with soft variants, spacing/radius/shadow
+  scales, motion tokens, `color-scheme: dark` — replacing the partial palette
+  embedded in `index.html` and ~16 off-token hexes.
+- Shared primitives (`src/components/ui.tsx`): 28 hand-authored SVG icons (no
+  more emoji), `PageHeader`/`Card`/`StatCard`/`StatusPill`/`EmptyState`/
+  `ErrorState`/`Skeleton`/`SegmentedControl`/`ConfirmButton`/`CopyButton` and
+  `fmtCompact`/`fmtRelative` (token counts render as `1M`/`262K`).
+- Chat is a proper surface: distinct user/assistant/tool role chips and tinting
+  (user messages were styled identically to assistant — the CSS rule never
+  existed), tool results capped at 240 px with show-more instead of flooding
+  the transcript, auto-scroll only when you are already near the bottom,
+  multiline textarea (Shift+Enter newline) with an IME composition guard,
+  actionable empty states, loop inspector as a real dialog (role, Escape,
+  autofocus).
+- No more lying states: Dashboard skeletons while loading instead of confident
+  "0" cards with swallowed errors (`catch(() => {})`), collected
+  `role=alert` errors with Retry; false empty-state flashes during fetch fixed
+  on Loops/Sessions/Skills; Models/Providers/Agents gained loading +
+  actionable empty states.
+- Accessibility & responsiveness: visible `:focus-visible` rings,
+  `aria-current`/`aria-pressed`, labeled inputs, contrast ramp ≥ 4.5:1,
+  `prefers-reduced-motion`; sidebar collapses to an icon rail and side-by-side
+  rails stack at ≤ 1100 px; wide tables scroll instead of clipping.
+- Sessions/Loops UX: visible selection states, searchable lists, busy-guard on
+  session creation, destructive actions behind ConfirmButton, model pickers
+  self-correct to models actually in the catalog.
+
+Verified: 630 tests / 40 files, `tsc -b --force` clean, lint 0 errors,
+prettier clean; the new path-confinement tests were discrimination-checked
+(guard bypassed → 3 failures) and the CORS suite proves the default server
+emits no `Access-Control-Allow-Origin`.
+
+---
+
 ## v0.3.3 — truthful model-error diagnostics (2026-08-30)
 
 Session prompts no longer claim "the model may not be available on the
@@ -32,7 +99,7 @@ configured server" when a turn actually fails for a known reason.
 Verified with the real omp SDK + local vLLM: the unserved alias returns an
 empty assistant message with `stopReason: "error"` and a 404 `errorMessage`;
 `createSession` now rejects that alias upfront, and the served `-0731` model
-prompts normally with no session error. 593 tests, tsc -b, lint 0 errors,
+prompts normally with no session error. 610 tests, tsc -b, lint 0 errors,
 prettier clean.
 
 ---

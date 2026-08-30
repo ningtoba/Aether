@@ -15,8 +15,20 @@ import {
   type FacadeProvider,
   type ProviderRecord,
 } from '../lib/api';
+import {
+  Card,
+  ConfirmButton,
+  CopyButton,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  Skeleton,
+  StatusPill,
+} from '../components/ui';
 
 const API_STYLES = ['openai-completions', 'chat-completions', 'anthropic', 'google'];
+
+const REQUIRED: React.CSSProperties = { color: 'var(--error)' };
 
 export function ProvidersPage() {
   const [status, setStatus] = useState<FacadeStatus | null>(null);
@@ -34,6 +46,8 @@ export function ProvidersPage() {
   const [jump, setJump] = useState('');
   const [expanded, setExpanded] = useState<string | null>(null);
 
+  const [catalogLoading, setCatalogLoading] = useState(true);
+
   const [error, setError] = useState<string | null>(null);
   const [catalogErr, setCatalogErr] = useState<string | null>(null);
   const [verify, setVerify] = useState<{ name: string; found: boolean; modelCount: number } | null>(
@@ -48,14 +62,19 @@ export function ProvidersPage() {
       .catch(() =>
         setStatus({ available: false, runtime: 'node', capabilities: [], error: undefined }),
       );
+    setCatalogLoading(true);
     listFacadeProviders()
       .then((r) => {
         setProviders(r.providers);
         setCatalogErr(null);
       })
-      .catch((e: Error) => setCatalogErr(e.message));
+      .catch((e: Error) => setCatalogErr(e.message))
+      .finally(() => setCatalogLoading(false));
     listProviders()
-      .then((r) => setLegacy(r.providers))
+      .then((r) => {
+        setLegacy(r.providers);
+        setError(null);
+      })
       .catch((e: Error) => setError(e.message));
   }, []);
 
@@ -115,49 +134,52 @@ export function ProvidersPage() {
 
   return (
     <>
-      <div className="row" style={{ marginBottom: 12 }}>
-        <h2 style={{ margin: 0 }}>Providers</h2>
-        {status === null ? (
-          <span className="tag">checking engine…</span>
-        ) : engineAvailable ? (
-          <span className="tag running">
-            omp engine{status.version ? ` v${status.version}` : ''}
-          </span>
-        ) : (
-          <span className="tag gated">engine unavailable</span>
-        )}
-      </div>
+      <PageHeader
+        title="Providers"
+        subtitle="Live omp catalog plus the legacy configured-provider registry."
+        actions={
+          status === null ? (
+            <StatusPill tone="idle" dot>
+              checking engine…
+            </StatusPill>
+          ) : engineAvailable ? (
+            <StatusPill tone="ok" dot>
+              omp engine{status.version ? ` v${status.version}` : ''}
+            </StatusPill>
+          ) : (
+            <StatusPill tone="warn" dot>
+              engine unavailable
+            </StatusPill>
+          )
+        }
+      />
 
-      {error && (
-        <div className="card" style={{ marginBottom: 12, borderColor: 'var(--red)' }}>
-          <span className="muted">{error}</span>
-          <button className="btn" style={{ marginLeft: 8 }} onClick={() => setError(null)}>
-            dismiss
-          </button>
-        </div>
-      )}
+      {error && <ErrorState message={error} onRetry={refresh} />}
 
       {status && !engineAvailable && (
-        <div className="card" style={{ marginBottom: 12 }}>
+        <Card>
           <span className="muted">
             The omp engine is unavailable (it needs the Bun runtime), so live provider discovery is
             off and the add form below is disabled. The legacy configured list still works.
             {status.error ? ` (${status.error})` : ''}
           </span>
-        </div>
+        </Card>
       )}
 
-      <div className="grid" style={{ gridTemplateColumns: '320px 1fr' }}>
-        <div className="card">
-          <h3>Add custom provider</h3>
+      <div className="grid" style={{ gridTemplateColumns: '320px 1fr', alignItems: 'start' }}>
+        <Card title="Add custom provider">
           {!engineAvailable && (
             <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
               Disabled until the engine is back — save, then verify against the omp catalog.
             </div>
           )}
           <div className="field">
-            <label>Name</label>
+            <label htmlFor="pv-name">
+              Name <span style={REQUIRED} aria-hidden="true">*</span>{' '}
+              <span className="key">name</span>
+            </label>
             <input
+              id="pv-name"
               className="input"
               value={name}
               disabled={!engineAvailable}
@@ -166,8 +188,11 @@ export function ProvidersPage() {
             />
           </div>
           <div className="field">
-            <label>API style</label>
+            <label htmlFor="pv-style">
+              API style <span className="key">type</span>
+            </label>
             <select
+              id="pv-style"
               className="select"
               value={apiStyle}
               disabled={!engineAvailable}
@@ -188,12 +213,17 @@ export function ProvidersPage() {
                 disabled={!engineAvailable}
                 onChange={(e) => setCustomStyle(e.target.value)}
                 placeholder="e.g. vllm"
+                aria-label="Custom API style"
               />
             )}
           </div>
           <div className="field">
-            <label>Base URL</label>
+            <label htmlFor="pv-url">
+              Base URL <span style={REQUIRED} aria-hidden="true">*</span>{' '}
+              <span className="key">endpoint</span>
+            </label>
             <input
+              id="pv-url"
               className="input"
               value={baseUrl}
               disabled={!engineAvailable}
@@ -202,8 +232,11 @@ export function ProvidersPage() {
             />
           </div>
           <div className="field">
-            <label>API key</label>
+            <label htmlFor="pv-key">
+              API key <span className="key">apiKey</span>
+            </label>
             <input
+              id="pv-key"
               className="input"
               type="password"
               value={apiKey}
@@ -211,6 +244,7 @@ export function ProvidersPage() {
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="(optional)"
             />
+            <span className="help">Stored server-side by the legacy registry; never echoed back.</span>
           </div>
           <button
             className="btn primary"
@@ -224,46 +258,56 @@ export function ProvidersPage() {
           </button>
 
           {verify && (
-            <div className="stack" style={{ gap: 4, marginTop: 12 }}>
+            <div className="stack" style={{ gap: 6, marginTop: 12 }}>
               {verify.found && verify.modelCount > 0 && (
-                <span style={{ color: 'var(--green)', fontSize: 12 }}>
-                  ✓ {verify.name} is live in the catalog with {verify.modelCount} model
-                  {verify.modelCount === 1 ? '' : 's'}.
+                <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  <StatusPill tone="ok" dot>
+                    live
+                  </StatusPill>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {verify.name} is live in the catalog with {verify.modelCount} model
+                    {verify.modelCount === 1 ? '' : 's'}.
+                  </span>
                 </span>
               )}
               {verify.found && verify.modelCount === 0 && (
-                <span style={{ color: 'var(--yellow)', fontSize: 12 }}>
-                  {verify.name} registered but the catalog reports 0 models — check the base URL and
-                  API style.
+                <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  <StatusPill tone="warn" dot>
+                    no models
+                  </StatusPill>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {verify.name} registered but the catalog reports 0 models — check the base URL
+                    and API style.
+                  </span>
                 </span>
               )}
               {!verify.found && (
-                <span style={{ color: 'var(--red)', fontSize: 12 }}>
-                  {verify.name} was saved but not found in the omp catalog — it may not be
-                  discoverable, or the engine needs a restart to pick it up.
+                <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
+                  <StatusPill tone="error" dot>
+                    not found
+                  </StatusPill>
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    {verify.name} was saved but not found in the omp catalog — it may not be
+                    discoverable, or the engine needs a restart to pick it up.
+                  </span>
                 </span>
               )}
             </div>
           )}
-        </div>
+        </Card>
 
         <div className="stack">
-          <div className="card">
-            <div className="row" style={{ marginBottom: 10 }}>
-              <h3 style={{ margin: 0 }}>Every provider ({providers.length})</h3>
-              <div className="spacer" />
-              <span className="muted" style={{ fontSize: 11 }}>
+          <Card
+            title={`Every provider (${providers.length})`}
+            actions={
+              <span className="mono muted" style={{ fontSize: 11 }}>
                 via /api/omp/providers
               </span>
-            </div>
+            }
+          >
             {catalogErr && (
-              <div className="row" style={{ marginBottom: 10, gap: 6 }}>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  Catalog unavailable: {catalogErr}
-                </span>
-                <button className="btn" onClick={() => setCatalogErr(null)}>
-                  dismiss
-                </button>
+              <div style={{ marginBottom: 10 }}>
+                <ErrorState message={`Catalog unavailable: ${catalogErr}`} onRetry={refresh} />
               </div>
             )}
             <div className="row" style={{ marginBottom: 10 }}>
@@ -271,11 +315,13 @@ export function ProvidersPage() {
                 className="input"
                 style={{ flex: 1 }}
                 placeholder="Search providers…"
+                aria-label="Search providers"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
               <select
                 className="select"
+                aria-label="Jump to provider"
                 value={jump}
                 onChange={(e) => {
                   setJump(e.target.value);
@@ -290,129 +336,175 @@ export function ProvidersPage() {
                 ))}
               </select>
             </div>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Provider</th>
-                  <th>Models</th>
-                  <th>Base URL</th>
-                  <th>Auth</th>
-                  <th>Discoverable</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => {
-                  const open = expanded === p.id;
-                  const samples = p.models.slice(0, 10);
-                  return (
-                    <Fragment key={p.id}>
-                      <tr>
-                        <td>
-                          <div>{p.name}</div>
-                          {p.id !== p.name && (
-                            <div className="mono muted" style={{ fontSize: 11 }}>
-                              {p.id}
-                            </div>
-                          )}
-                        </td>
-                        <td>
-                          <span className="tag">{p.modelCount}</span>
-                        </td>
-                        <td className="mono muted">{p.baseUrl ?? '—'}</td>
-                        <td>
-                          {p.authenticated ? (
-                            <span className="tag running">authenticated</span>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                        <td>
-                          {p.discoverable ? (
-                            <span className="tag completed">discoverable</span>
-                          ) : (
-                            <span className="muted">—</span>
-                          )}
-                        </td>
-                        <td>
-                          {p.modelCount > 0 && (
-                            <button className="btn" onClick={() => setExpanded(open ? null : p.id)}>
-                              {open ? 'collapse' : `models (${p.modelCount})`}
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                      {open && (
-                        <tr>
-                          <td colSpan={6} style={{ padding: '2px 10px 12px' }}>
-                            <div
-                              className="mono"
-                              style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}
-                            >
-                              {samples.map((m) => (
-                                <span key={m} className="tag">
-                                  {m}
-                                </span>
-                              ))}
-                              {p.modelCount - samples.length > 0 && (
-                                <span
-                                  className="muted"
-                                  style={{ fontSize: 11, alignSelf: 'center' }}
-                                >
-                                  +{p.modelCount - samples.length} more
-                                </span>
+
+            {catalogLoading && providers.length === 0 && <Skeleton rows={6} />}
+
+            {!catalogLoading && filtered.length === 0 && (
+              <EmptyState
+                icon="providers"
+                title={providers.length === 0 ? 'No providers in the catalog' : 'No providers match'}
+                message={
+                  providers.length === 0
+                    ? 'The catalog comes from the omp model registry (~/.omp/agent/models.yml + installed providers).'
+                    : 'Try a different search term, or clear the jump-to selection.'
+                }
+                action={
+                  q ? (
+                    <button
+                      className="btn ghost"
+                      onClick={() => {
+                        setQuery('');
+                        setJump('');
+                      }}
+                    >
+                      Clear search
+                    </button>
+                  ) : undefined
+                }
+              />
+            )}
+
+            {filtered.length > 0 && (
+              <div style={{ overflow: 'auto', maxHeight: 440 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>Provider</th>
+                      <th>Models</th>
+                      <th>Base URL</th>
+                      <th>Auth</th>
+                      <th>Discoverable</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((p) => {
+                      const open = expanded === p.id;
+                      const samples = p.models.slice(0, 10);
+                      return (
+                        <Fragment key={p.id}>
+                          <tr>
+                            <td>
+                              <div style={{ fontWeight: 600 }}>{p.name}</div>
+                              {p.id !== p.name && (
+                                <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                                  <span className="mono muted" style={{ fontSize: 11 }}>
+                                    {p.id}
+                                  </span>
+                                  <CopyButton text={p.id} title="Copy provider id" />
+                                </div>
                               )}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
-                {filtered.length === 0 && (
-                  <tr>
-                    <td colSpan={6} className="muted">
-                      No providers match. The catalog comes from the omp model registry
-                      (~/.omp/agent/models.yml + installed providers).
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                            </td>
+                            <td>
+                              <StatusPill tone="idle">{p.modelCount}</StatusPill>
+                            </td>
+                            <td className="mono muted" style={{ maxWidth: 280 }} title={p.baseUrl ?? undefined}>
+                              {p.baseUrl ?? '—'}
+                            </td>
+                            <td>
+                              {p.authenticated ? (
+                                <StatusPill tone="ok" dot>
+                                  configured
+                                </StatusPill>
+                              ) : (
+                                <StatusPill tone="idle">not configured</StatusPill>
+                              )}
+                            </td>
+                            <td>
+                              {p.discoverable ? (
+                                <StatusPill tone="info">discoverable</StatusPill>
+                              ) : (
+                                <span className="muted">—</span>
+                              )}
+                            </td>
+                            <td>
+                              {p.modelCount > 0 && (
+                                <button
+                                  className="btn sm"
+                                  onClick={() => setExpanded(open ? null : p.id)}
+                                >
+                                  {open ? 'collapse' : `models (${p.modelCount})`}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                          {open && (
+                            <tr>
+                              <td colSpan={6} style={{ padding: '2px 10px 12px' }}>
+                                <pre
+                                  className="code-preview"
+                                  style={{ margin: 0, maxHeight: 240, overflowY: 'auto' }}
+                                >
+                                  {samples.join('\n')}
+                                  {p.modelCount - samples.length > 0
+                                    ? `\n+${p.modelCount - samples.length} more`
+                                    : ''}
+                                </pre>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
 
           {legacy.length > 0 && (
-            <div className="card">
-              <h3>Configured (legacy) ({legacy.length})</h3>
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Type</th>
-                    <th>Endpoint</th>
-                    <th>Key</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {legacy.map((p) => (
-                    <tr key={p.id}>
-                      <td>{p.name}</td>
-                      <td>
-                        <span className="tag">{p.type}</span>
-                      </td>
-                      <td className="mono muted">{p.endpoint ?? '—'}</td>
-                      <td>{p.apiKeyConfigured ? '✓' : '—'}</td>
-                      <td>
-                        <button className="btn danger" onClick={() => del(p.id)}>
-                          Remove
-                        </button>
-                      </td>
+            <Card title={`Configured (legacy) (${legacy.length})`}>
+              <div style={{ overflow: 'auto', maxHeight: 440 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Type</th>
+                      <th>Endpoint</th>
+                      <th>API key</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {legacy.map((p) => (
+                      <tr key={p.id}>
+                        <td>
+                          <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                            <span className="mono">{p.id}</span>
+                            <CopyButton text={p.id} title="Copy provider id" />
+                          </div>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{p.name}</td>
+                        <td>
+                          <StatusPill tone="idle">{p.type}</StatusPill>
+                        </td>
+                        <td className="mono muted" style={{ maxWidth: 280 }} title={p.endpoint ?? undefined}>
+                          {p.endpoint ?? '—'}
+                        </td>
+                        <td>
+                          {p.apiKeyConfigured ? (
+                            <StatusPill tone="ok" dot>
+                              configured
+                            </StatusPill>
+                          ) : (
+                            <StatusPill tone="idle">not configured</StatusPill>
+                          )}
+                        </td>
+                        <td>
+                          <ConfirmButton
+                            title={`Remove ${p.name}`}
+                            onConfirm={() => void del(p.id)}
+                          >
+                            Remove
+                          </ConfirmButton>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </Card>
           )}
         </div>
       </div>

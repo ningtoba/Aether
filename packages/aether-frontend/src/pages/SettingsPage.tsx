@@ -7,8 +7,10 @@
  * inline, and credentials get a masked input that never echoes the stored
  * value. Changes auto-save through PUT /api/omp/settings with a small
  * per-setting saved/error flash. A search box filters settings across every
- * tab. When the engine is unavailable (501), the page degrades to a neutral
- * hint plus the unaffected legacy control-plane.
+ * tab; the tab strip is a segmented row of toggle buttons (every schema tab
+ * stays listed, including ones with no settings). When the engine is
+ * unavailable (501), the page degrades to a neutral hint plus the unaffected
+ * legacy control-plane.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,6 +20,7 @@ import {
   type SettingDef,
   type SettingsSchema,
 } from '../lib/api';
+import { Card, EmptyState, Icon, PageHeader, Skeleton, StatusPill } from '../components/ui';
 
 /** Legacy control-plane surfaces that keep working while the engine is down. */
 const LEGACY_BEHAVIORS: Array<{ name: string; note: string }> = [
@@ -101,21 +104,26 @@ function SettingRow({
 }: SettingRowProps) {
   const credential = isCredential(def);
   const shown = draft !== undefined ? draft : stringifyForInput(value);
+  const name = def.label ?? def.path;
 
   let control: React.ReactNode;
   if (def.type === 'boolean') {
     const on = value === true;
     control = (
-      <div className="row">
+      <div className="seg-row" role="group" aria-label={`${name} enabled`}>
         <button
-          className={`btn ${on ? 'primary' : ''}`}
+          type="button"
+          className={`seg-btn ${on ? 'active' : ''}`}
+          aria-pressed={on}
           disabled={saving}
           onClick={() => onCommit(def.path, true)}
         >
           Enabled
         </button>
         <button
-          className={`btn ${on ? '' : 'primary'}`}
+          type="button"
+          className={`seg-btn ${on ? '' : 'active'}`}
+          aria-pressed={!on}
           disabled={saving}
           onClick={() => onCommit(def.path, false)}
         >
@@ -230,13 +238,13 @@ function SettingRow({
     <div className="field" style={{ marginBottom: 0 }}>
       <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <div className="row" style={{ flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, color: 'var(--text)' }}>{def.label ?? def.path}</span>
-          <span className="mono muted">{def.path}</span>
-          {tabLabel && <span className="tag">{tabLabel}</span>}
+          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{name}</span>
+          <span className="key mono">{def.path}</span>
+          {tabLabel && <StatusPill tone="idle">{tabLabel}</StatusPill>}
           {credential && (
-            <span className="tag" style={{ color: 'var(--yellow)', borderColor: 'var(--yellow)' }}>
+            <StatusPill tone="warn" dot>
               credential
-            </span>
+            </StatusPill>
           )}
         </div>
         <div className="row">
@@ -245,23 +253,23 @@ function SettingRow({
               saving…
             </span>
           )}
-          {status && (
-            <span
-              className="mono"
-              style={{ fontSize: 11, color: status.ok ? 'var(--green)' : 'var(--red)' }}
-            >
-              {status.ok ? 'saved' : status.msg}
-            </span>
-          )}
+          {status &&
+            (status.ok ? (
+              <StatusPill tone="ok">saved</StatusPill>
+            ) : (
+              <span role="alert">
+                <StatusPill tone="error">{status.msg}</StatusPill>
+              </span>
+            ))}
         </div>
       </div>
       {def.description && (
-        <p className="muted" style={{ fontSize: 12, margin: '2px 0 6px' }}>
+        <p className="help" style={{ fontSize: 12, margin: '2px 0 6px' }}>
           {def.description}
         </p>
       )}
       {credential && (
-        <p style={{ fontSize: 12, margin: '0 0 6px', color: 'var(--yellow)' }}>
+        <p style={{ fontSize: 12, margin: '0 0 6px', color: 'var(--warn)' }}>
           Secret — the stored value is never shown. Leave the field blank to keep it unchanged.
         </p>
       )}
@@ -437,10 +445,10 @@ export function SettingsPage() {
   if (loading) {
     return (
       <>
-        <h2>Settings</h2>
-        <div className="card">
-          <span className="muted">Loading settings…</span>
-        </div>
+        <PageHeader title="Settings" subtitle="omp SETTINGS_SCHEMA · loading…" />
+        <Card>
+          <Skeleton rows={6} />
+        </Card>
       </>
     );
   }
@@ -448,28 +456,28 @@ export function SettingsPage() {
   if (legacy) {
     return (
       <>
-        <h2>Settings</h2>
-        <div className="card" style={{ marginBottom: 12 }}>
-          <h3>Live settings unavailable</h3>
-          <p className="muted" style={{ fontSize: 13, margin: '0 0 12px' }}>
-            The agent engine is not running under Bun (or the backend is unreachable):{' '}
-            <span className="mono">{hint || 'engine not configured'}</span>. Omp reads its config
-            from <span className="mono">~/.omp/agent/config.yml</span> on disk, so nothing here is
-            required to keep running — editing is disabled on this page.
-          </p>
-        </div>
-        <div className="card">
-          <h3>Legacy behaviors (still served)</h3>
-          <table className="table">
-            <tbody>
-              {LEGACY_BEHAVIORS.map((b) => (
-                <tr key={b.name}>
-                  <td style={{ width: 220 }}>{b.name}</td>
-                  <td className="muted">{b.note}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <PageHeader title="Settings" subtitle="live engine settings unavailable" />
+        <div className="stack">
+          <Card title="Live settings unavailable">
+            <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+              The agent engine is not running under Bun (or the backend is unreachable):{' '}
+              <span className="mono">{hint || 'engine not configured'}</span>. Omp reads its config
+              from <span className="mono">~/.omp/agent/config.yml</span> on disk, so nothing here
+              is required to keep running — editing is disabled on this page.
+            </p>
+          </Card>
+          <Card title="Legacy behaviors (still served)">
+            <table className="table">
+              <tbody>
+                {LEGACY_BEHAVIORS.map((b) => (
+                  <tr key={b.name}>
+                    <td style={{ width: 220 }}>{b.name}</td>
+                    <td className="muted">{b.note}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </Card>
         </div>
       </>
     );
@@ -477,57 +485,98 @@ export function SettingsPage() {
 
   return (
     <>
-      <h2>Settings</h2>
-      <div className="card" style={{ marginBottom: 14 }}>
-        <input
-          className="input"
-          style={{ width: '100%' }}
-          placeholder="Search settings by path, label, or description…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-        />
+      <PageHeader
+        title="Settings"
+        subtitle={
+          <>
+            omp SETTINGS_SCHEMA · {schema?.settings.length ?? 0} settings exposed · autosaved on
+            change
+          </>
+        }
+      />
+
+      <div className="stack">
+        <Card>
+          <div className="row" style={{ gap: 'var(--s-2)' }}>
+            <span className="muted" aria-hidden="true" style={{ display: 'inline-flex' }}>
+              <Icon name="search" />
+            </span>
+            <input
+              className="input"
+              style={{ flex: 1 }}
+              aria-label="Search settings by path, label, or description"
+              placeholder="Search settings by path, label, or description…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+        </Card>
+
+        {schema && schema.tabs.length > 0 && !queryLower && (
+          <div
+            className="seg-row"
+            role="group"
+            aria-label="Settings tabs"
+            style={{ overflowX: 'auto', flexWrap: 'nowrap' }}
+          >
+            {schema.tabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                className={`seg-btn ${tab === t.id ? 'active' : ''}`}
+                aria-pressed={tab === t.id}
+                onClick={() => setTab(t.id)}
+              >
+                {t.label && t.label !== t.id ? t.label : prettyTab(t.id)}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {queryLower ? (
+          searchResults.length === 0 ? (
+            <EmptyState
+              icon="search"
+              title="No settings match"
+              message={<>Nothing matches “{query.trim()}” — try a different path, label, or keyword.</>}
+              action={
+                <button className="btn" onClick={() => setQuery('')}>
+                  Clear search
+                </button>
+              }
+            />
+          ) : (
+            <Card title={`Search results (${searchResults.length})`}>
+              <div className="stack">{searchResults.map((d) => renderRow(d, tabLabelOf(schema, d.tab)))}</div>
+            </Card>
+          )
+        ) : (
+          <>
+            {((schema?.settings.length ?? 0) === 0 ||
+              (ungrouped.length === 0 && sections.length === 0)) && (
+              <EmptyState
+                icon="settings"
+                title="Nothing to edit here"
+                message={
+                  (schema?.settings.length ?? 0) === 0
+                    ? 'The engine exposes no settings through the schema endpoint.'
+                    : 'No settings exposed for this tab — try another tab or search across all of them.'
+                }
+              />
+            )}
+            {ungrouped.length > 0 && (
+              <Card>
+                <div className="stack">{ungrouped.map((d) => renderRow(d))}</div>
+              </Card>
+            )}
+            {sections.map((sec) => (
+              <Card key={sec.title} title={sec.title}>
+                <div className="stack">{sec.items.map((d) => renderRow(d))}</div>
+              </Card>
+            ))}
+          </>
+        )}
       </div>
-
-      {schema && schema.tabs.length > 0 && !queryLower && (
-        <div className="row" style={{ flexWrap: 'wrap' }}>
-          {schema.tabs.map((t) => (
-            <button
-              key={t.id}
-              className={`btn ${tab === t.id ? 'primary' : ''}`}
-              onClick={() => setTab(t.id)}
-            >
-              {t.label && t.label !== t.id ? t.label : prettyTab(t.id)}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {queryLower ? (
-        <div className="stack" style={{ marginTop: 14 }}>
-          {searchResults.length === 0 && (
-            <div className="card">
-              <span className="muted">No settings match “{query.trim()}”.</span>
-            </div>
-          )}
-          {searchResults.map((d) => renderRow(d, tabLabelOf(schema, d.tab)))}
-        </div>
-      ) : (
-        <div className="stack" style={{ marginTop: 14 }}>
-          {((schema?.settings.length ?? 0) === 0 ||
-            (ungrouped.length === 0 && sections.length === 0)) && (
-            <div className="card">
-              <span className="muted">No settings exposed for this tab.</span>
-            </div>
-          )}
-          {ungrouped.length > 0 && <div className="card">{ungrouped.map((d) => renderRow(d))}</div>}
-          {sections.map((sec) => (
-            <div className="card" key={sec.title}>
-              <h3>{sec.title}</h3>
-              <div className="stack">{sec.items.map((d) => renderRow(d))}</div>
-            </div>
-          ))}
-        </div>
-      )}
     </>
   );
 }

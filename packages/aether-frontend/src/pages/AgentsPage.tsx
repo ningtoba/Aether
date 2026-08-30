@@ -1,5 +1,21 @@
-import React, { useEffect, useState } from 'react';
+/**
+ * Agents — omp agent catalog (bundled + ~/.omp/agent/agents + .omp/agents) with
+ * a legacy control-plane fallback when the embedded engine (Bun) is unavailable.
+ */
+import React, { useCallback, useEffect, useState } from 'react';
 import { listOmpAgents, listAgents, type AgentDef, type AgentRecord } from '../lib/api';
+import {
+  Card,
+  CopyButton,
+  EmptyState,
+  ErrorState,
+  PageHeader,
+  SegmentedControl,
+  Skeleton,
+  StatusPill,
+  fmtRelative,
+  type StatusTone,
+} from '../components/ui';
 
 type SourceFilter = 'all' | 'bundled' | 'user' | 'project';
 
@@ -9,6 +25,12 @@ const SOURCES: Array<{ id: SourceFilter; label: string }> = [
   { id: 'user', label: 'User' },
   { id: 'project', label: 'Project' },
 ];
+
+const KIND_TONE: Record<AgentDef['source'], StatusTone> = {
+  bundled: 'idle',
+  user: 'ok',
+  project: 'info',
+};
 
 function inspectText(a: AgentDef): string {
   let out = '';
@@ -23,6 +45,12 @@ function inspectText(a: AgentDef): string {
   return out.trim();
 }
 
+function legacyTone(status: string): StatusTone {
+  if (status === 'running') return 'running';
+  if (status === 'error') return 'error';
+  return 'idle';
+}
+
 export function AgentsPage() {
   const [agents, setAgents] = useState<AgentDef[]>([]);
   const [legacy, setLegacy] = useState<AgentRecord[]>([]);
@@ -32,8 +60,10 @@ export function AgentsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
+  const refresh = useCallback(() => {
     let cancelled = false;
+    setMode('loading');
+    setError(null);
     (async () => {
       try {
         const r = await listOmpAgents();
@@ -60,6 +90,8 @@ export function AgentsPage() {
     };
   }, []);
 
+  useEffect(refresh, [refresh]);
+
   const q = query.trim().toLowerCase();
   const filtered = agents.filter((a) => {
     if (source !== 'all' && a.source !== source) return false;
@@ -71,112 +103,164 @@ export function AgentsPage() {
     );
   });
 
+  const filtering = q !== '' || source !== 'all';
   const current = filtered.find((a) => a.name === selected) ?? null;
   const currentText = current ? inspectText(current) : '';
+
   return (
     <>
-      <h2>Agents</h2>
-      {error && (
-        <div className="card" style={{ marginBottom: 12, borderColor: 'var(--red)' }}>
-          <span className="muted">{error}</span>
-          <button className="btn" style={{ marginLeft: 8 }} onClick={() => setError(null)}>
-            dismiss
-          </button>
-        </div>
-      )}
-
-      {mode === 'loading' && <div className="muted">Loading…</div>}
-
-      {mode === 'omp' && (
-        <>
-          <div className="row" style={{ marginBottom: 12, flexWrap: 'wrap' }}>
-            {SOURCES.map((s) => (
-              <button
-                key={s.id}
-                className={`btn ${source === s.id ? 'primary' : ''}`}
-                onClick={() => setSource(s.id)}
-              >
-                {s.label}
-              </button>
-            ))}
-            <span className="spacer" />
+      <PageHeader
+        title="Agents"
+        subtitle={
+          mode === 'loading'
+            ? 'Loading the agent catalog…'
+            : mode === 'omp'
+              ? `${filtered.length} of ${agents.length} agents in the omp catalog (bundled, user, project)`
+              : 'Legacy control-plane agent registry — the omp engine catalog is unavailable.'
+        }
+        actions={
+          mode === 'omp' ? (
             <input
               className="input"
+              style={{ width: 260 }}
               placeholder="Search name, description or path…"
+              aria-label="Search agents"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              style={{ width: 260 }}
             />
+          ) : undefined
+        }
+      />
+
+      {error && <ErrorState message={error} onRetry={refresh} />}
+
+      {mode === 'loading' && <Skeleton rows={6} />}
+
+      {mode === 'omp' && (
+        <div className="stack">
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <SegmentedControl
+              value={source}
+              onChange={setSource}
+              options={SOURCES.map((s) => ({ value: s.id, label: s.label }))}
+            />
+            <span className="spacer" />
+            <span className="muted" style={{ fontSize: 12 }}>
+              {agents.length} agent{agents.length === 1 ? '' : 's'} loaded
+            </span>
           </div>
 
-          <div
-            className="grid"
-            style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))' }}
-          >
-            {filtered.map((a) => (
-              <div
-                key={a.name}
-                className="card"
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: 6,
-                  alignItems: 'flex-start',
-                }}
-              >
-                <div className="row" style={{ width: '100%', flexWrap: 'wrap' }}>
-                  <strong>{a.name}</strong>
-                  <span className="tag">{a.source}</span>
-                  <span className="spacer" />
+          {filtered.length === 0 ? (
+            <EmptyState
+              icon="agents"
+              title="No matching agents"
+              message={
+                agents.length === 0
+                  ? 'The omp engine reported an empty agent catalog.'
+                  : 'Try a different source or search term.'
+              }
+              action={
+                filtering ? (
                   <button
-                    className={`btn ${selected === a.name ? 'primary' : ''}`}
-                    onClick={() => setSelected(selected === a.name ? null : a.name)}
+                    className="btn ghost"
+                    onClick={() => {
+                      setQuery('');
+                      setSource('all');
+                    }}
                   >
-                    {selected === a.name ? 'Close' : 'Inspect'}
+                    Clear filters
                   </button>
-                </div>
-                <span className="muted" style={{ fontSize: 12 }}>
-                  {a.description || `Bundled ${a.source} agent`}
-                </span>
-                {a.path && (
-                  <span className="muted mono" style={{ fontSize: 11 }}>
-                    {a.path}
-                  </span>
-                )}
-              </div>
-            ))}
-          </div>
-
-          {filtered.length === 0 && (
-            <div className="card">
-              <span className="muted">
-                No agents match this filter.
-                {agents.length === 0
-                  ? ' The omp engine reported an empty agent catalog.'
-                  : ' Try a different source or search term.'}
-              </span>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div className="grid cols-3">
+              {filtered.map((a) => {
+                const isSel = selected === a.name;
+                return (
+                  <div
+                    key={a.name}
+                    className="card card-ghost"
+                    style={
+                      isSel
+                        ? {
+                            borderColor: 'var(--accent)',
+                            boxShadow: 'inset 2px 0 0 var(--accent-strong), var(--shadow-1)',
+                          }
+                        : undefined
+                    }
+                  >
+                    <div className="card-header">
+                      <span
+                        className="truncate"
+                        style={{ maxWidth: 160, fontWeight: 600 }}
+                        title={a.name}
+                      >
+                        {a.name}
+                      </span>
+                      <StatusPill tone={KIND_TONE[a.source]}>{a.source}</StatusPill>
+                      <span className="spacer" />
+                      <button
+                        className="btn ghost sm"
+                        aria-pressed={isSel}
+                        onClick={() => setSelected(isSel ? null : a.name)}
+                      >
+                        {isSel ? 'Close' : 'Inspect'}
+                      </button>
+                    </div>
+                    <div className="card-body stack" style={{ gap: 6, alignItems: 'flex-start' }}>
+                      <span
+                        className="muted clamp-2"
+                        style={{ fontSize: 12 }}
+                        title={a.description || undefined}
+                      >
+                        {a.description || `Bundled ${a.source} agent`}
+                      </span>
+                      {a.path && (
+                        <span
+                          className="muted mono truncate"
+                          style={{ fontSize: 11 }}
+                          title={a.path}
+                        >
+                          {a.path}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
 
           {current && (
-            <div className="card" style={{ marginTop: 12 }}>
-              <h3>
-                {current.name} <span className="tag">{current.source}</span>
-              </h3>
-              {current.path && (
-                <div className="muted mono" style={{ fontSize: 11, marginBottom: 8 }}>
-                  {current.path}
-                </div>
-              )}
+            <Card
+              title={
+                <span className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
+                  <span style={{ fontWeight: 600 }}>{current.name}</span>
+                  <StatusPill tone={KIND_TONE[current.source]}>{current.source}</StatusPill>
+                </span>
+              }
+              actions={
+                current.path ? (
+                  <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                    <span
+                      className="mono muted truncate"
+                      style={{ fontSize: 11, maxWidth: 360 }}
+                      title={current.path}
+                    >
+                      {current.path}
+                    </span>
+                    <CopyButton text={current.path} title="Copy agent path" />
+                  </span>
+                ) : undefined
+              }
+            >
               {currentText ? (
                 <pre
+                  className="code-preview"
                   style={{
+                    margin: 0,
                     whiteSpace: 'pre-wrap',
-                    background: '#0b0f14',
-                    border: '1px solid var(--border)',
-                    borderRadius: 8,
-                    padding: 12,
-                    fontSize: 12.5,
                     lineHeight: 1.6,
                     maxHeight: 480,
                     overflowY: 'auto',
@@ -190,68 +274,69 @@ export function AgentsPage() {
                   markdown to inspect.
                 </span>
               )}
-            </div>
+            </Card>
           )}
-        </>
+        </div>
       )}
 
       {mode === 'legacy' && (
-        <>
-          <div
-            className="card"
-            style={{
-              marginBottom: 12,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 6,
-              alignItems: 'flex-start',
-            }}
-          >
-            <span className="muted" style={{ fontSize: 12 }}>
-              The omp agent catalog (bundled + <code>~/.omp/agent/agents/*.md</code> +{' '}
-              <code>.omp/agents/*.md</code>) is served by the embedded engine, which is not
-              configured on this server (plain-Node backend — the engine needs the Bun runtime).
-            </span>
-            <span className="muted" style={{ fontSize: 12 }}>
-              Showing the legacy control-plane agent registry instead.
-            </span>
-          </div>
-          <div className="card">
-            <h3>Registered agents ({legacy.length})</h3>
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {legacy.map((a) => (
-                  <tr key={a.id}>
-                    <td>{a.name}</td>
-                    <td>
-                      <span
-                        className={`tag ${a.status === 'running' ? 'running' : a.status === 'error' ? 'error' : ''}`}
-                      >
-                        {a.status}
-                      </span>
-                    </td>
-                    <td className="mono muted">{new Date(a.createdAt).toLocaleString()}</td>
-                  </tr>
-                ))}
-                {legacy.length === 0 && (
-                  <tr>
-                    <td colSpan={3} className="muted">
-                      No agents registered. Start the backend under Bun to unlock the real omp agent
-                      catalog.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </>
+        <div className="stack">
+          <Card>
+            <div className="stack" style={{ gap: 6 }}>
+              <span className="muted" style={{ fontSize: 12 }}>
+                The omp agent catalog (bundled + <code>~/.omp/agent/agents/*.md</code> +{' '}
+                <code>.omp/agents/*.md</code>) is served by the embedded engine, which is not
+                configured on this server (plain-Node backend — the engine needs the Bun runtime).
+              </span>
+              <span className="muted" style={{ fontSize: 12 }}>
+                Showing the legacy control-plane agent registry instead.
+              </span>
+            </div>
+          </Card>
+          <Card title={`Registered agents (${legacy.length})`}>
+            {legacy.length === 0 ? (
+              <EmptyState
+                icon="agents"
+                title="No agents registered"
+                message="Start the backend under Bun to unlock the real omp agent catalog."
+              />
+            ) : (
+              <div style={{ overflow: 'auto', maxHeight: 440 }}>
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Name</th>
+                      <th>Status</th>
+                      <th>Created</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {legacy.map((a) => (
+                      <tr key={a.id}>
+                        <td>
+                          <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                            <span className="mono">{a.id}</span>
+                            <CopyButton text={a.id} title="Copy agent id" />
+                          </div>
+                        </td>
+                        <td style={{ fontWeight: 600 }}>{a.name}</td>
+                        <td>
+                          <StatusPill tone={legacyTone(a.status)} dot={a.status === 'running'}>
+                            {a.status}
+                          </StatusPill>
+                        </td>
+                        <td className="mono muted" title={new Date(a.createdAt).toLocaleString()}>
+                          {fmtRelative(a.createdAt) || '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Card>
+        </div>
       )}
     </>
   );

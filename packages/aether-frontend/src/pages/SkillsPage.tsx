@@ -1,5 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { listOmpSkills, listSkills, type SkillRecord } from '../lib/api';
+import {
+  Card,
+  ConfirmButton,
+  EmptyState,
+  Icon,
+  PageHeader,
+  StatusPill,
+  fmtRelative,
+  type StatusTone,
+} from '../components/ui';
 
 interface Draft {
   name: string;
@@ -21,19 +31,26 @@ function loadDrafts(): Draft[] {
   }
 }
 
-function tagClass(source: string): string {
+/** Source → pill tone. omp-managed reads info, user-authored ok, the rest idle. */
+function sourceTone(source: string): StatusTone {
   switch (source) {
     case 'user':
-      return 'running';
+      return 'ok';
     case 'project':
-      return 'completed';
     case 'managed':
     case 'managed-skills':
-      return 'gated';
+      return 'info';
     default:
-      return '';
+      // bundled / legacy / unknown — neutral, never error
+      return 'idle';
   }
 }
+
+const iconBtn: React.CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 'var(--s-2)',
+};
 
 export function SkillsPage() {
   const [skills, setSkills] = useState<SkillRecord[]>([]);
@@ -137,6 +154,14 @@ export function SkillsPage() {
     setDraftNote(null);
   };
 
+  const clearEditing = () => {
+    setEditing(null);
+    setName('');
+    setDescription('');
+    setBody('');
+    setDraftNote(null);
+  };
+
   const q = query.trim().toLowerCase();
   const filtered = q
     ? skills.filter(
@@ -146,207 +171,261 @@ export function SkillsPage() {
 
   return (
     <>
-      <h2>Skills</h2>
-      {error && (
-        <div className="card" style={{ marginBottom: 12, borderColor: 'var(--red)' }}>
-          <div className="row">
+      <PageHeader
+        title="Skills"
+        subtitle={
+          <>
+            {source === 'omp' ? 'omp facade' : 'legacy endpoint'} · {filtered.length} of{' '}
+            {skills.length} discovered · {drafts.length} local draft{drafts.length === 1 ? '' : 's'}
+          </>
+        }
+        actions={
+          <button className="btn" style={iconBtn} onClick={refresh}>
+            <Icon name="refresh" size={14} />
+            Refresh
+          </button>
+        }
+      />
+
+      <div className="stack">
+        {error && (
+          <div className="error-state" role="alert">
             <span className="muted" style={{ flex: 1 }}>
               {error}
             </span>
-            <button className="btn" onClick={() => setError(null)}>
+            <button className="btn sm" onClick={() => setError(null)}>
               Dismiss
             </button>
           </div>
-        </div>
-      )}
-      {fallback && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <div className="row">
-            <span className="muted" style={{ flex: 1 }}>
-              {fallback}
-            </span>
-            <button className="btn" onClick={() => setFallback(null)}>
-              Dismiss
-            </button>
-          </div>
-        </div>
-      )}
-      {warnings && (
-        <div className="card" style={{ marginBottom: 12 }}>
-          <span className="muted">{warnings}</span>
-        </div>
-      )}
-      <div className="grid" style={{ gridTemplateColumns: '320px 1fr' }}>
-        <div className="card">
-          <h3>{editing !== null ? 'Edit draft' : 'Draft a skill'}</h3>
-          <div className="field">
-            <label>Name</label>
-            <input
-              className="input"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="my-useful-skill"
-            />
-          </div>
-          <div className="field">
-            <label>Description</label>
-            <input
-              className="input"
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
-          </div>
-          <div className="field">
-            <label>Body (markdown)</label>
-            <textarea
-              className="textarea"
-              style={{ minHeight: 180 }}
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-            />
-          </div>
-          <div className="row">
-            <button className="btn primary" onClick={saveDraft}>
-              {editing !== null ? 'Save draft' : 'Create (save draft)'}
-            </button>
-            {editing !== null && (
-              <button
-                className="btn"
-                onClick={() => {
-                  setEditing(null);
-                  setName('');
-                  setDescription('');
-                  setBody('');
-                  setDraftNote(null);
-                }}
-              >
-                Cancel
-              </button>
-            )}
-          </div>
-          {draftNote && (
-            <div className="muted" style={{ marginTop: 10, fontSize: 12 }}>
-              {draftNote}
-            </div>
-          )}
-          {drafts.length > 0 && (
-            <div className="stack" style={{ marginTop: 14 }}>
-              <div className="muted" style={{ fontSize: 11 }}>
-                Local drafts ({drafts.length}) — saved in this browser only
-              </div>
-              {drafts.map((d, i) => (
-                <div key={`${d.savedAt}-${i}`} className="card" style={{ padding: 10, margin: 0 }}>
-                  <div className="row">
-                    <span style={{ flex: 1, fontSize: 13 }}>{d.name}</span>
-                    <button className="btn" onClick={() => loadDraft(i)}>
-                      Load
-                    </button>
-                    <button className="btn danger" onClick={() => deleteDraft(i)}>
-                      Delete
-                    </button>
-                  </div>
-                  {d.description && (
-                    <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
-                      {d.description}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div>
+        )}
+        {fallback && (
           <div className="card">
-            <div className="row" style={{ marginBottom: 10 }}>
-              <h3 style={{ margin: 0, flex: 1 }}>
-                Discovered ({filtered.length}
-                {q ? ` / ${skills.length}` : ''})
-              </h3>
-              <span className={`tag ${source === 'omp' ? 'completed' : 'gated'}`}>
-                {source === 'omp' ? 'omp skills' : 'legacy skills'}
+            <div className="row" style={{ gap: 'var(--s-2)' }}>
+              <StatusPill tone="warn" dot>
+                fallback
+              </StatusPill>
+              <span className="muted" style={{ flex: 1, fontSize: 12 }}>
+                {fallback}
+              </span>
+              <button className="btn sm" onClick={() => setFallback(null)}>
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+        {warnings && (
+          <div className="card">
+            <div className="row" style={{ gap: 'var(--s-2)' }}>
+              <StatusPill tone="warn" dot>
+                warnings
+              </StatusPill>
+              <span className="muted" style={{ flex: 1, fontSize: 12 }}>
+                {warnings}
               </span>
             </div>
-            <input
-              className="input"
-              style={{ marginBottom: 12 }}
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search by name or description…"
-            />
+          </div>
+        )}
+
+        <div className="grid" style={{ gridTemplateColumns: 'minmax(300px, 360px) 1fr' }}>
+          <Card title={editing !== null ? 'Edit draft' : 'Draft a skill'}>
             <div className="stack">
-              {filtered.map((s) => {
-                const open = expanded === s.name || expanded === s.path;
-                return (
-                  <div
-                    key={`${s.path}:${s.name}`}
-                    className="card"
-                    style={{ margin: 0, padding: 0, overflow: 'hidden' }}
-                  >
-                    <button
-                      className="btn"
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'flex-start',
-                        gap: 4,
-                        width: '100%',
-                        borderRadius: 0,
-                        background: 'transparent',
-                        border: 'none',
-                        borderBottom: open ? '1px solid var(--border)' : 'none',
-                        padding: 12,
-                      }}
-                      onClick={() =>
-                        setExpanded(open ? null : expanded === s.name ? s.path : s.name)
-                      }
-                    >
-                      <span className="row" style={{ gap: 8 }}>
-                        <strong>{s.name}</strong>
-                        <span className={`tag ${tagClass(s.source)}`}>{s.source}</span>
-                        <span className="spacer" />
-                        <span className="muted" style={{ fontSize: 11 }}>
-                          {open ? 'collapse' : 'expand'}
-                        </span>
-                      </span>
-                      <span className="muted" style={{ fontSize: 12 }}>
-                        {s.description}
-                      </span>
-                    </button>
-                    {open && (
-                      <div className="stack" style={{ padding: 12 }}>
-                        <div className="muted mono" style={{ fontSize: 11 }}>
-                          {s.path}
-                        </div>
-                        <pre
-                          style={{
-                            whiteSpace: 'pre-wrap',
-                            background: '#0b0f14',
-                            border: '1px solid var(--border)',
-                            borderRadius: 8,
-                            padding: 12,
-                            fontSize: 12.5,
-                            lineHeight: 1.6,
-                            maxHeight: 480,
-                            overflowY: 'auto',
-                            margin: 0,
-                          }}
-                        >
-                          {s.body}
-                        </pre>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-              {filtered.length === 0 && (
+              <div className="field">
+                <label htmlFor="skill-draft-name">Name</label>
+                <input
+                  id="skill-draft-name"
+                  className="input"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="my-useful-skill"
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="skill-draft-desc">Description</label>
+                <input
+                  id="skill-draft-desc"
+                  className="input"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="skill-draft-body">Body (markdown)</label>
+                <textarea
+                  id="skill-draft-body"
+                  className="textarea"
+                  style={{ minHeight: 180 }}
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                />
+              </div>
+              <div className="row">
+                <button className="btn primary" style={iconBtn} onClick={saveDraft}>
+                  <Icon name="plus" size={14} />
+                  {editing !== null ? 'Save draft' : 'Create (save draft)'}
+                </button>
+                {editing !== null && (
+                  <button className="btn ghost" onClick={clearEditing}>
+                    Cancel
+                  </button>
+                )}
+              </div>
+              {draftNote && (
                 <div className="muted" style={{ fontSize: 12 }}>
-                  {q
-                    ? 'No skills match your search.'
-                    : 'No skills found. Drop a SKILL.md pack under .omp/skills/<name>/SKILL.md in the project, or ~/.omp/agent/skills/.'}
+                  {draftNote}
+                </div>
+              )}
+              {drafts.length > 0 && (
+                <div className="stack" style={{ gap: 'var(--s-2)' }}>
+                  <div className="muted" style={{ fontSize: 11 }}>
+                    Local drafts ({drafts.length}) — saved in this browser only
+                  </div>
+                  {drafts.map((d, i) => (
+                    <div
+                      key={`${d.savedAt}-${i}`}
+                      className="card-ghost"
+                      style={{
+                        padding: 'var(--s-2) var(--s-3)',
+                        borderRadius: 'var(--r-md)',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <div className="row" style={{ gap: 'var(--s-2)' }}>
+                        <span style={{ flex: 1, fontSize: 13, fontWeight: 600 }}>{d.name}</span>
+                        <span className="mono muted" style={{ fontSize: 11 }}>
+                          {fmtRelative(d.savedAt)}
+                        </span>
+                        <button className="btn sm" onClick={() => loadDraft(i)}>
+                          Load
+                        </button>
+                        <ConfirmButton onConfirm={() => deleteDraft(i)} title="Delete draft">
+                          Delete
+                        </ConfirmButton>
+                      </div>
+                      {d.description && (
+                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                          {d.description}
+                        </div>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
-          </div>
+          </Card>
+
+          <Card
+            title={`Discovered (${filtered.length}${q ? ` / ${skills.length}` : ''})`}
+            actions={
+              <StatusPill tone={source === 'omp' ? 'info' : 'idle'} dot>
+                {source === 'omp' ? 'omp skills' : 'legacy skills'}
+              </StatusPill>
+            }
+          >
+            <div className="stack">
+              <div className="row" style={{ gap: 'var(--s-2)' }}>
+                <span className="muted" aria-hidden="true" style={{ display: 'inline-flex' }}>
+                  <Icon name="search" />
+                </span>
+                <input
+                  className="input"
+                  style={{ flex: 1 }}
+                  aria-label="Search skills by name or description"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                  placeholder="Search by name or description…"
+                />
+              </div>
+
+              {filtered.length === 0 ? (
+                <EmptyState
+                  icon="skills"
+                  title={q ? 'No skills match' : 'No skills discovered'}
+                  message={
+                    q ? (
+                      <>
+                        Nothing matches “{query.trim()}” in the loaded {source} skills.
+                      </>
+                    ) : (
+                      'Drop a SKILL.md pack under .omp/skills/<name>/SKILL.md in the project, or ~/.omp/agent/skills/.'
+                    )
+                  }
+                  action={
+                    q ? (
+                      <button className="btn" onClick={() => setQuery('')}>
+                        Clear search
+                      </button>
+                    ) : undefined
+                  }
+                />
+              ) : (
+                <div className="stack" style={{ gap: 'var(--s-2)' }}>
+                  {filtered.map((s, i) => {
+                    const open = expanded === s.name || expanded === s.path;
+                    return (
+                      <div
+                        key={`${s.path}:${s.name}`}
+                        className="card-ghost"
+                        style={{ overflow: 'hidden', borderRadius: 'var(--r-md)' }}
+                      >
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          aria-expanded={open}
+                          aria-controls={`skill-body-${i}`}
+                          onClick={() =>
+                            setExpanded(open ? null : expanded === s.name ? s.path : s.name)
+                          }
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'stretch',
+                            gap: 4,
+                            width: '100%',
+                            borderRadius: 0,
+                            background: 'transparent',
+                            border: 'none',
+                            borderBottom: open ? '1px solid var(--hairline)' : 'none',
+                            padding: 'var(--s-3)',
+                            textAlign: 'left',
+                          }}
+                        >
+                          <span className="row" style={{ gap: 'var(--s-2)' }}>
+                            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
+                            <span className="mono" style={{ fontWeight: 600, fontSize: 13 }}>
+                              {s.name}
+                            </span>
+                            <StatusPill tone={sourceTone(s.source)}>{s.source}</StatusPill>
+                            <span className="spacer" />
+                          </span>
+                          <span className="muted" style={{ fontSize: 12 }}>
+                            {s.description}
+                          </span>
+                        </button>
+                        {open && (
+                          <div id={`skill-body-${i}`} className="stack" style={{ padding: 'var(--s-3)' }}>
+                            <div className="mono muted" style={{ fontSize: 11 }}>
+                              {s.path}
+                            </div>
+                            <pre
+                              className="code-preview"
+                              style={{
+                                whiteSpace: 'pre-wrap',
+                                maxHeight: 480,
+                                overflowY: 'auto',
+                                margin: 0,
+                              }}
+                            >
+                              {s.body}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </Card>
         </div>
       </div>
     </>

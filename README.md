@@ -16,7 +16,7 @@ docker compose up -d
 # realtime   → ws://localhost:3082
 ```
 
-> Host ports are remapped to `3081`/`3082` because port `3001` on typical dev hosts is held by other local services (e.g. the Hermes MCP gateway). The container itself listens on internal `3001`/`3002`, and mounts your host omp config (`~/.omp`) so the engine sees your models.
+> Host ports are remapped to `3081`/`3082` because port `3001` on typical dev hosts is held by other local services (e.g. the Hermes MCP gateway), and both are published on `127.0.0.1` only — the API can drive an agent with real tools, so LAN exposure is an explicit opt-in (drop the prefix **and** set `AETHER_API_KEY` + `AETHER_CORS_ORIGINS`). The container listens on internal `3001`/`3002`, and mounts your host omp config (`~/.omp`) so the engine sees your models. By default the API is same-origin-only for browsers (no cross-site reads/writes from any page you happen to have open).
 
 ### Local development
 

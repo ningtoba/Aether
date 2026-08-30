@@ -1,0 +1,84 @@
+/**
+ * Aether design tokens — "cinema-dark ops console".
+ *
+ * Single source of truth for every colour, radius, shadow and motion value.
+ * Page styles (app.css / chat.css / inline page CSS) MUST consume these
+ * variables instead of hard-coding colours; the only sanctioned literal is an
+ * `rgba(...)` hairline.
+ *
+ * Contrast contract (against --surface #11151d):
+ *   --text       #e9edf4  ≈15:1
+ *   --text-dim   #a6b0c0  ≈8.3:1
+ *   --text-faint #828e9f  ≈5.3:1   ← secondary-text floor, never go fainter
+ * Never pure #000 / #fff for surfaces or body text.
+ */
+
+:root {
+  /* Native widgets (select, caret, scrollbars, spinners) render dark. */
+  color-scheme: dark;
+
+  /* ── Surfaces ─────────────────────────────────────────────────────── */
+  --bg: #0b0e14;
+  --surface: #11151d;
+  --surface-2: #161b25;
+  --surface-3: #1d2430;
+
+  /* ── Borders ──────────────────────────────────────────────────────── */
+  --border: #252c39;
+  --hairline: rgba(255, 255, 255, 0.07);
+
+  /* ── Text ─────────────────────────────────────────────────────────── */
+  --text: #e9edf4;
+  --text-dim: #a6b0c0;
+  --text-faint: #828e9f;
+
+  /* ── Accent (single indigo-azure) ─────────────────────────────────── */
+  --accent: #7aa2ff;
+  --accent-strong: #4f7dff;
+  --accent-ink: #0b1220;
+  --accent-glow: rgba(79, 125, 255, 0.35);
+  --accent-soft: rgba(79, 125, 255, 0.13);
+
+  /* ── Status hues (+ .12 alpha soft fills for pills/chips/tiles) ───── */
+  --ok: #4ac26b;
+  --ok-soft: rgba(74, 194, 107, 0.12);
+  --warn: #e3b341;
+  --warn-soft: rgba(227, 179, 65, 0.12);
+  --error: #f47174;
+  --error-soft: rgba(244, 113, 116, 0.12);
+  --info: #58a6ff;
+  --info-soft: rgba(88, 166, 255, 0.12);
+  --tool: #b58cf5;
+  --tool-soft: rgba(181, 140, 245, 0.12);
+
+  /* ── Typography ───────────────────────────────────────────────────── */
+  --font-ui:
+    ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+
+  /* ── Spacing ──────────────────────────────────────────────────────── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-7: 48px;
+
+  /* ── Radii ────────────────────────────────────────────────────────── */
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 999px;
+
+  /* ── Effects ──────────────────────────────────────────────────────── */
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.45);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --ring: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+
+  /* ── Motion ───────────────────────────────────────────────────────── */
+  --t-fast: 120ms;
+  --t: 180ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
