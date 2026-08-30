@@ -38,6 +38,13 @@ services:
       # Working-directory roots the GUI can browse for sessions/loops.
       # Defaults to the host home. Colon-separated for multiple.
       - AETHER_WORKSPACES=${HOME}
+      # Auth opt-in (see ports comment above): set AETHER_API_KEY in the host
+      # shell (or a .env file) before `docker compose up -d` to require the
+      # key on the REST API, the realtime hub, and the legacy WS.
+      # AETHER_CORS_ORIGINS additionally admits exact cross-site origins.
+      # Unset (default) keeps the loopback-only open-dev posture.
+      - AETHER_API_KEY=${AETHER_API_KEY:-}
+      - AETHER_CORS_ORIGINS=${AETHER_CORS_ORIGINS:-}
     volumes:
       - aether-data:/data
       # Expose the host home at the SAME absolute path so picking a working

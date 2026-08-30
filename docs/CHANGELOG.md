@@ -28,6 +28,11 @@ CRITICAL closed — the realtime hub was a second, unauthenticated entry point:
 
 Auth completeness:
 
+- `docker-compose.yml` now passes `AETHER_API_KEY`/`AETHER_CORS_ORIGINS`
+  through to the container — until now the documented LAN-exposure runbook
+  was a no-op because compose silently dropped both variables. Verified on
+  the artifact: with the key set, uncredentialed REST and `:3082` upgrades
+  401, Bearer upgrades 101, and a used ticket replays as 401.
 - RBAC route authorization was fail-open: 10 registered routes (workspaces
   browse, disk transcripts, models/skills, omp status) resolved to a null
   permission and passed with authentication alone — a `viewer` key could
