@@ -6,6 +6,37 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.3 — truthful model-error diagnostics (2026-08-30)
+
+Session prompts no longer claim "the model may not be available on the
+configured server" when a turn actually fails for a known reason.
+
+- The engine now surfaces omp's real turn error (`errorMessage`, plus
+  `stopDetails.type`/`explanation`) verbatim in `session_error` instead of the
+  canned "model may not be available … try a different model" guess. A
+  provider 404 for a catalog model the server does not serve, an auth
+  failure, a timeout, or a refusal now shows its actual cause. Every session
+  error is tagged with the responsible model id (`… — model:
+  <provider>/<modelId>`), so a failing turn is self-identifying. The
+  post-turn "no output" check is now gated to truly silent, error-free turns
+  — a clean turn that streamed thinking but no text is a model response, not
+  a failure.
+- `createSession` preflights the resolved model against its provider's served
+  model list — `GET <baseUrl>/models`, authenticated with the provider's
+  stored key — and refuses to create a session on a catalog entry the server
+  does not serve (e.g. `local-server/deepseek-ai/DeepSeek-V4-Flash` when only
+  `…-0731` is running), with a message naming the served models. Best-effort:
+  if the list is unreachable or unparseable, creation proceeds and the turn
+  still reports the real error.
+
+Verified with the real omp SDK + local vLLM: the unserved alias returns an
+empty assistant message with `stopReason: "error"` and a 404 `errorMessage`;
+`createSession` now rejects that alias upfront, and the served `-0731` model
+prompts normally with no session error. 593 tests, tsc -b, lint 0 errors,
+prettier clean.
+
+---
+
 ## v0.3.2 — omp-fidelity chat rendering (2026-08-30)
 
 Chat windows (Sessions + loop inspection) now render like the omp terminal

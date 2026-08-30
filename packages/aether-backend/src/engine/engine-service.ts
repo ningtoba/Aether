@@ -69,6 +69,46 @@ function extractContentText(content: unknown, includeToolJson: boolean): string 
   return '';
 }
 
+/** Build the truthful error text for an errored assistant message_end. omp
+ *  records the underlying provider error on `errorMessage` (e.g. a 404 for a
+ *  model the server does not serve) and the stop category on
+ *  `stopDetails.type`. Prefer them over the generic fallback so a failed turn
+ *  is never misdiagnosed as a model-availability problem. */
+function describeOmpTurnError(message: Record<string, unknown>): string {
+  const raw = typeof message?.errorMessage === 'string' ? message.errorMessage.trim() : '';
+  if (raw) return raw;
+  const details = (message?.stopDetails as Record<string, unknown> | undefined) ?? {};
+  const stopType = typeof details?.type === 'string' ? details.type : '';
+  // Provider shapes differ: Anthropic classifies on `explanation`, others on
+  // `reason`. Accept either through the loose record cast.
+  const explanation =
+    typeof details?.explanation === 'string'
+      ? details.explanation.trim()
+      : typeof details?.reason === 'string'
+        ? details.reason.trim()
+        : '';
+  if (stopType && explanation) return `Turn ended with error (${stopType}): ${explanation}`;
+  if (stopType) return `Turn ended with error (${stopType})`;
+  return 'Model returned no output — the model may not be available on the configured server. Try a different model.';
+}
+
+/** Compose the actionable error for a catalog model that the provider server
+ *  does not actually serve (e.g. an alias in models.yml the local vLLM never
+ *  hosts). Returns null when the id appears in the served list. */
+export function describeUnservedModel(opts: {
+  provider: string;
+  modelId: string;
+  baseUrl: string;
+  servedIds: string[];
+}): string | null {
+  if (opts.servedIds.includes(opts.modelId)) return null;
+  const served =
+    opts.servedIds.length > 0
+      ? opts.servedIds.map((id) => `\`${id}\``).join(', ')
+      : '(none listed)';
+  return `Model ${opts.provider}/${opts.modelId} is not served by the provider at ${opts.baseUrl}. Served models: ${served}.`;
+}
+
 interface OmpModelLike {
   id: string;
   provider: string;
@@ -109,6 +149,9 @@ export class EngineSession {
   lastAssistantText = '';
   /** True while the current turn has produced any assistant text. */
   private turnHadOutput = false;
+  /** True while the current turn has streamed any thinking — a thinking-only
+   *  reply is a model response, not a silent failure. */
+  private turnHadThinking = false;
   /** True if the current turn surfaced an explicit engine error event. */
   private turnErrored = false;
   /** A turn is in flight (gate for concurrent prompts). */
@@ -139,18 +182,23 @@ export class EngineSession {
     }
     this.status = 'running';
     this.turnHadOutput = false;
+    this.turnHadThinking = false;
     this.turnErrored = false;
     try {
       await omp.prompt(message);
       // A "clean" turn can still produce zero assistant output when the model
       // is not actually served by the configured provider — omp resolves it
       // without an error event. Never present that as a successful answer.
-      if (!this.turnHadOutput && !this.turnErrored) {
+      // Reached only when omp surfaced no error detail, so stay factual.
+      // A turn that streamed thinking but no text is a model response, not a
+      // silent failure — only a fully empty, error-free turn is an error.
+      if (!this.turnHadOutput && !this.turnErrored && !this.turnHadThinking) {
         this.status = 'error';
         this.onEvent({
           kind: 'session_error',
-          message:
-            'Model returned no output — it may not be available on the configured server. Try a different model.',
+          message: this.annotate(
+            'Model returned no output — the turn ended without assistant text and omp reported no error. Try a different model.',
+          ),
         });
       }
     } finally {
@@ -177,6 +225,14 @@ export class EngineSession {
       provider: m.provider ?? '',
       modelId: (m.modelId ?? m.id ?? '') as string,
     };
+  }
+
+  /** Tag a session error with the model that produced the turn, so the GUI
+   *  can see exactly which catalog entry failed without hunting for it. */
+  private annotate(text: string): string {
+    const m = this.model;
+    if (!m.modelId) return text;
+    return `${text} — model: ${m.provider}/${m.modelId}`;
   }
   /**
    * Reconstruct a rich transcript from the session's message journal.
@@ -330,6 +386,7 @@ export class EngineSession {
         const kind = ame?.type === 'thinking_delta' ? 'thinking' : 'assistant';
         if (typeof delta === 'string') {
           if (kind === 'assistant') this.turnHadOutput = true;
+          else if (kind === 'thinking') this.turnHadThinking = true;
           this.onEvent({ kind: 'message_update', role: kind, delta, turn: 0 });
         }
         break;
@@ -383,14 +440,15 @@ export class EngineSession {
           const stopReason = (m?.stopReason as string) ?? '';
           if (text) this.turnHadOutput = true;
           if (!text && stopReason === 'error') {
-            // omp reports an absent/erroring model as an empty final message
-            // with stopReason "error" (no explicit error event). Surface it.
+            // omp ends an errored turn with an empty assistant message whose
+            // stopReason is "error" (no separate error event). The real cause
+            // lives on errorMessage (e.g. a provider 404 for a model the
+            // server does not serve); surface it verbatim instead of guessing.
             this.status = 'error';
             this.turnErrored = true;
             this.onEvent({
               kind: 'session_error',
-              message:
-                'Model returned no output — the model may not be available on the configured server. Try a different model.',
+              message: this.annotate(describeOmpTurnError(m)),
             });
           }
           this.lastAssistantText = text;
@@ -537,6 +595,51 @@ export class EngineService {
     return model;
   }
 
+  /**
+   * Best-effort check that a resolved catalog model is actually served by its
+   * provider before a session is created. A catalog entry the server does not
+   * host (e.g. a local-server alias missing the served revision) otherwise
+   * fails its first turn with a confusing "no output" error. Only a POSITIVE
+   * absence blocks — an unreachable or unparseable model list lets creation
+   * proceed and the turn surfaces the real error instead.
+   */
+  async #verifyModelServed(model: OmpModelLike): Promise<void> {
+    const baseUrl =
+      typeof model.baseUrl === 'string' && model.baseUrl ? model.baseUrl.replace(/\/+$/, '') : '';
+    if (!baseUrl) return;
+    try {
+      const auth = this.authStorage as {
+        getApiKey?(provider: string): Promise<string | undefined>;
+      } | null;
+      const apiKey = (await auth?.getApiKey?.(model.provider)) ?? undefined;
+      const res = await fetch(`${baseUrl}/models`, {
+        headers: {
+          accept: 'application/json',
+          ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+        },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!res.ok) return; // endpoint absent or auth-gated — cannot verify
+      const body = (await res.json()) as { data?: Array<{ id?: unknown }> };
+      const servedIds = Array.isArray(body?.data)
+        ? body.data
+            .map((d) => (typeof d?.id === 'string' ? d.id : null))
+            .filter((id): id is string => id !== null)
+        : [];
+      if (servedIds.length === 0) return; // unrecognized shape — cannot verify
+      const problem = describeUnservedModel({
+        provider: model.provider,
+        modelId: model.id,
+        baseUrl,
+        servedIds,
+      });
+      if (problem) throw new Error(problem);
+    } catch (err) {
+      if (err instanceof Error && /is not served by the provider/.test(err.message)) throw err;
+      // Probe unreachable on this provider — let the turn surface the real error.
+    }
+  }
+
   /** Create a new agent session, attached to the omp engine. */
   async createSession(opts: {
     cwd: string;
@@ -546,6 +649,10 @@ export class EngineService {
     if (!this.registry || !this.authStorage) throw new EngineUnavailableError();
     const sdk = await this.#importSdk();
     const model = await this.resolveModel(opts.model);
+    // Refuse to create a session on a catalog model the provider server does
+    // not actually serve — omp would fail the first turn with a confusing
+    // "no output" instead of naming the wrong model id.
+    await this.#verifyModelServed(model);
 
     const id = `ses_${this.nextSessionId++}`;
     const session = new EngineSession({
