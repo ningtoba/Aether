@@ -12,7 +12,7 @@ import {
   readOutputFile,
   VERSION,
 } from './index.js';
-import { getTsxEntryPath, tsxBinaryName } from './index.js';
+import { getTsxEntryPath, resolveTsLauncher, tsxBinaryName } from './index.js';
 import { existsSync } from 'node:fs';
 
 afterEach(() => {
@@ -111,6 +111,46 @@ describe('getTsxEntryPath', () => {
     }
   });
 });
+
+describe('resolveTsLauncher', () => {
+  it('never hands the tsx CLI to a Bun host (tsx chunks do not load under Bun)', () => {
+    const launcher = resolveTsLauncher('linux', {
+      execPath: '/usr/local/bin/bun',
+      bunVersion: '1.3.14',
+    });
+    expect(launcher.strategy).toBe('runtime-native');
+    expect(launcher.runsTypeScriptNatively).toBe(true);
+    expect(launcher.executable).toBe('/usr/local/bin/bun');
+    expect(launcher.prefixArgs).toEqual([]);
+  });
+
+  it('launches the tsx entry through the executable on Node, on every OS', () => {
+    for (const platform of ['linux', 'darwin', 'win32'] as NodeJS.Platform[]) {
+      const launcher = resolveTsLauncher(platform, { execPath: '/usr/bin/node' });
+      expect(launcher.strategy).toBe('tsx-entry');
+      expect(launcher.runsTypeScriptNatively).toBe(false);
+      // execFile cannot start .cmd shims, so the module entry must be used and
+      // the script path stays the only trailing argument.
+      expect(launcher.executable).toBe('/usr/bin/node');
+      const entry = launcher.prefixArgs[0];
+      expect(typeof entry).toBe('string');
+      expect(entry?.endsWith('cli.mjs')).toBe(true);
+      expect(existsSync(entry as string)).toBe(true);
+    }
+  });
+
+  it('defaults to a launcher the host runtime can actually run', () => {
+    const launcher = resolveTsLauncher();
+    const hostIsBun = process.versions.bun !== undefined;
+    expect(launcher.strategy).toBe(hostIsBun ? 'runtime-native' : 'tsx-entry');
+    expect(launcher.executable).toBe(process.execPath);
+  });
+
+  it('falls back to the bare node executable name when execPath is unusable', () => {
+    expect(resolveTsLauncher('linux', { execPath: '' }).executable).toBe('node');
+  });
+});
+
 describe('sandbox isolation', () => {
   it('runs untrusted code in the temp working directory, not the caller cwd', async () => {
     const result = await execTypeScript('console.log(process.cwd())');

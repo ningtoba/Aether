@@ -107,6 +107,12 @@ export function escapeShellArg(arg: string, platform: NodeJS.Platform = process.
   return `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
+/**
+ * How long stdio keeps draining after the child `exit` event when no `close`
+ * event arrives (see `collectOutput`). Bounded so the kill path always settles.
+ */
+const EXIT_DRAIN_GRACE_MS = 250;
+
 async function collectOutput(
   child: ChildProcess,
   def: ToolDef,
@@ -185,6 +191,49 @@ async function collectOutput(
   // For regular shell mode, stdin is not piped by default.
 
   return new Promise<ShellResult>((resolve) => {
+    // `close` is Node's canonical "process gone *and* stdio drained" signal, but
+    // it is not a guarantee: Bun's node:child_process emits `exit` for a
+    // signal-killed child and then never closes the stdio pipes, and Node withholds
+    // `close` for as long as a grandchild keeps the inherited pipes open. Waiting on
+    // `close` alone therefore ignores def.timeoutMs — the killed child's promise
+    // never settles and the dangling pipe handles pin the event loop. So `exit`
+    // settles too, after a short drain window that still lets in-flight output land
+    // on runtimes whose pipes do close (`close` cancels it).
+    let settled = false;
+    let drainTimer: NodeJS.Timeout | undefined;
+
+    const snapshot = (exitCode: number | null | undefined): ShellResult => ({
+      exitCode: exitCode ?? -1,
+      stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
+      stderr: Buffer.concat(stderrChunks).toString('utf-8'),
+      durationMs: Date.now() - startedAt,
+      timedOut,
+      truncated,
+    });
+
+    const settle = (result: ShellResult, chunk?: ToolChunk): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      clearTimeout(drainTimer);
+      child.stdout?.off('data', pushStdout);
+      child.stderr?.off('data', pushStderr);
+      // Release the pipes: when we settle from `exit` the runtime still holds
+      // open stdio handles that would otherwise pin the event loop.
+      child.stdout?.destroy();
+      child.stderr?.destroy();
+      if (onChunk && chunk) void onChunk(chunk);
+      resolve(result);
+    };
+
+    const exitChunk = (exitCode: number | null | undefined): ToolChunk => ({
+      kind: 'exit',
+      // A signal-killed process reports exitCode null; serialize it as the
+      // stable '-1' so stream consumers never see the literal string 'null'.
+      data: String(exitCode ?? -1),
+      timestamp: Date.now(),
+    });
+
     if (child.stdout) {
       child.stdout.on('data', pushStdout);
     }
@@ -193,41 +242,32 @@ async function collectOutput(
     }
 
     child.on('error', (err) => {
-      clearTimeout(timer);
-      if (onChunk) {
-        void onChunk({
+      settle(
+        {
+          exitCode: -1,
+          stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
+          stderr: `${err.message}\n`,
+          durationMs: Date.now() - startedAt,
+          timedOut: false,
+          truncated,
+        },
+        {
           kind: 'error',
           data: err.message,
           timestamp: Date.now(),
-        });
-      }
-      resolve({
-        exitCode: -1,
-        stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
-        stderr: `${err.message}\n`,
-        durationMs: Date.now() - startedAt,
-        timedOut: false,
-        truncated,
-      });
+        },
+      );
+    });
+
+    child.on('exit', (exitCode) => {
+      if (settled) return;
+      drainTimer = setTimeout(() => {
+        settle(snapshot(exitCode), exitChunk(exitCode));
+      }, EXIT_DRAIN_GRACE_MS);
     });
 
     child.on('close', (exitCode) => {
-      clearTimeout(timer);
-      if (onChunk) {
-        void onChunk({
-          kind: 'exit',
-          data: String(exitCode ?? -1),
-          timestamp: Date.now(),
-        });
-      }
-      resolve({
-        exitCode: exitCode ?? -1,
-        stdout: Buffer.concat(stdoutChunks).toString('utf-8'),
-        stderr: Buffer.concat(stderrChunks).toString('utf-8'),
-        durationMs: Date.now() - startedAt,
-        timedOut,
-        truncated,
-      });
+      settle(snapshot(exitCode), exitChunk(exitCode));
     });
   });
 }

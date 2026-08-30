@@ -81,6 +81,75 @@ export function getTsxEntryPath(platform: NodeJS.Platform = process.platform): s
   return tsxBinaryName(platform);
 }
 
+/** Host runtime facts that decide how a `.ts` file gets launched. */
+export interface TsRuntimeInfo {
+  /** Absolute path of the JavaScript runtime executing this module. */
+  execPath: string;
+  /** Bun's version when the host runtime is Bun; undefined on Node. */
+  bunVersion?: string;
+}
+
+/** A resolved launch recipe for one untrusted `.ts` file. */
+export interface TsLauncher {
+  /** Executable handed to `execFile`. */
+  executable: string;
+  /** Arguments placed before the script path (the tsx entry, or none). */
+  prefixArgs: string[];
+  /** True when the executable understands TypeScript without a loader hook. */
+  runsTypeScriptNatively: boolean;
+  /** Strategy taken, so callers can assert it without spawning. */
+  strategy: 'runtime-native' | 'tsx-entry' | 'tsx-path';
+}
+
+/** The runtime facts of the current process. */
+export function currentTsRuntime(): TsRuntimeInfo {
+  return {
+    execPath: process.execPath,
+    // @types/node types process.versions with an index signature; Bun reports itself here.
+    bunVersion: process.versions.bun,
+  };
+}
+
+/**
+ * Resolve how to launch an untrusted `.ts` file with the runtime we run on.
+ *
+ * Bun strips types itself, and shelling out to tsx is broken there: tsx's
+ * bundled `dist/cli.mjs` resolves its own chunks relatively, which Bun's loader
+ * cannot follow ("Cannot find module './cjs/index.cjs' from ''"), so every
+ * sandboxed run died before the user code started — including when the child
+ * was launched through this process's own executable, which *is* Bun. On Node
+ * we keep the tsx entry module, launched through the executable itself so the
+ * same code path works on Windows (where .cmd shims cannot be execFile'd).
+ */
+export function resolveTsLauncher(
+  platform: NodeJS.Platform = process.platform,
+  runtime: TsRuntimeInfo = currentTsRuntime(),
+): TsLauncher {
+  const execPath = runtime.execPath.length > 0 ? runtime.execPath : 'node';
+  if (runtime.bunVersion) {
+    return {
+      executable: execPath,
+      prefixArgs: [],
+      runsTypeScriptNatively: true,
+      strategy: 'runtime-native',
+    };
+  }
+  const entry = getTsxEntryPath(platform);
+  return entry.endsWith('.mjs')
+    ? {
+        executable: execPath,
+        prefixArgs: [entry],
+        runsTypeScriptNatively: false,
+        strategy: 'tsx-entry',
+      }
+    : {
+        executable: entry,
+        prefixArgs: [],
+        runsTypeScriptNatively: false,
+        strategy: 'tsx-path',
+      };
+}
+
 /** Write code to a temp file and return the file path. */
 function writeTempFile(code: string): { filePath: string; cleanup: () => void } {
   const tmpDir = mkdtempSync(join(tmpdir(), 'ts-runtime-'));
@@ -118,28 +187,31 @@ export function execTypeScript(
     // not keep the event loop alive for the full timeout window.
     const killTimers: ReturnType<typeof setTimeout>[] = [];
 
+    const launcher = resolveTsLauncher();
+
     const env: Record<string, string> = {
       ...(process.env as Record<string, string>),
       NODE_ENV: 'sandbox',
       NODE_NO_WARNINGS: '1',
-      NODE_OPTIONS: '--max-old-space-size=256',
       ...options.env,
     };
 
-    // If user explicitly sets NODE_OPTIONS, use theirs instead
+    // If user explicitly sets NODE_OPTIONS, use theirs instead. Otherwise the
+    // V8 heap cap is applied only to a Node child — it means nothing to a
+    // runtime that is not V8-backed, and silently implies a limit that is not
+    // enforced.
     if (options.env?.NODE_OPTIONS !== undefined) {
       env.NODE_OPTIONS = options.env.NODE_OPTIONS;
+    } else if (!launcher.runsTypeScriptNatively) {
+      env.NODE_OPTIONS = '--max-old-space-size=256';
     }
 
-    // Launch the tsx entry module with the Node executable itself so the same
-    // code path works on Windows (where .cmd/.tsx shims cannot be execFile'd).
-    const tsxEntry = getTsxEntryPath();
-    const executable = tsxEntry.endsWith('.mjs') ? process.execPath : tsxEntry;
-    const tsxArgs = tsxEntry.endsWith('.mjs') ? [tsxEntry, filePath] : [filePath];
-
+    // `killRequested` records that *we* killed the child, so `timedOut` does not
+    // depend on how the host runtime words its execFile timeout error.
+    let killRequested = false;
     const child = execFile(
-      executable,
-      tsxArgs,
+      launcher.executable,
+      [...launcher.prefixArgs, filePath],
       {
         timeout,
         maxBuffer: maxOutput,
@@ -150,9 +222,9 @@ export function execTypeScript(
         cleanup();
         for (const t of killTimers) clearTimeout(t);
         const timedOut =
+          killRequested ||
           error?.killed === true ||
-          (error?.message != null && error.message.includes('timed out')) ||
-          false;
+          (error?.message != null && error.message.includes('timed out'));
         resolve({
           stdout: stdout ?? '',
           stderr: stderr ?? '',
@@ -165,10 +237,11 @@ export function execTypeScript(
     // Safety: ensure the process is killed on timeout. execFile treats timeout 0
     // as "no timeout", so the manual timer must too — otherwise timeout: 0
     // SIGTERMs a just-spawned child at t=0.
-    if (timeout > 0 && child.exitCode === null) {
+    if (timeout > 0) {
       killTimers.push(
         setTimeout(() => {
-          if (child.exitCode === null) {
+          if (child.exitCode === null && child.signalCode === null) {
+            killRequested = true;
             child.kill('SIGTERM');
             killTimers.push(
               setTimeout(() => {
