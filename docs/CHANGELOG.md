@@ -18,16 +18,17 @@ deployed build).
   (`configured` / `via config` / `models.yml` / `keyless`), and the action
   cluster keeps its natural width inside the scrollable table so buttons
   can never shrink-clip again. A search box + jump-to-provider select
-  front the 70-row catalog.
+  front the provider catalog.
 - **The reachability result moved to the Auth column.** The `reachable` /
   `unreachable` pill produced by `POST /:id/verify` describes the
   provider's endpoint/credential, not an action — sitting in the action
   cluster it clipped mid-word the moment you verified. It now stacks under
   the auth pills with the probe's reason code (`http-401`, `timeout`,
   `network`, `no-base-url`) on hover.
-- **Dashboard health copy is true**: `providers: 2 configured · 67 in catalog`
-  replaces `2 of 67 configured`, which implied the other 65 were half-configured
-  when 67 is simply the catalog size.
+- **Dashboard health copy is true**: `providers: 2 configured · 67 in
+  registry` replaces `2 of 67 configured`, which implied the other 65 were
+  half-configured. 67 is what `/health` counts; the Providers table renders
+  70 rows — the two endpoints count on different bases.
 - Probe semantics are unchanged from v0.3.8 and remain as documented in
   [API.md](API.md): one 4-second request to `<baseUrl>/models`, key from
   `AuthStorage.peekApiKey`, reason-coded failures, model lists never
