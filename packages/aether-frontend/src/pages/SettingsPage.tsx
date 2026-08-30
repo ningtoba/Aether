@@ -10,12 +10,16 @@
  * tab; the tab strip is a segmented row of toggle buttons (every schema tab
  * stays listed, including ones with no settings). When the engine is
  * unavailable (501), the page degrades to a neutral hint plus the unaffected
- * legacy control-plane.
+ * legacy control-plane. A browser-local "API key" card (sessionStorage, session-only) lets the
+ * operator authenticate this tab against a key-enforcing backend; it renders in
+ * both the normal and the degraded view, since a 401 is exactly when it is needed.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  getApiKey,
   getSettingsSchema,
   getSettingsValues,
+  setApiKey,
   setSetting,
   type SettingDef,
   type SettingsSchema,
@@ -278,6 +282,89 @@ function SettingRow({
   );
 }
 
+/** Browser-local backend API key (sessionStorage, session-only by design). */
+function ApiKeyCard() {
+  const [value, setValue] = useState(() => getApiKey() ?? '');
+  const [flash, setFlash] = useState<string | null>(null);
+  const timerRef = useRef<number | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) window.clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  const showFlash = useCallback((msg: string) => {
+    setFlash(msg);
+    if (timerRef.current) window.clearTimeout(timerRef.current);
+    timerRef.current = window.setTimeout(() => setFlash(null), 2800);
+  }, []);
+
+  const save = () => {
+    setApiKey(value);
+    setValue(getApiKey() ?? '');
+    showFlash(value.trim() ? 'Saved for this browser tab' : 'API key cleared');
+  };
+
+  const clear = () => {
+    setApiKey('');
+    setValue('');
+    showFlash('API key cleared');
+  };
+
+  const isSet = getApiKey() !== null;
+
+  return (
+    <Card title="API key">
+      <div className="field" style={{ marginBottom: 0 }}>
+        <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
+          <div className="row" style={{ flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+              Backend API key
+            </span>
+            <span className="key mono">aether.apiKey</span>
+            {isSet ? <StatusPill tone="ok">key set</StatusPill> : null}
+          </div>
+          {flash ? (
+            <div className="row">
+              <StatusPill tone="ok">{flash}</StatusPill>
+            </div>
+          ) : null}
+        </div>
+        <p className="help" style={{ fontSize: 12, margin: '2px 0 6px' }}>
+          Sent as <span className="mono">Authorization: Bearer …</span> on every API call and used
+          to mint realtime tickets. Held in session storage only — it is cleared when this tab
+          closes.
+        </p>
+        <div className="row" style={{ gap: 'var(--s-2)' }}>
+          <input
+            className="input"
+            style={{ flex: 1 }}
+            type="password"
+            autoComplete="new-password"
+            aria-label="Backend API key"
+            placeholder={isSet ? 'stored — re-enter to replace' : 'not set'}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') save();
+            }}
+          />
+          <button type="button" className="btn primary" onClick={save}>
+            <Icon name="key" size={14} />
+            Save
+          </button>
+          <button type="button" className="btn" onClick={clear}>
+            <Icon name="close" size={14} />
+            Clear
+          </button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export function SettingsPage() {
   const [schema, setSchema] = useState<SettingsSchema | null>(null);
   const [values, setValues] = useState<Record<string, unknown>>({});
@@ -478,6 +565,7 @@ export function SettingsPage() {
               </tbody>
             </table>
           </Card>
+          <ApiKeyCard />
         </div>
       </>
     );
@@ -576,6 +664,7 @@ export function SettingsPage() {
             ))}
           </>
         )}
+        <ApiKeyCard />
       </div>
     </>
   );

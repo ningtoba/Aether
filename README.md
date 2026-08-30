@@ -16,7 +16,7 @@ docker compose up -d
 # realtime   → ws://localhost:3082
 ```
 
-> Host ports are remapped to `3081`/`3082` because port `3001` on typical dev hosts is held by other local services (e.g. the Hermes MCP gateway), and both are published on `127.0.0.1` only — the API can drive an agent with real tools, so LAN exposure is an explicit opt-in (drop the prefix **and** set `AETHER_API_KEY` + `AETHER_CORS_ORIGINS`). The container listens on internal `3001`/`3002`, and mounts your host omp config (`~/.omp`) so the engine sees your models. By default the API is same-origin-only for browsers (no cross-site reads/writes from any page you happen to have open).
+> Host ports are remapped to `3081`/`3082` because port `3001` on typical dev hosts is held by other local services (e.g. the Hermes MCP gateway), and both are published on `127.0.0.1` only — the API can drive an agent with real tools, so LAN exposure is an explicit opt-in (drop the prefix **and** set `AETHER_API_KEY` + `AETHER_CORS_ORIGINS`). The container listens on internal `3001`/`3002`, and mounts your host omp config (`~/.omp`) so the engine sees your models. By default the API is same-origin-only for browsers (no cross-site reads/writes from any page you happen to have open), and the realtime channel enforces the same origin rule on every upgrade. With `AETHER_API_KEY` set, the GUI authenticates too: paste the key once in **Settings → API key** (kept per browser tab) and realtime connects with short-lived single-use tickets.
 
 ### Local development
 
@@ -75,7 +75,7 @@ Requires **Bun ≥ 1.3.14** at runtime (the agent engine only runs under Bun) an
 
 - Session transcript persistence into omp's real session store (currently engine-sessions are in-memory; disk transcripts are read-only).
 - Loop `skill`-transition picker with per-round argument templating.
-- RBAC role-based GUI access + per-route permissions beyond admin.
+- API-key/role provisioning UX in the GUI (roles are already honored end-to-end across REST and the realtime ticket flow; keys are provisioned via env today).
 - Provider CRUD wired to the engine registry (add a provider from the GUI).
 - Skill create/import flow writing `SKILL.md` into user/project skill dirs.
 

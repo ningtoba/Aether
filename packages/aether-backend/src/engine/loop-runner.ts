@@ -32,11 +32,21 @@ export interface LoopRunnerCallbacks {
 
 type GateAction = 'continue' | 'stop';
 
+/** Retention window for rounds in the live progress state: an indefinite
+ *  loop would otherwise grow this (and every serialized progress payload)
+ *  forever. totalRounds keeps the true count outside the window. */
+const MAX_RETAINED_ROUNDS = 200;
+/** Per-round summary cap — a full assistant reply must not ride in every
+ *  progress response. */
+const ROUND_SUMMARY_MAX_CHARS = 2000;
+
 /** Internal mutable runtime state for a loop run. */
 interface LoopRunState {
   status: LoopStatus;
   reason?: string;
   rounds: LoopRoundResult[];
+  /** Total rounds executed (survives the rounds retention window). */
+  totalRounds: number;
   startedAt?: string;
   gateResolver: ((a: GateAction) => void) | null;
   stopped: boolean;
@@ -50,6 +60,8 @@ export class LoopRunner {
   private state: LoopRunState;
   private generation = 0;
   private startWallMs = 0;
+  /** Exactly one terminal finish() per run (cap / error / stop / mid-stop). */
+  private finished = false;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(definition: LoopDefinition, session: EngineSession, callbacks: LoopRunnerCallbacks) {
@@ -62,6 +74,7 @@ export class LoopRunner {
     this.state = {
       status: 'idle',
       rounds: [],
+      totalRounds: 0,
       gateResolver: null,
       stopped: false,
       currentRound: 0,
@@ -81,6 +94,7 @@ export class LoopRunner {
     status: LoopStatus;
     currentRound: number;
     rounds: LoopRoundResult[];
+    totalRounds: number;
     startedAt?: string;
     stopReason?: string;
     sessionId?: string;
@@ -90,6 +104,7 @@ export class LoopRunner {
       status: this.state.status,
       currentRound: this.state.currentRound,
       rounds: this.state.rounds,
+      totalRounds: this.state.totalRounds,
       startedAt: this.state.startedAt,
       stopReason: this.state.reason,
       sessionId: this.session.id,
@@ -105,6 +120,7 @@ export class LoopRunner {
     this.state.status = 'running';
     this.state.startedAt = new Date().toISOString();
     this.state.stopped = false;
+    this.finished = false;
     this.state.currentRound = 0;
     this.startWallMs = Date.now();
     this.emit({ kind: 'loop:start', loopId: this.id });
@@ -120,17 +136,27 @@ export class LoopRunner {
       // Round cap reached → completed. The transition only runs BETWEEN rounds
       // (a cap of N means exactly N rounds: `[r1] -> T -> [r2] -> ... -> [rN]`,
       // never a transition after the final round).
-      if (this.definition.maxRounds && this.state.rounds.length >= this.definition.maxRounds) {
+      if (this.definition.maxRounds && this.state.totalRounds >= this.definition.maxRounds) {
         return this.finish('max rounds reached');
       }
 
-      const round = this.state.rounds.length + 1;
+      const round = this.state.totalRounds + 1;
       this.state.currentRound = round;
       this.emit({ kind: 'loop:round_start', loopId: this.id, round });
 
       const roundResult = await this.runRound(round, gen);
-      if (!roundResult) return; // stopped mid-round
+      // Stopped mid-round (manual stop / time limit landed while the prompt
+      // was still in flight): route through the normal finish path so the
+      // timer is cleared, the status becomes terminal and the GUI receives
+      // its loop:stop event. finish() is latched, so double-finish is safe.
+      if (!roundResult) return this.finish(this.state.reason ?? 'stopped');
+      this.state.totalRounds++;
       this.state.rounds.push(roundResult);
+      // Keep only the retention window — totalRounds carries the truth, and
+      // round numbering/caps read from it, never from the truncated array.
+      if (this.state.rounds.length > MAX_RETAINED_ROUNDS) {
+        this.state.rounds.splice(0, this.state.rounds.length - MAX_RETAINED_ROUNDS);
+      }
       this.emit({
         kind: 'loop:round_end',
         loopId: this.id,
@@ -139,7 +165,8 @@ export class LoopRunner {
         errored: roundResult.errored,
       });
 
-      if (this.state.stopped || gen !== this.generation) return;
+      if (gen !== this.generation) return;
+      if (this.state.stopped) return this.finish(this.state.reason ?? 'stopped');
 
       // Round error policy: stop the loop (a persistent error won't heal by
       // repeating the same prompt).
@@ -149,7 +176,7 @@ export class LoopRunner {
 
       // Transition between rounds — skipped when this was the final round.
       const isFinalRound = this.definition.maxRounds
-        ? this.state.rounds.length >= this.definition.maxRounds
+        ? this.state.totalRounds >= this.definition.maxRounds
         : false;
       if (isFinalRound) return this.finish('max rounds reached');
 
@@ -159,7 +186,11 @@ export class LoopRunner {
       // 'continue' → next round.
     }
 
-    if (!this.state.stopped && this.state.status === 'running') this.finish('completed');
+    // Fell out of the while condition: stopped between rounds (e.g. the stop
+    // landed during a transition await) or ran dry — either way the normal
+    // finish path owns the terminal transition.
+    if (this.state.stopped) this.finish(this.state.reason ?? 'stopped');
+    else if (this.state.status === 'running') this.finish('completed');
   }
 
   /** Run a single prompt round. Returns null when the loop should abort. */
@@ -285,6 +316,13 @@ export class LoopRunner {
     if (this.state.stopped) return;
     this.state.stopped = true;
     this.state.reason = reason;
+    // Clear the time-cap timer on EVERY stop path — finish() may never run
+    // again for a stop that lands mid-round, and a live timer would fire a
+    // second stop() into a loop that is already winding down.
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     if (this.state.status !== 'gated') {
       // Interrupt the current prompt by disposing the session prompt? The omp
       // SDK prompt() has no synchronous abort exposed here; instead we surface
@@ -299,7 +337,12 @@ export class LoopRunner {
 
   /** Terminate the loop cleanly (after cap/error/transition-stop). */
   private finish(reason: string): void {
-    if (this.timer) clearTimeout(this.timer);
+    if (this.finished) return; // exactly one terminal transition per run
+    this.finished = true;
+    if (this.timer) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
     this.state.reason = reason;
     this.state.status = reason === 'completed' ? 'completed' : 'stopped';
     if (reason === 'max rounds reached' || reason === 'completed') {
@@ -315,7 +358,13 @@ export class LoopRunner {
   /** Read the last assistant message text from the session (best-effort). */
   private async sessionReadLastText(): Promise<string | undefined> {
     const text = this.session.lastAssistantText?.trim();
-    return text || undefined;
+    if (!text) return undefined;
+    // This summary rides in every progress response and the round_end event —
+    // an unbounded reply per round is an unbounded payload on indefinite
+    // loops. Cap it; the head of the text stays readable.
+    return text.length > ROUND_SUMMARY_MAX_CHARS
+      ? `${text.slice(0, ROUND_SUMMARY_MAX_CHARS)}…`
+      : text;
   }
 
   private emit(ev: LoopEvent): void {

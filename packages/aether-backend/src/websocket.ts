@@ -61,6 +61,72 @@ interface RxBuffer {
  * objects (each ~100B of V8 overhead) under a fixed payload cap. */
 const MAX_RX_CHUNKS = 64;
 
+/**
+ * Extract the hostname (port stripped, lowercased) from an HTTP `Host`
+ * header value. IPv6 literals keep their brackets: `[::1]:3002` → `[::1]`.
+ */
+export function hostHeaderHostname(hostHeader: string): string {
+  const h = hostHeader.trim().toLowerCase();
+  if (h.startsWith('[')) {
+    const end = h.indexOf(']');
+    return end === -1 ? h : h.slice(0, end + 1);
+  }
+  const colon = h.lastIndexOf(':');
+  return colon === -1 ? h : h.slice(0, colon);
+}
+
+/**
+ * Host-match Origin rule (D5): with no explicit origin allow-list, a browser
+ * upgrade is only accepted when its Origin HOSTNAME equals the request Host
+ * hostname (ports may differ — the GUI page on `http://localhost:3081`
+ * legitimately opens `ws://localhost:3002`). A page on any other host
+ * (`https://evil.example`) fails: previously an empty allow-list accepted
+ * ANY Origin, which is cross-site WebSocket hijacking on the legacy socket.
+ * Requests with no Origin header (curl, SDKs, server-to-server) pass —
+ * browsers always send Origin on WebSocket handshakes.
+ */
+export function sameHostOrigin(
+  origin: string | undefined,
+  hostHeader: string | undefined,
+): boolean {
+  // Non-browser clients (tools, SDKs) send no Origin; browsers always do.
+  if (origin === undefined || origin === '') return true;
+  // The literal `null` origin (sandboxed iframe, file://) is never same-host.
+  if (origin === 'null') return false;
+  if (hostHeader === undefined || hostHeader === '') return false;
+  let originHost: string;
+  try {
+    originHost = new URL(origin).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  if (originHost === '') return false;
+  return originHost === hostHeaderHostname(hostHeader);
+}
+
+/**
+ * Shared WebSocket upgrade Origin gate (D5), used by BOTH the legacy
+ * node:http manager and the Bun realtime hub wiring in main.ts. Precedence
+ * (identical to the REST CORS policy in AetherServer):
+ * - list contains the literal '*' → any browser origin allowed (explicit
+ *   operator opt-in, e.g. a remote/Docker GUI), except the opaque `null`
+ *   origin which REST always denies too;
+ * - other non-empty list → exact-match (no-Origin requests still pass);
+ * - empty list → the host-match rule, NOT "accept anything".
+ */
+export function isUpgradeOriginAllowed(
+  origin: string | undefined,
+  hostHeader: string | undefined,
+  allowedOrigins: string[],
+): boolean {
+  if (allowedOrigins.includes('*')) return origin !== 'null';
+  if (allowedOrigins.length > 0) {
+    if (origin === undefined || origin === '') return true;
+    return allowedOrigins.includes(origin);
+  }
+  return sameHostOrigin(origin, hostHeader);
+}
+
 export class WebSocketManager {
   private clients = new Map<string, WSClient>();
   private server: Server | null = null;
@@ -74,9 +140,10 @@ export class WebSocketManager {
   private tx = new WeakMap<Duplex, { buffered: number; drainBound: boolean }>();
 
   /**
-   * Restrict WebSocket upgrades by `Origin` header. Empty array disables the
-   * check (any origin accepted). Pass e.g. `['http://localhost:5173']` to
-   * block cross-site connections.
+   * Restrict WebSocket upgrades by `Origin` header. A non-empty array uses
+   * exact-match semantics; an empty array applies the host-match default
+   * (see `sameHostOrigin`) — it no longer accepts any Origin (D5). Pass
+   * e.g. `['http://localhost:5173']` to pin an explicit origin.
    */
   setAllowedOrigins(origins: string[]): void {
     this.allowedOrigins = origins;
@@ -251,11 +318,11 @@ export class WebSocketManager {
   }
 
   private isOriginAllowed(req: IncomingMessage): boolean {
-    if (this.allowedOrigins.length === 0) return true;
-    const origin = req.headers.origin;
-    // Non-browser clients (tools, SDKs) send no Origin; browsers always do.
-    if (!origin) return true;
-    return this.allowedOrigins.includes(origin);
+    return isUpgradeOriginAllowed(
+      typeof req.headers.origin === 'string' ? req.headers.origin : undefined,
+      typeof req.headers.host === 'string' ? req.headers.host : undefined,
+      this.allowedOrigins,
+    );
   }
 
   /** Buffer raw bytes for a socket. Throws when the buffer would grow past

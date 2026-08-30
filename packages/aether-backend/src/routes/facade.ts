@@ -79,7 +79,17 @@ export async function settingsGet(
   const paths = schemaRes.schema.settings.map((s) => s.path);
   const r = await ctx.facade.settingsGet(paths);
   if (!r.ok) return jsonResponse(res, 501, { error: r.error ?? 'settings unavailable' });
-  jsonResponse(res, 200, { values: r.values });
+  // Credential-flagged paths (provider API keys etc.) are NEVER echoed back —
+  // clients get a presence marker instead, the same truthiness as the
+  // providers.ts apiKeyConfigured flag: true when a non-empty value is
+  // stored, false when empty/undefined. The write path (PUT /api/omp/settings)
+  // still accepts and stores the real value unchanged.
+  const values: Record<string, unknown> = { ...r.values };
+  for (const s of schemaRes.schema.settings) {
+    if (!s.credential) continue;
+    values[s.path] = Boolean(values[s.path]);
+  }
+  jsonResponse(res, 200, { values });
 }
 
 export async function settingsSet(

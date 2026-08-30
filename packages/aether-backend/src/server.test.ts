@@ -197,3 +197,133 @@ describe('AetherServer', () => {
     });
   });
 });
+
+// ---------------------------------------------------------------------------
+// D1: routePermission is TOTAL on /api/* — no registered route may slip
+// through a table gap with a null permission (that silently skipped RBAC).
+// ---------------------------------------------------------------------------
+describe('RBAC route table totality (D1)', () => {
+  const server = new AetherServer({ port: 0, host: '127.0.0.1' });
+
+  // Private seam peek, same convention this file already uses for `router`.
+  const permissionFor = (method: string, path: string): { resource: string; action: string } =>
+    // @ts-expect-error - accessing private method for test
+    server.routePermission(method, path);
+
+  it('resolves a concrete permission for EVERY registered /api route', () => {
+    const router = (server as any).router;
+    const registered: Array<{ method: string; pattern: RegExp }> = router.routes;
+    // RegExp built from a STRING pattern escapes forward slashes in .source
+    // ('^/api/agents$' comes back as '^\\/api\\/agents$') — normalize before
+    // matching, or the enumeration silently sees zero routes.
+    const api = registered
+      .map((r) => ({ method: r.method, source: r.pattern.source.replace(/\\\//g, '/') }))
+      .filter((r) => r.source.startsWith('^/api/'));
+    // Anti-vacuity: the real table has ~40 API entries; an empty extraction
+    // must never let this guard pass by checking nothing.
+    expect(api.length).toBeGreaterThanOrEqual(30);
+    for (const entry of api) {
+      // Reconstruct a concrete path: ^/api/agents/([^/]+)$ → /api/agents/test-id
+      const path = entry.source.slice(1, -1).replace(/\(\[\^\/\]\+\)/g, 'test-id');
+      for (const method of [entry.method, 'HEAD']) {
+        const perm = permissionFor(method, path);
+        expect(perm, `${method} ${path}`).not.toBeNull();
+        expect(perm.resource, `${method} ${path} resource`).toBeTruthy();
+        expect(perm.action, `${method} ${path} action`).toBeTruthy();
+      }
+    }
+  });
+
+  it('registers the realtime-ticket route', () => {
+    const router = (server as any).router;
+    expect(router.match('POST', '/api/realtime-ticket')).not.toBeNull();
+  });
+
+  it('maps the audit-enumerated routes explicitly', () => {
+    expect(permissionFor('GET', '/api/workspaces')).toEqual({
+      resource: 'workspaces:*',
+      action: 'read',
+    });
+    expect(permissionFor('GET', '/api/workspaces/browse')).toEqual({
+      resource: 'workspaces:*',
+      action: 'read',
+    });
+    expect(permissionFor('GET', '/api/models')).toEqual({ resource: 'system:*', action: 'read' });
+    expect(permissionFor('GET', '/api/skills')).toEqual({ resource: 'system:*', action: 'read' });
+    expect(permissionFor('GET', '/api/omp/status')).toEqual({
+      resource: 'system:*',
+      action: 'read',
+    });
+    for (const p of ['/api/omp/providers', '/api/omp/agents', '/api/omp/skills']) {
+      expect(permissionFor('GET', p)).toEqual({ resource: 'agents:*', action: 'read' });
+    }
+    // Disk-reading session routes get their OWN resource (viewer holds
+    // agents:*/system:* read and must NOT slurp raw transcripts):
+    for (const p of ['/api/omp/sessions', '/api/omp/sessions/read']) {
+      expect(permissionFor('GET', p)).toEqual({ resource: 'sessions:*', action: 'read' });
+    }
+    // The pre-existing six mappings stay byte-identical:
+    expect(permissionFor('GET', '/api/agents')).toEqual({ resource: 'agents:*', action: 'read' });
+    expect(permissionFor('POST', '/api/agents')).toEqual({ resource: 'agents:*', action: 'write' });
+    expect(permissionFor('GET', '/api/providers')).toEqual({
+      resource: 'providers:config',
+      action: 'read',
+    });
+    expect(permissionFor('POST', '/api/providers')).toEqual({
+      resource: 'providers:config',
+      action: 'write',
+    });
+    expect(permissionFor('GET', '/api/executions')).toEqual({
+      resource: 'agents:*',
+      action: 'read',
+    });
+    expect(permissionFor('POST', '/api/executions/e1/cancel')).toEqual({
+      resource: 'agents:*',
+      action: 'execute',
+    });
+    expect(permissionFor('GET', '/api/sessions')).toEqual({ resource: 'agents:*', action: 'read' });
+    expect(permissionFor('POST', '/api/sessions/s1/prompt')).toEqual({
+      resource: 'agents:*',
+      action: 'execute',
+    });
+    expect(permissionFor('GET', '/api/loops')).toEqual({ resource: 'agents:*', action: 'read' });
+    expect(permissionFor('POST', '/api/loops/l1/start')).toEqual({
+      resource: 'agents:*',
+      action: 'execute',
+    });
+    expect(permissionFor('GET', '/api/omp/settings')).toEqual({
+      resource: 'settings:*',
+      action: 'read',
+    });
+    expect(permissionFor('PUT', '/api/omp/settings')).toEqual({
+      resource: 'settings:*',
+      action: 'write',
+    });
+  });
+
+  it('never returns null: unknown /api/* paths fall back to system:* read/write', () => {
+    // This is the fail-open regression: the old table returned null here and
+    // handleRequest skipped RBAC entirely.
+    expect(permissionFor('GET', '/api/not-yet-listed')).toEqual({
+      resource: 'system:*',
+      action: 'read',
+    });
+    expect(permissionFor('HEAD', '/api/not-yet-listed')).toEqual({
+      resource: 'system:*',
+      action: 'read',
+    });
+    expect(permissionFor('POST', '/api/not-yet-listed')).toEqual({
+      resource: 'system:*',
+      action: 'write',
+    });
+    expect(permissionFor('DELETE', '/api/not-yet-listed')).toEqual({
+      resource: 'system:*',
+      action: 'write',
+    });
+    // Ticket mint (POST) rides the total fallback: system:* write.
+    expect(permissionFor('POST', '/api/realtime-ticket')).toEqual({
+      resource: 'system:*',
+      action: 'write',
+    });
+  });
+});

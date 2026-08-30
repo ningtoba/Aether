@@ -9,9 +9,10 @@
  * the embedded agent engine is wired in automatically so sessions, loops,
  * skills, and the model catalog are served to the web GUI. A Bun-native
  * WebSocket hub (`REALTIME_PORT`, default 3002) streams live engine events to
- * the browser — Bun's node:http layer cannot host WebSockets itself.
+ * the browser — Bun's node:http layer cannot host WebSockets itself. The hub
+ * enforces the SAME credential + Origin policy as the REST API (D2).
  */
-import { AetherServer } from './server.js';
+import { AetherServer, secretsEqual, validateRealtimeTicket } from './server.js';
 import {
   EngineService,
   LoopManager,
@@ -19,9 +20,27 @@ import {
   SkillsService,
   WorkspacesService,
 } from './engine/index.js';
-import { BunRealtimeHub } from './realtime/bun-realtime.js';
-import { join } from 'node:path';
+import {
+  BunRealtimeHub,
+  extractRealtimeKey,
+  type HubRequestLike,
+} from './realtime/bun-realtime.js';
+import { isUpgradeOriginAllowed } from './websocket.js';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
+
+// Deliberate split (C4): a rejected background promise (e.g. a fire-and-forget
+// prompt() that fails after its route already answered) must NEVER take the
+// server down — log and survive. An exception with no handler means invariants
+// are already broken: log it and exit(1) so the supervisor restarts a clean
+// process instead of limping on in an unknown state.
+process.on('unhandledRejection', (err) => console.error('[Aether] unhandledRejection:', err));
+process.on('uncaughtException', (err) => {
+  console.error('[Aether] uncaughtException:', err);
+  process.exit(1);
+});
 
 function parseIntEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -53,6 +72,26 @@ const CORS_ORIGINS = (process.env.AETHER_CORS_ORIGINS ?? '')
   .map((o) => o.trim())
   .filter((o) => o.length > 0);
 
+/**
+ * Backend manifest version for /health (C5: never trust a stale literal).
+ * Read relative to this module so it resolves identically from src (tsx),
+ * dist (`node dist/main.js` → `../package.json` = the backend manifest) and
+ * the Docker image. Falls back softly rather than crash-looping a container
+ * over a version string.
+ */
+function resolveVersion(): string {
+  try {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const raw = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf-8')) as {
+      version?: unknown;
+    };
+    return typeof raw.version === 'string' && raw.version.length > 0 ? raw.version : '0.0.0-dev';
+  } catch {
+    return '0.0.0-dev';
+  }
+}
+const VERSION = resolveVersion();
+
 // ── Engine wiring (Bun runtime only) ────────────────────────────────────
 const engine = new EngineService();
 const skills = new SkillsService({ projectRoot: process.cwd() });
@@ -67,12 +106,57 @@ const LOOP_STORE_DIR = process.env.LOOP_STORE_DIR ?? DEFAULT_LOOP_STORE;
 const loops = new LoopManager(engine, skills, { storeDir: LOOP_STORE_DIR });
 const facade = new OmpFacade();
 
+// Realtime hub auth wiring (D2/X3). When an API key is configured, the hub
+// demands the SAME credential surface as the REST API (Bearer / X-API-Key /
+// ?apikey=, constant-time compared) or a single-use ?ticket= minted by
+// POST /api/realtime-ticket — the browser never puts the key in a URL. When
+// unset, the hub stays open (local dev), but the Origin gate below is ALWAYS
+// installed: browser traffic from a foreign host is rejected either way (D5).
+const hubAuth = API_KEY
+  ? {
+      authenticate: (req: HubRequestLike): boolean => {
+        const key = extractRealtimeKey(req);
+        return key !== null && secretsEqual(key, API_KEY);
+      },
+      // Same module-level store the /api/realtime-ticket route mints into;
+      // delete-on-use (single-use) with a 30s TTL.
+      validateTicket: validateRealtimeTicket,
+    }
+  : {};
+// WebSocket upgrade origins: pass the FULL CORS_ORIGINS list so browsers
+// see the same precedence as REST CORS — literal '*' opts upgrades into
+// allow-any (remote/Docker GUI), an explicit list is exact-match, and an
+// empty list falls back to same-HOST (port-insensitive), so a page on
+// evil.example can no longer stream live engine frames off an open hub.
+const hubIsOriginAllowed = (req: HubRequestLike): boolean => {
+  let hostHeader = req.headers.get('host');
+  if (!hostHeader) {
+    try {
+      hostHeader = new URL(req.url).host;
+    } catch {
+      /* malformed URL → header absence decides */
+    }
+  }
+  return isUpgradeOriginAllowed(
+    req.headers.get('origin') ?? undefined,
+    hostHeader ?? undefined,
+    CORS_ORIGINS,
+  );
+};
+
 let realtime: BunRealtimeHub | null = null;
 if (engine.isAvailable) {
   console.log('[AetherServer] Engine available; wiring agent sessions/loops/skills');
   // Only the Bun runtime can host the realtime hub.
   if (typeof Bun !== 'undefined') {
-    realtime = new BunRealtimeHub(REALTIME_PORT);
+    realtime = new BunRealtimeHub({
+      port: REALTIME_PORT,
+      // D3: bind exactly HOST and log the actual address (no more false
+      // loopback line on a 0.0.0.0 bind).
+      host: HOST,
+      ...hubAuth,
+      isOriginAllowed: hubIsOriginAllowed,
+    });
   }
 } else {
   console.warn('[AetherServer] Agent engine unavailable; sessions/loops/skills disabled');
@@ -116,15 +200,28 @@ if (realtime) {
     omp: { version: facade.statusOf().version ?? null },
   };
 }
+// C5: /health reports the backend manifest version, not a stale literal
+// (healthExtras spread wins over getHealthStatus()'s placeholder).
+server.healthExtras.version = VERSION;
 
 async function shutdown(signal: string): Promise<void> {
   console.log(`[AetherServer] ${signal} received, shutting down...`);
   try {
+    // Dispose live engine sessions BEFORE closing the transport so no omp
+    // session state outlives the server. A dispose failure must never block
+    // the transport stop — log and continue.
+    try {
+      await engine.disposeAll();
+    } catch (err) {
+      console.error('[AetherServer] engine disposeAll error:', err);
+    }
     if (realtime) await realtime.stop();
     await server.stop();
-  } finally {
-    process.exit(0);
+  } catch (err) {
+    console.error('[AetherServer] shutdown error:', err);
+    process.exit(1);
   }
+  process.exit(0);
 }
 
 process.on('SIGINT', () => void shutdown('SIGINT'));

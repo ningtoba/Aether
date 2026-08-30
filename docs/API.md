@@ -266,9 +266,12 @@ Engine capability report: runtime, omp version, and per-feature availability.
   every setting with type/label/description/enum) — generated from omp's own
   `SETTINGS_SCHEMA` so the GUI editor tracks omp releases.
 - `GET /api/omp/settings/values` → `{ values: { "<setting.path>": <current> } }`
-  for every schema path.
+  for every schema path. When API auth is enabled, paths the schema flags as
+  credentials are replaced by presence markers (`true` = non-empty stored,
+  `false` = empty/absent) — secrets never echo back.
 - `PUT /api/omp/settings` with `{ "path": "…", "value": … }` → writes one setting
-  through the SDK's `Settings.set()/flush()` to the user config.
+  through the SDK's `Settings.set()/flush()` to the user config (real values,
+  including credentials).
 
 ### `GET /api/omp/providers`
 
@@ -306,7 +309,9 @@ Agent-registry CRUD (records + config). Body for create: `{ "name": "…", "conf
 
 ### `GET|POST /api/executions`, `GET /api/executions/:id`, `POST /api/executions/:id/cancel`
 
-Execution-run tracking (in-memory).
+Execution-run tracking (in-memory, capped at 500 records → 503). These records
+are a **simulation** (no engine wiring yet): every response carries
+`"simulated": true` and status transitions are timer-driven.
 
 ---
 
@@ -314,13 +319,27 @@ Execution-run tracking (in-memory).
 
 ### `GET|POST /api/providers`, `DELETE /api/providers/:id`, `GET /api/providers/:id/health`
 
-Provider-configuration CRUD. Note: the embedded engine's model catalog comes from the omp registry (`~/.omp/agent/models.yml` + bundled providers), not this list — see `GET /api/models`.
+Provider-configuration CRUD (in-memory, capped at 500 records → 503). Note:
+the embedded engine's model catalog comes from the omp registry
+(`~/.omp/agent/models.yml` + bundled providers), not this list — see
+`GET /api/models`. `POST` rejects a non-empty `apiKey` with 400 pointing at
+`PUT /api/omp/settings` (where keys actually live). `GET /api/providers/:id/health`
+is honest, not probed: `{ "status": "unknown", "latency": null, "simulated": true }`.
 
 ---
 
 ## Realtime WebSocket
 
 Connect to `ws://<host>:<REALTIME_PORT>/` (port advertised in `/health.realtime.port`). Subscribe to events with a filter frame:
+
+When `AETHER_API_KEY` is set, the realtime port requires credentials on the
+**upgrade**: `Authorization`/`X-API-Key` headers aren't available to browser
+`WebSocket`, so clients first call `POST /api/realtime-ticket` (authenticated
+REST) for a single-use 30-second ticket, then connect
+`ws://<host>:<REALTIME_PORT>/?ticket=<t>`. With auth disabled the endpoint
+returns `{ "ticket": null }` and the socket opens uncredentialed. Regardless
+of auth, upgrades are origin-gated: a browser `Origin` must be same-host
+(or listed in `AETHER_CORS_ORIGINS`).
 
 ```jsonc
 { "filter": ["engine"] }
@@ -348,5 +367,11 @@ Set `AETHER_API_KEY` to enable API auth:
 - A single key authenticates as the `admin` role; a key→role map configures per-key roles.
 - `/health` stays open for container probes.
 - Unauthorized → `401`; authorized-but-forbidden → `403`.
+- Every `/api/*` route resolves to a concrete RBAC permission — there is no
+  unmapped fail-open path. Catalog/status reads fall back to `system:* read`;
+  the filesystem browser needs `workspaces:* read` and raw on-disk transcript
+  reads need `sessions:* read`; no builtin non-admin role holds those.
+- `POST /api/realtime-ticket` (auth-gated) mints the single-use realtime
+  ticket described under [Realtime WebSocket](#realtime-websocket).
 
 **Engine availability:** session/loop/skill/model routes return `501` (not `500`) when the backend runs without the Bun runtime or the omp SDK, so clients can degrade cleanly.

@@ -7,9 +7,15 @@
  * - CORS preflight handling
  * - WebSocket frame encoding/decoding end to end
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import net from 'node:net';
-import { AetherServer } from './server.js';
+import {
+  AetherServer,
+  mintRealtimeTicket,
+  validateRealtimeTicket,
+  realtimeTicketStoreSize,
+  clearRealtimeTicketStore,
+} from './server.js';
 import { WebSocketManager } from './websocket.js';
 import type { RoleId } from '@aether/core';
 
@@ -42,7 +48,9 @@ describe('AetherServer HTTP integration', () => {
     expect(body).toHaveProperty('providers');
     expect(body).toHaveProperty('timestamp');
     expect(body.status).toBe('ok');
-    expect(body.version).toBe('0.1.0');
+    // Version tracked via healthExtras from the backend manifest (C5). Assert
+    // semver SHAPE only — pinning the literal re-freezes a stale value.
+    expect(body.version).toMatch(/^\d+\.\d+\.\d+(?:-[\w.]+)?$/);
     expect(body.memory).toHaveProperty('rss');
     expect(body.memory).toHaveProperty('heapUsed');
     expect(body.providers).toHaveProperty('configured');
@@ -572,6 +580,136 @@ describe('API authentication & RBAC', () => {
     } finally {
       await srv.stop();
     }
+  });
+
+  it('viewer role CANNOT browse workspaces or read disk sessions (D1 A-mapping)', async () => {
+    // workspaces:* / sessions:* are NOT granted to viewer (only admin's */*
+    // covers them), so these filesystem- and disk-reading routes 403 while
+    // the read-only key still reads agents. Reverting the resource choice to
+    // system:*/agents:* (which viewer HAS read for) would flip these to 200.
+    const srv = new AetherServer({
+      port: 0,
+      host: '127.0.0.1',
+      auth: { apiKey: { 'ro-key': 'viewer' as RoleId, 'admin-key': 'admin' as RoleId } },
+    });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      // Sanity: viewer still has its normal read grants.
+      expect(
+        (await fetch(`${base}/api/agents`, { headers: { 'X-API-Key': 'ro-key' } })).status,
+      ).toBe(200);
+      // Filesystem browser + raw disk transcripts are denied to viewer…
+      expect(
+        (await fetch(`${base}/api/workspaces/browse`, { headers: { 'X-API-Key': 'ro-key' } }))
+          .status,
+      ).toBe(403);
+      expect(
+        (await fetch(`${base}/api/omp/sessions/read`, { headers: { 'X-API-Key': 'ro-key' } }))
+          .status,
+      ).toBe(403);
+      // …while admin passes the RBAC gate (omp/sessions/read then degrades to
+      // 501 for the absent engine — proof the 403 came from RBAC, not wiring).
+      expect(
+        (await fetch(`${base}/api/workspaces`, { headers: { 'X-API-Key': 'admin-key' } })).status,
+      ).toBe(200);
+      expect(
+        (await fetch(`${base}/api/omp/sessions/read`, { headers: { 'X-API-Key': 'admin-key' } }))
+          .status,
+      ).toBe(501);
+    } finally {
+      await srv.stop();
+    }
+  });
+
+  it('realtime-ticket route requires auth (401 anon, 200 with key)', async () => {
+    const srv = new AetherServer({ port: 0, host: '127.0.0.1', auth: { apiKey: 'tk-key' } });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      expect((await fetch(`${base}/api/realtime-ticket`, { method: 'POST' })).status).toBe(401);
+      const ok = await fetch(`${base}/api/realtime-ticket`, {
+        method: 'POST',
+        headers: { 'X-API-Key': 'tk-key' },
+      });
+      expect(ok.status).toBe(200);
+      const body = (await ok.json()) as { ticket: string | null };
+      expect(body.ticket).toMatch(/^[0-9a-f]{32}$/);
+    } finally {
+      await srv.stop();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Realtime upgrade tickets (X3): single-use, 30s TTL, shared route+hub store
+// ---------------------------------------------------------------------------
+describe('realtime upgrade tickets', () => {
+  afterEach(() => {
+    clearRealtimeTicketStore();
+    vi.useRealTimers();
+  });
+
+  it('route returns { ticket: null } when auth is disabled (open hub)', async () => {
+    const srv = new AetherServer({ port: 0, host: '127.0.0.1' });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      const res = await fetch(`${base}/api/realtime-ticket`, { method: 'POST' });
+      expect(res.status).toBe(200);
+      expect(((await res.json()) as { ticket: string | null }).ticket).toBeNull();
+    } finally {
+      await srv.stop();
+    }
+  });
+
+  it('route-minted ticket validates EXACTLY ONCE through the shared validator (single-use)', async () => {
+    const srv = new AetherServer({ port: 0, host: '127.0.0.1', auth: { apiKey: 'tk-key' } });
+    await srv.start();
+    const base = `http://127.0.0.1:${srv.getPort()}`;
+    try {
+      const { ticket } = (await (
+        await fetch(`${base}/api/realtime-ticket`, {
+          method: 'POST',
+          headers: { 'X-API-Key': 'tk-key' },
+        })
+      ).json()) as { ticket: string };
+      // The hub's validateTicket is this same function — first use passes…
+      expect(validateRealtimeTicket(ticket)).toBe(true);
+      // …second use FAILS (delete-on-use). This is the anti-replay pin.
+      expect(validateRealtimeTicket(ticket)).toBe(false);
+    } finally {
+      await srv.stop();
+    }
+  });
+
+  it('expired tickets are rejected and swept on the next mint (30s TTL)', () => {
+    vi.useFakeTimers({ now: 1_700_000_000_000 });
+    clearRealtimeTicketStore();
+    const t1 = mintRealtimeTicket();
+    mintRealtimeTicket();
+    expect(realtimeTicketStoreSize()).toBe(2);
+    // Advance past the 30s TTL WITHOUT consuming either ticket, then mint
+    // once: the sweep must evict BOTH expired entries, leaving only the
+    // fresh ticket. Remove the sweep-on-mint and this becomes 3 (strict pin).
+    vi.advanceTimersByTime(30_001);
+    mintRealtimeTicket();
+    expect(realtimeTicketStoreSize()).toBe(1);
+    // TTL rejection: a pre-advance ticket can never validate again, swept
+    // (this path) or not.
+    expect(validateRealtimeTicket(t1)).toBe(false);
+  });
+
+  it('an unbounded trickle of mints is bounded by sweep (no memory leak)', () => {
+    vi.useFakeTimers({ now: 1_700_000_000_000 });
+    clearRealtimeTicketStore();
+    for (let round = 0; round < 50; round++) {
+      for (let i = 0; i < 10; i++) mintRealtimeTicket();
+      vi.advanceTimersByTime(30_001); // age out the whole batch
+    }
+    // One final mint sweeps all 500 aged-out tickets → only the newest lives.
+    mintRealtimeTicket();
+    expect(realtimeTicketStoreSize()).toBe(1);
   });
 });
 describe('AetherServer resilience', () => {

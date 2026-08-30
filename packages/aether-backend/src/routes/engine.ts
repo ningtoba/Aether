@@ -83,7 +83,7 @@ function sessionToSummary(session: EngineSession): Record<string, unknown> {
     model,
     status: session.status,
     messageCount: session.messageCount,
-    createdAt: new Date().toISOString(),
+    createdAt: new Date(session.createdAtMs).toISOString(),
     stats: session.stats(),
   };
 }
@@ -164,12 +164,18 @@ export async function promptSession(
       error: `Session ${session.id} is busy — a turn is already running`,
     });
   }
-  try {
-    void session.prompt(body.message); // events stream over WS
-    jsonResponse(res, 202, { accepted: true, sessionId: session.id });
-  } catch (err) {
-    handleEngineError(res, err);
-  }
+  // prompt() is async — it can never throw into this handler, so a try/catch
+  // here was dead code and a rejection on the fire-and-forget chain escaped as
+  // an unhandledRejection (crash on Node ≥15). Attach a real handler: log
+  // loudly and mirror the failure onto the session_error channel the engine
+  // uses for prompt errors. The busy gate above plus EngineSession.prompt's
+  // synchronous running-flip keep the 202 promise exclusive.
+  session.prompt(body.message).catch((err) => {
+    const cause = err instanceof Error ? err.message : String(err);
+    console.error(`[Engine] prompt failed on ${session.id}: ${cause}`);
+    session.notifyPromptFailure(cause); // surfaces as a session_error over WS
+  });
+  jsonResponse(res, 202, { accepted: true, sessionId: session.id });
 }
 
 export async function compactSession(
@@ -180,6 +186,13 @@ export async function compactSession(
 ): Promise<void> {
   const session = ctx.engine.getSession(params.id as string);
   if (!session) return notFound(res, 'Session not found');
+  // Same conflict style as the prompt route: a compact racing a live turn
+  // would race the model's own context management — refuse at the edge.
+  if (session.busy) {
+    return jsonResponse(res, 409, {
+      error: `Session ${session.id} is busy — a turn is already running`,
+    });
+  }
   try {
     await session.compact();
     jsonResponse(res, 200, { ok: true });

@@ -1,5 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { WebSocketManager, MAX_WS_FRAME_SIZE } from './websocket.js';
+import {
+  WebSocketManager,
+  MAX_WS_FRAME_SIZE,
+  sameHostOrigin,
+  isUpgradeOriginAllowed,
+} from './websocket.js';
 import { createHash } from 'node:crypto';
 
 describe('WebSocketManager', () => {
@@ -304,5 +309,109 @@ describe('attach lifecycle & fragmentation', () => {
     expect(writes.filter((w) => w.includes('101 Switching Protocols'))).toHaveLength(1);
     expect(destroyed).toBe(true);
     expect(wsm.connectionCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Origin policy (D5): empty allow-list = host-match, NOT "accept any Origin"
+// ---------------------------------------------------------------------------
+describe('origin policy (D5 CSWSH default)', () => {
+  let wsm: WebSocketManager;
+
+  beforeEach(() => {
+    wsm = new WebSocketManager();
+  });
+  it('sameHostOrigin: absent Origin accepted (non-browser client)', () => {
+    expect(sameHostOrigin(undefined, 'localhost:3002')).toBe(true);
+    expect(sameHostOrigin('', 'localhost:3002')).toBe(true);
+  });
+
+  it('sameHostOrigin: matching hostname with a DIFFERENT port accepted', () => {
+    // The documented deployment: GUI page on :3081 opens the hub on :3002.
+    expect(sameHostOrigin('http://localhost:3081', 'localhost:3002')).toBe(true);
+    expect(sameHostOrigin('http://127.0.0.1:3081', '127.0.0.1:3002')).toBe(true);
+  });
+
+  it('sameHostOrigin: foreign origin rejected', () => {
+    // The regression this pins: evil.example previously passed the empty list.
+    expect(sameHostOrigin('https://evil.example', 'localhost:3002')).toBe(false);
+    expect(sameHostOrigin('http://localhost.evil.example:3081', 'localhost:3002')).toBe(false);
+  });
+
+  it('sameHostOrigin: browser traffic without a Host header rejected', () => {
+    expect(sameHostOrigin('http://localhost:3081', undefined)).toBe(false);
+    expect(sameHostOrigin('http://localhost:3081', '')).toBe(false);
+  });
+
+  it('sameHostOrigin: null / garbage origins rejected', () => {
+    expect(sameHostOrigin('null', 'localhost:3002')).toBe(false);
+    expect(sameHostOrigin('not a url', 'localhost:3002')).toBe(false);
+  });
+
+  it('sameHostOrigin: case-insensitive and IPv6 literals compare bracketed', () => {
+    expect(sameHostOrigin('http://LOCALHOST:3081', 'localhost:3002')).toBe(true);
+    expect(sameHostOrigin('http://[::1]:3081', '[::1]:3002')).toBe(true);
+    expect(sameHostOrigin('http://[::1]:3081', '[::2]:3002')).toBe(false);
+  });
+
+  it('isUpgradeOriginAllowed: explicit list keeps exact-match semantics', () => {
+    const list = ['https://gui.example'];
+    expect(isUpgradeOriginAllowed('https://gui.example', 'localhost:3002', list)).toBe(true);
+    expect(isUpgradeOriginAllowed('https://evil.example', 'localhost:3002', list)).toBe(false);
+    // Same-host alone is NOT enough once an explicit list is configured:
+    expect(isUpgradeOriginAllowed('http://localhost:9', 'localhost:3002', list)).toBe(false);
+    // Non-browser traffic (no Origin) still passes an explicit list.
+    expect(isUpgradeOriginAllowed(undefined, 'localhost:3002', list)).toBe(true);
+  });
+
+  it('isUpgradeOriginAllowed: empty list falls back to the host-match rule', () => {
+    expect(isUpgradeOriginAllowed('http://localhost:3081', 'localhost:3002', [])).toBe(true);
+    expect(isUpgradeOriginAllowed('https://evil.example', 'localhost:3002', [])).toBe(false);
+    expect(isUpgradeOriginAllowed(undefined, 'localhost:3002', [])).toBe(true);
+  });
+
+  it('isUpgradeOriginAllowed: literal "*" opts upgrades into allow-any (REST parity)', () => {
+    // Operators who set AETHER_CORS_ORIGINS='*' (remote/Docker GUI) must not
+    // have their hub sockets rejected by the tightened empty-list default.
+    expect(isUpgradeOriginAllowed('https://anywhere.example', 'localhost:3002', ['*'])).toBe(true);
+    expect(isUpgradeOriginAllowed('http://localhost:3081', 'localhost:3002', ['*'])).toBe(true);
+    expect(isUpgradeOriginAllowed(undefined, 'localhost:3002', ['*'])).toBe(true);
+    // The opaque `null` origin stays denied (handleCors parity).
+    expect(isUpgradeOriginAllowed('null', 'localhost:3002', ['*'])).toBe(false);
+  });
+
+  it('manager gate: default (empty list) rejects a cross-site upgrade, accepts same-host and Origin-less', () => {
+    // Discriminates the D5 fix end-to-end inside WebSocketManager: with the
+    // old `allowedOrigins.length === 0 → true` default, the evil.example
+    // assertion below would fail.
+    const evil = {
+      headers: { origin: 'https://evil.example', host: 'localhost:3002' },
+    } as unknown as import('node:http').IncomingMessage;
+    // @ts-expect-error - accessing private method for test
+    expect(wsm.isOriginAllowed(evil)).toBe(false);
+    const sameHost = {
+      headers: { origin: 'http://localhost:3081', host: 'localhost:3002' },
+    } as unknown as import('node:http').IncomingMessage;
+    // @ts-expect-error - accessing private method for test
+    expect(wsm.isOriginAllowed(sameHost)).toBe(true);
+    const noOrigin = {
+      headers: { host: 'localhost:3002' },
+    } as unknown as import('node:http').IncomingMessage;
+    // @ts-expect-error - accessing private method for test
+    expect(wsm.isOriginAllowed(noOrigin)).toBe(true);
+  });
+
+  it('manager gate: explicit allow-list keeps exact-match behavior', () => {
+    wsm.setAllowedOrigins(['https://gui.example']);
+    const listed = {
+      headers: { origin: 'https://gui.example', host: 'localhost:3002' },
+    } as unknown as import('node:http').IncomingMessage;
+    // @ts-expect-error - accessing private method for test
+    expect(wsm.isOriginAllowed(listed)).toBe(true);
+    const unlisted = {
+      headers: { origin: 'http://localhost:3081', host: 'localhost:3002' },
+    } as unknown as import('node:http').IncomingMessage;
+    // @ts-expect-error - accessing private method for test
+    expect(wsm.isOriginAllowed(unlisted)).toBe(false);
   });
 });

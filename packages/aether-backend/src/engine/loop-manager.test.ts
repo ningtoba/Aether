@@ -28,13 +28,20 @@ function fakeSession(): EngineSession {
   }) as unknown as EngineSession; // structural test double
 }
 
-function fakeEngine(recorded: string[]): EngineService {
+function fakeEngine(
+  recorded: string[],
+  disposes: string[] = [],
+  session: EngineSession = fakeSession(),
+  onDispose?: (id: string) => void,
+): EngineService {
   return {
     async createSession(opts: { cwd: string }) {
       recorded.push(opts.cwd);
-      return fakeSession();
+      return session;
     },
-    async disposeSession() {
+    async disposeSession(id: string) {
+      disposes.push(id);
+      onDispose?.(id);
       return true;
     },
   } as unknown as EngineService; // structural test double
@@ -91,5 +98,86 @@ describe('LoopManager cwd contract', () => {
     await manager.start('explicit');
     await done;
     expect(recorded).toEqual(['/home/user/projects/app']);
+  });
+});
+
+/** Session double whose prompt resolves and yields a real last text, so the
+ *  runner reaches a genuine 'completed' (the generic Proxy double trips the
+ *  summary read and lands on an errored round instead). */
+function completingSession(): EngineSession {
+  return {
+    id: 'ses_fake',
+    status: 'idle',
+    lastAssistantText: 'done',
+    prompt: async () => {},
+    compact: async () => {},
+  } as unknown as EngineSession; // structural test double
+}
+
+/**
+ * The loop OWNS the session it creates — every terminal path of a run must
+ * dispose it. Pre-fix each loop start leaked one live omp session + its
+ * subscription (per-loop-start session leak).
+ */
+describe('LoopManager session disposal', () => {
+  it('disposes the loop session when the runner completes normally', async () => {
+    const disposes: string[] = [];
+    // Awaiting the real dispose event, not a timer: if the dispose is missing
+    // the promise never settles and the vitest test timeout fails the test.
+    const disposed = Promise.withResolvers<void>();
+    const manager = new LoopManager(
+      fakeEngine([], disposes, completingSession(), () => disposed.resolve()),
+      fakeSkills,
+    );
+    manager.save(loopDef('dispose-done', '/tmp/aether-test-dispose-done'));
+    await manager.start('dispose-done');
+    await disposed.promise;
+    expect(disposes).toContain('ses_fake');
+    expect(manager.progressOf('dispose-done')?.status).toBe('completed');
+  });
+
+  it('disposes the loop session when runner.start() rejects', async () => {
+    const disposes: string[] = [];
+    const disposed = Promise.withResolvers<void>();
+    const boomSkills = {
+      get: async () => {
+        throw new Error('skill store offline');
+      },
+    } as unknown as SkillsService; // test seam — makes the skill transition reject
+    const manager = new LoopManager(
+      fakeEngine([], disposes, completingSession(), () => disposed.resolve()),
+      boomSkills,
+    );
+    manager.save({
+      ...loopDef('dispose-reject', '/tmp/aether-test-dispose-reject'),
+      maxRounds: 2, // the transition must be reached: round 1 is NOT final
+      transition: { kind: 'skill', skillName: 'boom' },
+    });
+    await manager.start('dispose-reject');
+    await disposed.promise;
+    expect(disposes).toContain('ses_fake');
+  });
+
+  it('disposes the loop session on manual stop while a round is still in flight', async () => {
+    const disposes: string[] = [];
+    const gate = Promise.withResolvers<void>();
+    const stalled = {
+      id: 'ses_fake',
+      status: 'idle',
+      lastAssistantText: '',
+      prompt: () => gate.promise,
+      compact: async () => {},
+    } as unknown as EngineSession; // structural test double
+    const manager = new LoopManager(fakeEngine([], disposes, stalled), fakeSkills);
+    manager.save({
+      ...loopDef('dispose-stop', '/tmp/aether-test-dispose-stop'),
+      maxRounds: undefined, // indefinite: only stop() can end this run
+    });
+    await manager.start('dispose-stop');
+    // Round 1 is awaiting the never-resolving prompt: the void chain has NOT
+    // settled, so only stop()'s own dispose can satisfy this assertion.
+    await manager.stop('dispose-stop');
+    expect(disposes).toContain('ses_fake');
+    gate.resolve(); // let the round end so the chain settles cleanly
   });
 });

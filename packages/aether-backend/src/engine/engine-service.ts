@@ -12,13 +12,7 @@
  * the Bun-only native addon. All public methods that need the engine return a
  * strict `EngineUnavailableError` when running under Node.
  */
-import type {
-  ModelRecord,
-  ProviderModelGroup,
-  SessionSummary,
-  SessionTurnEvent,
-  SessionMessage,
-} from './types.js';
+import type { ModelRecord, ProviderModelGroup, SessionSummary, SessionTurnEvent } from './types.js';
 import type { SessionTranscriptEntry } from './types.js';
 
 /** Thrown when an engine operation is attempted but the omp SDK cannot run
@@ -141,6 +135,10 @@ interface OmpSessionLike {
 export class EngineSession {
   readonly id: string;
   readonly cwd: string;
+  /** Creation instant (epoch ms). Every summary derives `createdAt` from this
+   *  so the value is stable across reads (it used to be a fresh new Date()
+   *  per summary, so the same session "changed" on every poll). */
+  readonly createdAtMs = Date.now();
   private omp: OmpSessionLike | null = null;
   private onEvent: (ev: SessionTurnEvent) => void;
   status: 'idle' | 'running' | 'error' | 'closed' = 'idle';
@@ -206,8 +204,27 @@ export class EngineSession {
     }
   }
 
+  /** Surface an out-of-band prompt failure: the fire-and-forget route chain
+   *  cannot await prompt(), so a rejection there would escape as an
+   *  unhandledRejection. This mirrors the in-turn session_error path — marks
+   *  the session failed and broadcasts the cause on the same channel the
+   *  engine uses for prompt errors. Never throws. */
+  notifyPromptFailure(cause: string): void {
+    if (this.status !== 'closed') this.status = 'error';
+    this.onEvent({ kind: 'session_error', message: this.annotate(`Prompt failed: ${cause}`) });
+  }
+
   async compact(customInstructions?: string): Promise<void> {
     const omp = this.#require();
+    // Mirror prompt's busy guard: compacting while a turn is in flight races
+    // the model's own context management — refuse loudly instead.
+    if (this.status === 'running') {
+      this.onEvent({
+        kind: 'session_error',
+        message: 'Session is busy — cannot compact while a turn is running',
+      });
+      return;
+    }
     await omp.compact(customInstructions);
   }
 
@@ -483,6 +500,18 @@ export interface EngineServiceOptions {
   defaultCwd?: string;
   /** Enable even under plain Node (used to force exercises in tests that mock the SDK). */
   force?: boolean;
+  /** Hard cap on concurrently live sessions. Defaults to the
+   *  MAX_LIVE_SESSIONS env var, then 64. */
+  maxLiveSessions?: number;
+}
+
+/** Default live-session cap when MAX_LIVE_SESSIONS is unset or invalid. */
+const DEFAULT_MAX_LIVE_SESSIONS = 64;
+
+/** Resolve the live-session cap: constructor override → MAX_LIVE_SESSIONS → 64. */
+function parseMaxLiveSessions(value: number | string | undefined): number {
+  const n = typeof value === 'number' ? value : Number.parseInt(value ?? '', 10);
+  return Number.isFinite(n) && n > 0 ? n : DEFAULT_MAX_LIVE_SESSIONS;
 }
 
 /**
@@ -498,6 +527,10 @@ export class EngineService {
   private sessions = new Map<string, EngineSession>();
   private nextSessionId = 1;
   private started = false;
+  /** Live-session cap (constructor override → MAX_LIVE_SESSIONS → 64). */
+  private maxLiveSessions: number;
+  /** One-shot latch: warn only the first time the cap meets an all-busy set. */
+  private capWarnedAllBusy = false;
 
   constructor(opts: EngineServiceOptions = {}) {
     this.opts = opts;
@@ -505,6 +538,9 @@ export class EngineService {
     // import: bun's createRequire() does not go through the ESM exports map,
     // so probing with require.resolve() is unreliable here.
     this.available = isBunRuntime() || opts.force === true;
+    this.maxLiveSessions = parseMaxLiveSessions(
+      opts.maxLiveSessions ?? process.env.MAX_LIVE_SESSIONS,
+    );
   }
 
   get isAvailable(): boolean {
@@ -674,6 +710,9 @@ export class EngineService {
       enableLsp: false,
     } as never);
     session.attach((created as { session: OmpSessionLike }).session);
+    // Cap enforcement runs immediately before the insert: freshest eviction
+    // decision, smallest race window, no wasted eviction on failed creation.
+    await this.#enforceSessionCap();
     this.sessions.set(id, session);
     return session;
   }
@@ -694,6 +733,61 @@ export class EngineService {
     return true;
   }
 
+  /**
+   * Enforce the live-session cap before a new session is inserted: dispose the
+   * oldest (insertion-order) NON-busy session until there is room. A busy
+   * session is never force-disposed; when every live session is busy creation
+   * still proceeds with a one-time loud warning — a temporary overshoot beats
+   * failing a legitimate request.
+   */
+  async #enforceSessionCap(): Promise<void> {
+    while (this.sessions.size >= this.maxLiveSessions) {
+      let victim: EngineSession | undefined;
+      for (const candidate of this.sessions.values()) {
+        if (!candidate.busy) {
+          victim = candidate;
+          break;
+        }
+      }
+      if (!victim) {
+        if (!this.capWarnedAllBusy) {
+          this.capWarnedAllBusy = true;
+          console.warn(
+            `[EngineService] MAX_LIVE_SESSIONS cap (${this.maxLiveSessions}) reached with every session busy — creating anyway`,
+          );
+        }
+        return;
+      }
+      try {
+        await this.disposeSession(victim.id);
+      } catch (err) {
+        console.error(
+          `[EngineService] cap eviction dispose failed for ${victim.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      // disposeSession keeps the entry when dispose() threw — drop it here so
+      // the eviction loop always makes progress.
+      this.sessions.delete(victim.id);
+    }
+  }
+
+  /** Dispose every live session and clear the index (shutdown path).
+   *  Resilient to individual failures — one bad session never blocks the
+   *  rest, and this method never throws. */
+  async disposeAll(): Promise<void> {
+    const live = Array.from(this.sessions.values());
+    this.sessions.clear();
+    for (const session of live) {
+      try {
+        await session.dispose();
+      } catch (err) {
+        console.error(
+          `[EngineService] disposeAll failed for ${session.id}: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    }
+  }
+
   /** Broadcast an event from a session to whoever subscribed (WS hub installs this). */
   onBroadcast: ((sessionId: string, ev: SessionTurnEvent) => void) | null = null;
 
@@ -704,7 +798,7 @@ export class EngineService {
   /** Build a GUI-facing summary for a session. */
   toSummary(session: EngineSession): SessionSummary {
     const model = session.model;
-    const createdAt = new Date().toISOString();
+    const createdAt = new Date(session.createdAtMs).toISOString();
     return {
       id: session.id,
       name: session.id,
@@ -714,12 +808,6 @@ export class EngineService {
       messageCount: session.messageCount,
       createdAt,
     };
-  }
-
-  async listSessionMessages(id: string): Promise<SessionMessage[]> {
-    const session = this.sessions.get(id);
-    if (!session) throw new Error(`Session not found: ${id}`);
-    return [];
   }
 
   /** Rich transcript from a live session's journal (loop/session inspection). */

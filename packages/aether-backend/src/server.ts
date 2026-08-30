@@ -5,7 +5,7 @@
  * Structured for easy migration to Fastify/Express when needed.
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { createHash, timingSafeEqual } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { Router, type RouteParams } from './router.js';
 import { WebSocketManager } from './websocket.js';
 import { badRequest, jsonResponse, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
@@ -63,6 +63,58 @@ export interface ServerAuthConfig {
    * or `X-API-Key`. When unset, the API stays open (local development).
    */
   apiKey?: string | Record<string, RoleId>;
+}
+
+/**
+ * Constant-time secret comparison (sha256 digest-compare). Exported so the
+ * realtime hub wiring in main.ts authenticates with EXACTLY the same
+ * primitive as the REST path (D2: the Bun hub cannot import the private
+ * AetherServer methods, but must not re-implement the comparison either).
+ */
+export function secretsEqual(a: string, b: string): boolean {
+  const ha = createHash('sha256').update(a).digest();
+  const hb = createHash('sha256').update(b).digest();
+  return timingSafeEqual(ha, hb);
+}
+
+// ── Realtime upgrade tickets (X3: keep credentials out of URLs) ──────────
+// Browsers cannot set headers on a WebSocket handshake, so the GUI mints a
+// short-lived single-use ticket via POST /api/realtime-ticket and connects
+// with `?ticket=<t>` instead of putting the long-lived API key into a URL
+// (URLs leak into proxies, history and server logs). Tickets are 32-hex,
+// live 30s, and are consumed on first validation (delete-on-use).
+const REALTIME_TICKET_TTL_MS = 30_000;
+const realtimeTickets = new Map<string, number>();
+
+/** Mint a single-use realtime upgrade ticket (sweeps expired entries). */
+export function mintRealtimeTicket(): string {
+  const now = Date.now();
+  for (const [ticket, expiry] of realtimeTickets) {
+    if (expiry <= now) realtimeTickets.delete(ticket);
+  }
+  const ticket = randomBytes(16).toString('hex');
+  realtimeTickets.set(ticket, now + REALTIME_TICKET_TTL_MS);
+  return ticket;
+}
+
+/** Validate a realtime ticket: true AT MOST once per ticket, false once the
+ *  30s TTL passed. This is the exact function main.ts hands to the
+ *  BunRealtimeHub `validateTicket` option — route and hub share one store. */
+export function validateRealtimeTicket(ticket: string): boolean {
+  const expiry = realtimeTickets.get(ticket);
+  if (expiry === undefined) return false;
+  realtimeTickets.delete(ticket);
+  return expiry > Date.now();
+}
+
+/** Test seam: pending (unexpired-or-not) ticket count in the shared store. */
+export function realtimeTicketStoreSize(): number {
+  return realtimeTickets.size;
+}
+
+/** Test seam: drop every stored ticket (isolation for store tests). */
+export function clearRealtimeTicketStore(): void {
+  realtimeTickets.clear();
 }
 
 export class AetherServer {
@@ -150,20 +202,13 @@ export class AetherServer {
     return null;
   }
 
-  /** Constant-time key comparison (digest-compare). */
-  private keysEqual(a: string, b: string): boolean {
-    const ha = createHash('sha256').update(a).digest();
-    const hb = createHash('sha256').update(b).digest();
-    return timingSafeEqual(ha, hb);
-  }
-
   /** Authenticate a request; returns the granted role or null. */
   private authenticate(req: IncomingMessage): RoleId | null {
     if (this.apiKeys.size === 0) return null;
     const provided = this.extractApiKey(req);
     if (!provided) return null;
     for (const [key, role] of this.apiKeys) {
-      if (this.keysEqual(key, provided)) return role;
+      if (secretsEqual(key, provided)) return role;
     }
     return null;
   }
@@ -186,16 +231,26 @@ export class AetherServer {
     }
     if (!provided) return false;
     for (const key of this.apiKeys.keys()) {
-      if (this.keysEqual(key, provided)) return true;
+      if (secretsEqual(key, provided)) return true;
     }
     return false;
   }
 
-  /** Map an HTTP method + path to an RBAC (resource, action). */
-  private routePermission(
-    method: string,
-    pathname: string,
-  ): { resource: string; action: string } | null {
+  /** Map an HTTP method + path to an RBAC (resource, action).
+   *
+   *  TOTAL on /api/* (D1): every registered — and future — API path resolves
+   *  to a concrete permission. Unlisted paths fall back to `system:* read`
+   *  (GET/HEAD) or `system:* write` (mutations), so a newly added route can
+   *  never be silently fail-open. `/health` is not an /api path and stays
+   *  open for container probes.
+   *
+   *  Vocabulary: only resources/actions admin's `*`/`*` grant covers, using
+   *  the read/write/execute actions defined in core's BUILTIN_ROLES.
+   *  Filesystem- and disk-touching reads get their OWN resources
+   *  (`workspaces:*`, `sessions:*`) so read-only viewer keys (which hold
+   *  `system:*`/`agents:*` read) cannot browse directories or slurp raw
+   *  session transcripts. */
+  private routePermission(method: string, pathname: string): { resource: string; action: string } {
     if (pathname.startsWith('/api/agents')) {
       return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'write' };
     }
@@ -214,7 +269,34 @@ export class AetherServer {
     if (pathname.startsWith('/api/omp/settings')) {
       return { resource: 'settings:*', action: method === 'GET' ? 'read' : 'write' };
     }
-    return null;
+    // Directory tree browser over the real filesystem — own resource so
+    // viewer keys stay out (GET-only routes).
+    if (pathname.startsWith('/api/workspaces')) {
+      return { resource: 'workspaces:*', action: 'read' };
+    }
+    // Persisted session transcripts are raw files read off disk — own
+    // resource, and matched before any broader /api/omp prefix branch.
+    if (pathname.startsWith('/api/omp/sessions')) {
+      return { resource: 'sessions:*', action: 'read' };
+    }
+    if (
+      pathname === '/api/models' ||
+      pathname === '/api/skills' ||
+      pathname === '/api/omp/status'
+    ) {
+      return { resource: 'system:*', action: 'read' };
+    }
+    if (
+      pathname === '/api/omp/providers' ||
+      pathname === '/api/omp/agents' ||
+      pathname === '/api/omp/skills'
+    ) {
+      return { resource: 'agents:*', action: 'read' };
+    }
+    // Total fallback: never null, never fail-open.
+    return method === 'GET' || method === 'HEAD'
+      ? { resource: 'system:*', action: 'read' }
+      : { resource: 'system:*', action: 'write' };
   }
 
   /** Bridge engine session/loop events to every realtime surface. */
@@ -266,6 +348,20 @@ export class AetherServer {
     this.router.get('/api/workspaces/browse', (req, res) =>
       workspaceRoutes.browseWorkspace(req, res, {} as RouteParams, { workspaces: wsp }),
     );
+
+    // Realtime upgrade ticket (X3): single-use, 30s TTL; the GUI mints one
+    // here and opens `ws://host:realtimePort/?ticket=<t>` instead of putting
+    // the API key in a URL. FROZEN contract: 200 { ticket: string | null } —
+    // null when auth is disabled (open hub needs no credential). RBAC via
+    // the total fallback (POST → system:* write). The hub consumes tickets
+    // from the SAME module store via validateRealtimeTicket (main.ts wiring).
+    this.router.post('/api/realtime-ticket', (_req, res) => {
+      if (!this.authEnabled) {
+        jsonResponse(res, 200, { ticket: null });
+        return;
+      }
+      jsonResponse(res, 200, { ticket: mintRealtimeTicket() });
+    });
 
     // Engine control-plane (bound to the wiring when present, else 501)
     const ctx = this.engineWiring;
@@ -330,10 +426,13 @@ export class AetherServer {
   }
 
   /** Set CORS allowed origins. Also populates the WebSocket upgrade
-   *  origin allow-list (exact origins only; `'*'` stays HTTP-only). */
+   *  origin allow-list with the SAME precedence as REST CORS: literal `'*'`
+   *  opts upgrades into allow-any (opaque `null` origin still denied), an
+   *  explicit list is exact-match, and an empty list falls back to the
+   *  host-match rule (see websocket.ts `isUpgradeOriginAllowed`). */
   setCorsOrigins(origins: string[]): void {
     this.corsOrigins = origins;
-    this.wsManager.setAllowedOrigins(origins.filter((o) => o !== '*'));
+    this.wsManager.setAllowedOrigins(origins);
   }
 
   /** Handle CORS preflight and headers.
@@ -395,8 +494,11 @@ export class AetherServer {
       if (!role) {
         return jsonResponse(res, 401, { error: 'Unauthorized' });
       }
+      // routePermission is TOTAL on /api/* (D1) — no `perm &&` short-circuit:
+      // a registered or unknown API path always resolves to a concrete
+      // permission, so RBAC can never be skipped by a table gap.
       const perm = this.routePermission(method, url.split('?')[0]);
-      if (perm && this.rbac && !this.rbac.isAllowed([role], perm.resource, perm.action)) {
+      if (this.rbac && !this.rbac.isAllowed([role], perm.resource, perm.action)) {
         return jsonResponse(res, 403, { error: 'Forbidden' });
       }
     }

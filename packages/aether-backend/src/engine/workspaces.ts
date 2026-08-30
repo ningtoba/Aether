@@ -14,9 +14,9 @@
  * directory that exists (invalid paths are rejected with a clear error before
  * an omp session is created).
  */
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { isAbsolute, join, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 export interface WorkspaceDirEntry {
   name: string;
@@ -27,6 +27,32 @@ export interface WorkspaceDirEntry {
 export interface WorkspaceRoot {
   path: string;
   label: string;
+}
+
+/**
+ * Resolve `path` to its real on-disk location, following symlinks. When the
+ * path (or a deeper component of it) does not exist yet, the NEAREST EXISTING
+ * ancestor is resolved and the missing components are re-appended lexically —
+ * components that do not exist cannot be symlinks, so this stays sound (the
+ * classic containment recipe). `undefined` means the location cannot be
+ * proven (EACCES etc.); callers must treat unprovable as outside the root.
+ */
+function realpathNearest(path: string): string | undefined {
+  const missing: string[] = [];
+  let cur = path;
+  for (;;) {
+    try {
+      const real = realpathSync(cur);
+      return missing.length > 0 ? join(real, ...missing.reverse()) : real;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') return undefined;
+      const parent = dirname(cur);
+      if (parent === cur) return undefined;
+      missing.push(cur.slice(parent.length + 1));
+      cur = parent;
+    }
+  }
 }
 
 export class WorkspacesService {
@@ -67,9 +93,21 @@ export class WorkspacesService {
     return this.roots;
   }
 
-  /** True when `path` is within any configured root (or exactly a root). */
+  /**
+   * True when the REAL location of `path` is within (or exactly) the REAL
+   * location of any configured root. Realpaths are compared, never lexical
+   * strings: a symlink inside a root that points outside must be rejected,
+   * while a root reachable through a symlink keeps working.
+   */
   private isWithinRoot(path: string): boolean {
-    return this.roots.some((r) => path === r.path || path.startsWith(r.path + sep));
+    const real = realpathNearest(path);
+    if (real === undefined) return false; // unprovable location → outside
+    return this.roots.some((r) => {
+      const base = realpathNearest(r.path);
+      if (base === undefined) return false;
+      if (base === sep) return real.startsWith(sep); // root '/' holds every absolute path
+      return real === base || real.startsWith(base + sep);
+    });
   }
 
   /**

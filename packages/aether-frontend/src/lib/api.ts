@@ -8,9 +8,41 @@
 
 const BASE = import.meta.env?.VITE_API_BASE ?? '';
 
+/* ── API key (browser-local, session-only) ────────────────────────────── */
+
+/** sessionStorage slot for the operator-supplied API key. Deliberately
+ *  session-scoped — a long-lived secret must not outlive the browser tab,
+ *  so this is NEVER mirrored into localStorage. */
+const API_KEY_STORAGE_KEY = 'aether.apiKey';
+
+/** Current API key, or null when unset / storage is unavailable. */
+export function getApiKey(): string | null {
+  try {
+    return sessionStorage.getItem(API_KEY_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+/** Store the API key for this browser tab; an empty value clears it. */
+export function setApiKey(key: string): void {
+  try {
+    const trimmed = key.trim();
+    if (trimmed) sessionStorage.setItem(API_KEY_STORAGE_KEY, trimmed);
+    else sessionStorage.removeItem(API_KEY_STORAGE_KEY);
+  } catch {
+    /* storage unavailable (private mode) — requests stay unauthenticated */
+  }
+}
+
 async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  const key = getApiKey();
   const res = await fetch(`${BASE}${path}`, {
-    headers: { 'content-type': 'application/json', ...(opts.headers ?? {}) },
+    headers: {
+      'content-type': 'application/json',
+      ...(key ? { authorization: `Bearer ${key}` } : {}),
+      ...(opts.headers ?? {}),
+    },
     ...opts,
   });
   const text = await res.text();
@@ -21,6 +53,11 @@ async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
     body = text;
   }
   if (!res.ok) {
+    // 401 with no key configured is an operator-setup gap, not a data error:
+    // name the remedy instead of surfacing a bare "401 Unauthorized".
+    if (res.status === 401 && !key) {
+      throw new Error('Unauthorized — this backend requires an API key. Set it in Settings.');
+    }
     const message =
       (body && typeof body === 'object' && 'error' in (body as Record<string, unknown>)
         ? String((body as { error: unknown }).error)

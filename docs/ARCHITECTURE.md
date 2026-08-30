@@ -57,7 +57,7 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 1. `AetherServer` (node:http) handles `handleRequest`:
    - CORS preflight → 204.
    - Body-size cap → 413 before reading bytes.
-   - Optional API-key auth (`Authorization: Bearer`/`X-API-Key`, constant-time compare) + RBAC for `/api/*`; `/health` stays open.
+   - Optional API-key auth (`Authorization: Bearer`/`X-API-Key`, constant-time compare) + fail-closed RBAC for `/api/*`; `/health` stays open; realtime hub upgrades are origin-gated always and credential-gated when auth is on.
    - `Router.match` → route handler, or:
    - non-`/api/` GET → `StaticFileServer` (real file → stream; otherwise SPA fallback to `index.html`), else JSON 404.
 
@@ -78,22 +78,26 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 
 ## Security
 
-- API key auth (`Authorization: Bearer` / `X-API-Key`) with constant-time digest comparison (`crypto.timingSafeEqual`); RBAC (hierarchical roles + glob resources) enforced on `/api/agents|providers|executions|sessions|loops`. Auth is opt-in via `AETHER_API_KEY`; the server logs a loud warning at startup when it runs unauthenticated on a non-loopback bind.
-- CORS is **same-origin-only by default** (no `Access-Control-Allow-Origin` header is ever emitted unless the request `Origin` exactly matches an entry in `AETHER_CORS_ORIGINS`); the same list gates legacy WebSocket upgrade origins. This closes drive-by cross-site requests against the agent-driving API.
-- `GET /api/omp/sessions/read` confines every read to regular `.jsonl` files whose realpath resolves inside omp's session roots; all other paths return a fixed 404 with no filesystem detail.
+- API key auth (`Authorization: Bearer` / `X-API-Key`) with constant-time digest comparison (`crypto.timingSafeEqual`). Auth is opt-in via `AETHER_API_KEY`; the server logs a loud warning at startup when it runs unauthenticated on a non-loopback bind.
+- RBAC (hierarchical roles + glob resources) is **fail-closed over every `/api/*` route**: `routePermission` is total — workspaces browse needs `workspaces:* read` and raw disk-transcript reads `sessions:* read`, resources no builtin non-admin role holds; catalog/status reads fall back to `system:* read` and everything else to `system:* read|write`. A route-table totality test enumerates the live router so new routes cannot slip through a table gap.
+- CORS is **same-origin-only by default** (no `Access-Control-Allow-Origin` header is ever emitted unless the request `Origin` exactly matches an entry in `AETHER_CORS_ORIGINS`). Both WebSocket surfaces run an origin gate on every upgrade: browser `Origin`s must be same-host (port may differ, so `localhost:3081 → :3002` works) unless an explicit list is configured (`'*'` restores allow-any).
+- The realtime hub (`:3002`) is no longer an open second entry point: upgrades pass the origin gate first, then a credential gate — `Authorization: Bearer`, `X-API-Key`, `?apikey=`, or a **single-use 30 s ticket** from `POST /api/realtime-ticket` (what the GUI uses, keeping long-lived keys out of socket URLs). The hub binds `HOST` and logs its actual bound address.
+- `GET /api/omp/settings/values` redacts credential-flagged settings to presence markers when auth is enabled; writes still accept real values.
+- `GET /api/omp/sessions/read` confines every read to regular `.jsonl` files whose realpath resolves inside omp's session roots; all other paths return a fixed 404 with no filesystem detail. Workspace/working-directory validation likewise compares **realpaths**, so a symlink cannot escape configured roots.
+- Engine routes return 501 (not 500) when the engine is unavailable; simulated surfaces (in-memory provider/execution registries) self-describe (`simulated: true`, honest `status: "unknown"` health) and are capped at 500 records.
 - Static file serving rejects path traversal/absolute escapes; only GET/HEAD.
-- Engine routes return 501 (not 500) when the engine is unavailable.
+- Process posture: `unhandledRejection` is logged and survived; `uncaughtException` exits 1 so the container restarts clean. The live session map is capped (`MAX_LIVE_SESSIONS`, default 64, idle-evict) and drained on shutdown; loop-owned sessions are disposed on every terminal path.
 
 ## Testing & verification
 
-- **630 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
+- **692 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
 - `npm run build` = `tsc -b --force` (whole monorepo); `npm run lint` and `npm run format:check` gate CI.
 - CI: lint/format/madge, type-check, tests, then a Docker image build (`package.yml`).
 
 ## Operation
 
 - `docker compose up -d` → GUI at `http://localhost:3081`, realtime `ws://localhost:3082`. Both host ports are published on `127.0.0.1` only (drop the prefix to opt into LAN exposure — then also set `AETHER_API_KEY` + `AETHER_CORS_ORIGINS`).
-- Env: `PORT` (default 3001), `REALTIME_PORT` (3002), `HOST` (`0.0.0.0`), `MAX_BODY_SIZE`, `AETHER_API_KEY`, `AETHER_CORS_ORIGINS` (comma-separated exact origins; unset = same-origin-only).
+- Env: `PORT` (default 3001), `REALTIME_PORT` (3002), `HOST` (`0.0.0.0`), `MAX_BODY_SIZE`, `MAX_LIVE_SESSIONS` (64), `AETHER_API_KEY`, `AETHER_CORS_ORIGINS` (comma-separated exact origins; unset = same-origin-only, `*` = allow-any).
 - Model catalog: `~/.omp/agent/models.yml` + omp provider catalog; the GUI reads it live.
 
 ## Roadmap
@@ -101,4 +105,4 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 - Persist engine session transcripts into omp's real session store (loop definitions already persist across restarts).
 - Per-round skill transition argument templating.
 - GUI-driven provider CRUD into the engine registry.
-- RBAC-scoped GUI access beyond admin.
+- API-key/role provisioning UX (roles are already honored end-to-end across REST and the realtime ticket flow; keys are provisioned via env today).

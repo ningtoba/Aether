@@ -6,6 +6,76 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.5 — lifecycle discipline + the closed authz loop (2026-08-30)
+
+Third audit iteration: a lifecycle lens over the engine/loop object graph and
+an authz lens over the network surface, every finding pre-verified by
+independent read-only scouts, then fixed by four parallel implementation
+waves with discriminating tests (62 new; 692 total).
+
+CRITICAL closed — the realtime hub was a second, unauthenticated entry point:
+
+- `:3002` upgraded every WS connection unconditionally — no key, no Origin
+  check, even with `AETHER_API_KEY` set — and streamed live transcripts and
+  tool output to any TCP peer (any web page in the operator's browser could
+  open `ws://127.0.0.1:3082`). Upgrades now run an origin gate first
+  (same-host by default) and a credential gate when auth is on: Bearer /
+  `X-API-Key` / `?apikey=` or a single-use 30 s ticket from the new
+  `POST /api/realtime-ticket`. The hub binds `HOST` (it silently bound
+  `0.0.0.0` while logging `127.0.0.1`) and logs its actual address.
+- The legacy `:3001` WS default flipped from "any Origin" to the same
+  host-match rule — one rule for both sockets.
+
+Auth completeness:
+
+- RBAC route authorization was fail-open: 10 registered routes (workspaces
+  browse, disk transcripts, models/skills, omp status) resolved to a null
+  permission and passed with authentication alone — a `viewer` key could
+  browse `$HOME` and read every on-disk session. `routePermission` is now
+  total: `workspaces:*`/`sessions:*` resources for the two sensitive groups,
+  `system:*` fallback for the rest, pinned by a test that enumerates the
+  live router table.
+- The GUI can finally run against a protected backend: Settings stores a
+  tab-scoped API key, REST attaches it, and realtime opens with a fresh
+  single-use ticket per connection (long-lived keys stay out of socket
+  URLs).
+- Credential-flagged omp settings values are redacted to presence markers on
+  reads when auth is enabled; writes are unchanged.
+
+Lifecycle & resilience:
+
+- Loop-owned sessions were created per start and never disposed — now
+  disposed on completion, start-rejection, and manual stop; the live session
+  map is capped (`MAX_LIVE_SESSIONS`, default 64, idle-evict) and drained on
+  shutdown.
+- A rejected `prompt()` escaped as an unhandled rejection (crash-by-default
+  on Node ≥15/Bun); the route now reports it through the session's error
+  channel, and `main.ts` survives logged rejections while exiting 1 on
+  `uncaughtException`.
+- Mid-round manual stop left loops status `running` forever with the
+  max-time timer armed; stop now clears, finalizes, and emits the terminal
+  event. Indefinite loops no longer accumulate every round reply in memory
+  (200-entry window + `totalRounds`), `compact()` can no longer race a
+  running prompt (409), and session `createdAt` is real.
+
+Honesty pass:
+
+- Provider health stopped fabricating `reachable` + random latency (now
+  `unknown`/`simulated`); simulated execution records self-describe
+  (`simulated: true`); `POST /api/providers` rejects an `apiKey` field with
+  a pointer to where keys actually live; both in-memory registries are
+  capped at 500.
+- `/health` version comes from the backend manifest (was a pinned `0.1.0`
+  literal; the manifest now matches root `0.2.0`).
+- Workspace validation compares realpaths — a symlinked directory no longer
+  slips through the lexical containment check.
+
+Verification: 692 tests / 44 files, `tsc -b --force` clean, lint 0 errors,
+prettier clean. The route-table totality, hub-auth, and ticket anti-replay
+tests were discrimination-checked (reverting each fix turns them red).
+
+---
+
 ## v0.3.4 — GUI redesign + security hardening (2026-08-30)
 
 An audit-driven iteration: the web GUI was redesigned against a proper design

@@ -135,16 +135,34 @@ export class LoopManager {
     });
 
     this.runners.set(id, runner);
-    void runner.start().catch((err) => {
-      this.broadcast({
-        kind: 'loop:round_error',
-        loopId: id,
-        round: runner.progress.currentRound,
-        message: err instanceof Error ? err.message : String(err),
-      });
-      this.runners.delete(id);
-    });
+    void runner
+      .start()
+      .catch((err) => {
+        this.broadcast({
+          kind: 'loop:round_error',
+          loopId: id,
+          round: runner.progress.currentRound,
+          message: err instanceof Error ? err.message : String(err),
+        });
+        this.runners.delete(id);
+      })
+      // start() settles on BOTH remaining terminal paths (normal completion
+      // via finish(), and the rejection handled above) — dispose there so no
+      // loop run leaks its omp session.
+      .finally(() => this.disposeLoopSession(id, session.id));
     return runner.progress;
+  }
+
+  /** Dispose the omp session a loop run owns. The loop CREATED this session,
+   *  so every terminal path must dispose it. Best-effort but loud: a disposal
+   *  failure never throws into the route that triggered the terminal path. */
+  private disposeLoopSession(loopId: string, sessionId: string | undefined): void {
+    if (!sessionId) return;
+    this.engine.disposeSession(sessionId).catch((err) => {
+      console.error(
+        `[LoopManager] session dispose failed (loop ${loopId}, session ${sessionId}): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    });
   }
 
   /** Manual stop (works while running or gated). */
@@ -153,6 +171,11 @@ export class LoopManager {
     if (!runner) return this.progressOf(id);
     await runner.stop('manual stop');
     this.runners.delete(id);
+    // Dispose now, not only when the in-flight chain settles: a mid-round stop
+    // leaves runner.start() awaiting the prompt, so its .finally dispose could
+    // linger indefinitely. A repeat dispose from that finally is a no-op
+    // (EngineService.disposeSession returns false once the id is gone).
+    this.disposeLoopSession(id, runner.progress.sessionId);
     return runner.progress;
   }
 

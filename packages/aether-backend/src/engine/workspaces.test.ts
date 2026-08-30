@@ -5,7 +5,7 @@
  * so a caller-side re-check would be an untestable dead branch instead.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkspacesService } from './workspaces.js';
@@ -49,5 +49,36 @@ describe('WorkspacesService.resolveCwd', () => {
     const svc = new WorkspacesService(undefined);
     const r = svc.resolveCwd(undefined);
     expect('path' in r && r.path.startsWith('/')).toBe(true);
+  });
+});
+
+describe('WorkspacesService symlink containment', () => {
+  it('rejects a symlink inside a root that points to a directory outside it', () => {
+    // Fixture: root/escape → a real directory OUTSIDE every root. The old
+    // lexical startsWith check saw 'root/escape' as inside and statSync then
+    // happily followed the link, so both entry points accepted the escape.
+    const outside = mkdtempSync(join(tmpdir(), 'aether-outside-'));
+    const link = join(root, 'escape');
+    symlinkSync(outside, link);
+    try {
+      const svc = new WorkspacesService(root);
+      const r = svc.resolveCwd(link);
+      expect('error' in r && r.error).toContain('outside configured workspaces');
+      // browse() must refuse to list through the same link.
+      expect(svc.browse(link)).toBeUndefined();
+      // The outside target itself was already rejected before the fix too —
+      // pin that the REAL path never leaks into the answer.
+      expect(JSON.stringify(r)).not.toContain(outside);
+    } finally {
+      rmSync(link, { force: true }); // unlinks the symlink, not the target
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('still accepts regular directories inside the root (no false positives)', () => {
+    const svc = new WorkspacesService(root);
+    // Discriminating pair for the test above: same service, real directory.
+    expect(svc.resolveCwd(sub)).toEqual({ path: sub });
+    expect(svc.browse(sub)?.path).toBe(sub);
   });
 });
