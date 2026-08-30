@@ -27,8 +27,10 @@ deployed build).
   `network`, `no-base-url`) on hover.
 - **Dashboard health copy is true**: `providers: 2 configured · 67 in
   registry` replaces `2 of 67 configured`, which implied the other 65 were
-  half-configured. 67 is what `/health` counts; the Providers table renders
-  70 rows — the two endpoints count on different bases.
+  half-configured. 67 is what `/health` counts (distinct providers owning
+  at least one registry model); the Providers table renders 70 rows because
+  `listProviders` appends the same set's `getDiscoverableProviders()` entries
+  that have no static models — that append is the +3.
 - Probe semantics are unchanged from v0.3.8 and remain as documented in
   [API.md](API.md): one 4-second request to `<baseUrl>/models`, key from
   `AuthStorage.peekApiKey`, reason-coded failures, model lists never
