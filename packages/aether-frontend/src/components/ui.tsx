@@ -401,6 +401,9 @@ export function ConfirmButton(props: {
   onConfirm: () => void;
   children?: React.ReactNode;
   title?: string;
+  /** Icon-only confirms are announced as 'Confirm?' — screen readers need
+   *  the real action ("Delete loop X"), which callers know and we don't. */
+  ariaLabel?: string;
 }): React.ReactElement {
   const [armed, setArmed] = useState(false);
   const timer = useRef<number | undefined>(undefined);
@@ -428,6 +431,7 @@ export function ConfirmButton(props: {
     <button
       type="button"
       className="btn danger sm"
+      aria-label={props.ariaLabel}
       title={props.title ?? (armed ? 'Click again to confirm' : 'Click twice to confirm')}
       onClick={click}
     >

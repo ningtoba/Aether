@@ -22,8 +22,6 @@ aether-backend (runs on Bun)
    │   LoopRunner
    ├── SkillsService     → SKILL.md discovery (.omp/skills, ~/.omp/agent/skills)
    └── BunRealtimeHub    → Bun.serve websocket hub for live engine events
-        │
-        └─ domain packages: aether-core · aether-memory · aether-orchestrator · aether-tools
 ```
 
 ### Why the runtime is Bun
@@ -37,18 +35,15 @@ The omp SDK (`@oh-my-pi/pi-coding-agent`) only runs under the **Bun** runtime (i
 
 ## Package layout
 
-| Package               | Depends on                              | Responsibilities                                                                                                                                                                     |
-| --------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `aether-core`         | —                                       | Events (`EventBus`), lifecycle, config, shared types, utils, telemetry (pino + OpenTelemetry), security (RBAC). Merged from the former types/utils/core/telemetry/security packages. |
-| `aether-memory`       | `aether-core`                           | `MemoryStore`, `InMemoryVectorStore`, `RAGEngine`, scoped stores (episodic/semantic/task/conversation).                                                                              |
-| `aether-orchestrator` | `aether-core`                           | LangGraph workflow graph engine, `WorkflowBuilder`, checkpoint manager, graph editor + DOT/Mermaid visualizer.                                                                       |
-| `aether-tools`        | `aether-core`                           | Tool registry, shell + Docker + Playwright + Python-venv + TS-runtime sandboxes (merged from tools/docker/playwright/python-venv/ts-runtime).                                        |
-| `aether-backend`      | all above + `@oh-my-pi/pi-coding-agent` | HTTP/WS server, engine service, loop manager, skills service, model catalog, static GUI hosting.                                                                                     |
-| `aether-frontend`     | `aether-core`                           | React + Vite web GUI.                                                                                                                                                                |
+| Package           | Depends on                                  | Responsibilities                                                                                                                                                                     |
+| ----------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `aether-core`     | —                                           | Events (`EventBus`), lifecycle, config, shared types, utils, telemetry (pino + OpenTelemetry), security (RBAC). Merged from the former types/utils/core/telemetry/security packages. |
+| `aether-backend`  | `aether-core` + `@oh-my-pi/pi-coding-agent` | HTTP/WS server, engine service, loop manager, skills service, model catalog, static GUI hosting.                                                                                     |
+| `aether-frontend` | `aether-core`                               | React + Vite web GUI.                                                                                                                                                                |
 
-Dependency flow is strictly leaf → root: `core → memory/orchestrator/tools → backend → frontend`.
+Dependency flow is strictly leaf → root: `core → backend → frontend`.
 
-The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are gone: the SDK/provider layer is superseded by the embedded omp engine and its model registry; the Electron shell by the web GUI.
+The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are gone: the SDK/provider layer is superseded by the embedded omp engine and its model registry; the Electron shell by the web GUI. In v0.3.6 `aether-memory`, `aether-orchestrator`, and `aether-tools` were deleted too: a repo-wide grep proved zero importers (the orchestrator's node runners returned canned outputs, and the tools sandboxes are superseded by the omp SDK's own session tools).
 
 ## Backend internals
 
@@ -90,7 +85,7 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 
 ## Testing & verification
 
-- **692 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
+- **548 vitest tests** (`npm test`) across the three packages — run under Node, never importing the Bun-only omp SDK.
 - `npm run build` = `tsc -b --force` (whole monorepo); `npm run lint` and `npm run format:check` gate CI.
 - CI: lint/format/madge, type-check, tests, then a Docker image build (`package.yml`).
 
@@ -103,6 +98,5 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 ## Roadmap
 
 - Persist engine session transcripts into omp's real session store (loop definitions already persist across restarts).
-- Per-round skill transition argument templating.
 - GUI-driven provider CRUD into the engine registry.
 - API-key/role provisioning UX (roles are already honored end-to-end across REST and the realtime ticket flow; keys are provisioned via env today).

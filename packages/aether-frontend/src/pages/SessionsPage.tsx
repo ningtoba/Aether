@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   listSessions,
   createSession,
@@ -9,15 +9,23 @@ import {
   listDiskSessions,
   readDiskSession,
   getSession,
+  getSessionTranscript,
   type SessionSummary,
   type ModelGroup,
   type DiskSessionInfo,
 } from '../lib/api';
-import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
+import { getRealtimeClient, type RealtimeFrame } from '../lib/realtime';
 import { ChatConsole } from '../components/ChatConsole';
 import type { ChatStats } from '../components/ChatConsole';
 import { CwdPicker } from '../components/CwdPicker';
-import { reduceChatFrame, appendUser, fromMessages, type ChatItem } from '../lib/chat';
+import {
+  reduceChatFrame,
+  appendUser,
+  appendMeta,
+  fromMessages,
+  fromTranscriptEntries,
+  type ChatItem,
+} from '../lib/chat';
 import {
   ConfirmButton,
   CopyButton,
@@ -39,7 +47,7 @@ const STATUS_TONE: Record<string, StatusTone> = {
   closed: 'idle',
 };
 
-export function SessionsPage() {
+export function SessionsPage({ initialSessionId }: { initialSessionId?: string }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [diskSessions, setDiskSessions] = useState<DiskSessionInfo[]>([]);
   const [groups, setGroups] = useState<ModelGroup[]>([]);
@@ -47,7 +55,6 @@ export function SessionsPage() {
   const [current, setCurrent] = useState<string | null>(null);
   const [cwd, setCwd] = useState<string | undefined>(undefined);
   const [items, setItems] = useState<ChatItem[]>([]);
-  const [rt, setRt] = useState<RealtimeClient | null>(null);
   const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed'>('connecting');
   const [viewingDisk, setViewingDisk] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -55,6 +62,11 @@ export function SessionsPage() {
   const [activeModel, setActiveModel] = useState<string>('');
   const [creating, setCreating] = useState(false);
   const [query, setQuery] = useState('');
+  // Items-view generation counter: every async writer to `items` captures it
+  // at request start and discards its response once a newer open/close has
+  // bumped it (fast clicking between sessions/disk transcripts used to let a
+  // stale response overwrite the fresh view).
+  const itemsReqRef = useRef(0);
 
   const refresh = useCallback(() => {
     listSessions()
@@ -79,6 +91,21 @@ export function SessionsPage() {
       .catch(() => {});
   }, []);
 
+  /** Fetch the live session's persisted transcript so opening a session (and
+   *  reconnect recovery) renders real history, not just the stats line.
+   *  Responses from a superseded open are discarded. */
+  const loadTranscript = useCallback((id: string) => {
+    const reqId = ++itemsReqRef.current;
+    getSessionTranscript(id)
+      .then((d) => {
+        if (itemsReqRef.current !== reqId) return;
+        setItems(fromTranscriptEntries(d.transcript.entries));
+      })
+      .catch(() => {
+        /* transcript endpoint unavailable — live frames still fill the view */
+      });
+  }, []);
+
   useEffect(() => {
     refresh();
     listModels()
@@ -94,29 +121,20 @@ export function SessionsPage() {
     if (first && !opts.includes(model)) setModel(first);
   }, [groups, model]);
 
-  // Accept a /health-provided realtime port (poll once to discover it).
+  // The realtime singleton discovers its own port (lib/realtime.ts); this
+  // only mirrors the shared socket's state into the header pill.
   useEffect(() => {
-    fetch('/health')
-      .then((r) => r.json())
-      .then((h) => {
-        if (!h?.realtime?.port) return;
-        setRt((prev) => prev ?? new RealtimeClient(h.realtime.port));
-      })
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    if (!rt) return;
+    const rt = getRealtimeClient();
     const iv = setInterval(() => {
       setWsState(rt.connected ? 'open' : 'connecting');
     }, 500);
     return () => clearInterval(iv);
-  }, [rt]);
+  }, []);
 
   // Fold live frames into the transcript, only while a session is open.
   useEffect(() => {
-    if (!rt || !current) return;
-    const unsub = rt.subscribe((frame: RealtimeFrame) => {
+    if (!current) return;
+    const unsub = getRealtimeClient().subscribe((frame: RealtimeFrame) => {
       const sid = frame.payload?.sessionId;
       if (sid && sid !== current) return;
       const ev = frame.payload?.event as Record<string, unknown> & { kind?: string };
@@ -124,7 +142,20 @@ export function SessionsPage() {
       setItems((it) => reduceChatFrame(it, frame));
     });
     return unsub;
-  }, [rt, current, loadActive]);
+  }, [current, loadActive]);
+
+  // Frames emitted while the socket was down are gone forever: on every
+  // (re)connect after the first, re-pull the open session's stats AND
+  // transcript so streaming blocks can never stick on a stale cursor.
+  useEffect(
+    () =>
+      getRealtimeClient().onReconnect(() => {
+        if (!current) return;
+        loadActive(current);
+        loadTranscript(current);
+      }),
+    [current, loadActive, loadTranscript],
+  );
 
   const openSession = async () => {
     if (creating) return; // busy guard — no double-spawn on double click
@@ -137,6 +168,7 @@ export function SessionsPage() {
       setCurrent(session.id);
       loadActive(session.id);
       setViewingDisk(null);
+      itemsReqRef.current++; // discard any in-flight transcript of the old view
       setItems([]);
       refresh();
     } catch (e) {
@@ -146,30 +178,60 @@ export function SessionsPage() {
     }
   };
 
-  const openHistory = async (s: SessionSummary) => {
-    setCurrent(s.id);
-    setViewingDisk(null);
-    setItems([]);
-    loadActive(s.id);
-  };
+  const openHistory = useCallback(
+    (s: SessionSummary) => {
+      setCurrent(s.id);
+      setViewingDisk(null);
+      setItems([]);
+      loadActive(s.id);
+      // Stats alone leave a reopened session looking empty until the next
+      // frame; replay the persisted transcript too.
+      loadTranscript(s.id);
+    },
+    [loadActive, loadTranscript],
+  );
+
+  // Deep link (#/sessions/<id>): auto-open that session once, resolving it
+  // through listSessions so the sidebar state stays honest. A target the
+  // backend no longer knows is LOUD, never silently ignored.
+  const deepOpenedRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const id = initialSessionId;
+    if (!id || deepOpenedRef.current === id) return;
+    deepOpenedRef.current = id;
+    listSessions()
+      .then((r) => {
+        const s = r.sessions.find((x) => x.id === id);
+        if (s) openHistory(s);
+        else setError(`Session “${id}” is not live — nothing to open.`);
+      })
+      .catch((e) => setError((e as Error).message));
+  }, [initialSessionId, openHistory]);
 
   const openDiskSession = async (info: DiskSessionInfo) => {
+    const reqId = ++itemsReqRef.current;
     try {
       const { transcript } = await readDiskSession(info.path);
+      if (itemsReqRef.current !== reqId) return; // superseded by a newer open
       setItems(fromMessages(transcript.messages));
       setViewingDisk(info.path);
       setCurrent(null);
     } catch (e) {
+      if (itemsReqRef.current !== reqId) return;
       setError((e as Error).message);
     }
   };
 
   const send = async (text: string) => {
     if (!text.trim() || !current) return;
+    const sid = current;
     setItems((it) => appendUser(it, text));
     try {
-      await promptSession(current, text);
+      await promptSession(sid, text);
     } catch (e) {
+      // The optimistic bubble has no accepted turn behind it — say so in the
+      // transcript instead of silently waiting for a reply that never comes.
+      setItems((it) => appendMeta(it, '⚠ message not delivered'));
       setError((e as Error).message);
     }
   };
@@ -182,6 +244,7 @@ export function SessionsPage() {
   const close = async () => {
     if (!current) return;
     await disposeSession(current).catch(() => {});
+    itemsReqRef.current++; // drop in-flight reads for the disposed view
     setCurrent(null);
     setViewingDisk(null);
     setItems([]);

@@ -35,16 +35,50 @@ export function setApiKey(key: string): void {
   }
 }
 
-async function request<T>(path: string, opts: RequestInit = {}): Promise<T> {
+/** Per-call overrides on top of RequestInit. */
+export interface RequestOptions extends RequestInit {
+  /** Abort the fetch after this many ms; 0 disables the timeout. */
+  timeoutMs?: number;
+}
+
+/** Default bound for every API call: a hung backend must never pin a spinner
+ *  forever. Prompt POSTs are fire-and-forget 202s (routes/engine.ts answers
+ *  immediately), so the default is safe for them too. */
+const DEFAULT_TIMEOUT_MS = 30_000;
+
+async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const key = getApiKey();
-  const res = await fetch(`${BASE}${path}`, {
-    headers: {
-      'content-type': 'application/json',
-      ...(key ? { authorization: `Bearer ${key}` } : {}),
-      ...(opts.headers ?? {}),
-    },
-    ...opts,
-  });
+  const {
+    headers: callerHeaders,
+    signal: callerSignal,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    ...rest
+  } = opts;
+  // Caller headers merge AFTER the defaults: previously `...opts` spread over
+  // the computed headers object, so ANY caller-supplied header silently
+  // dropped the Authorization header → spurious 401s on credentialed backends.
+  const headers = new Headers({ 'content-type': 'application/json' });
+  if (key) headers.set('authorization', `Bearer ${key}`);
+  new Headers(callerHeaders).forEach((value, name) => headers.set(name, value));
+  const controller = new AbortController();
+  const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : undefined;
+  const relayAbort = () => controller.abort();
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', relayAbort, { once: true });
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${BASE}${path}`, { ...rest, headers, signal: controller.signal });
+  } catch (e) {
+    if (controller.signal.aborted && !callerSignal?.aborted) {
+      throw new Error(`Request timed out after ${timeoutMs}ms: ${opts.method ?? 'GET'} ${path}`);
+    }
+    throw e;
+  } finally {
+    clearTimeout(timer);
+    if (callerSignal) callerSignal.removeEventListener('abort', relayAbort);
+  }
   const text = await res.text();
   let body: unknown = null;
   try {
@@ -170,7 +204,11 @@ export type LoopTransitionKind = 'none' | 'compact' | 'skill' | 'gate';
 
 export interface LoopTransition {
   kind: LoopTransitionKind;
+  /** Required when kind === 'skill'. */
   skillName?: string;
+  /** Optional single-line argument line appended to the skill invocation;
+   *  {round} is rendered per round (mirrors backend types.ts). */
+  args?: string;
 }
 
 export interface LoopDefinition {
@@ -198,6 +236,10 @@ export interface LoopProgress {
   status: 'idle' | 'running' | 'gated' | 'stopped' | 'completed' | 'error';
   currentRound: number;
   rounds: LoopRoundResult[];
+  /** Total rounds ever executed — the rounds array is a retention window,
+   *  so round counts/caps must read this, never rounds.length (backend
+   *  loop-runner.ts MAX_RETAINED_ROUNDS). */
+  totalRounds: number;
   startedAt?: string;
   stopReason?: string;
   /** Session the loop is running on — for live chat inspection. */

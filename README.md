@@ -37,7 +37,7 @@ Requires **Bun ≥ 1.3.14** at runtime (the agent engine only runs under Bun) an
 | Capability              | What it does                                                                                                                                                                                                                                                |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Sessions**            | Full agent console. Pick any model in the catalog, prompt it, watch text/thinking/tool calls stream live over WebSocket, compact, and dispose. Plus a browser over omp's persisted sessions on disk (every project, transcripts included).                  |
-| **Loops**               | Indefinite, workflow-controlled runs: `[round N] → [transition] → [round N+1]`. Transitions — `none`, `compact`, `skill`, or an interactive `gate` where _you_ decide — plus `maxRounds`/`maxTimeMs`/manual stop. Loop definitions persist across restarts. |
+| **Loops**               | Indefinite, workflow-controlled runs: `[round N] → [transition] → [round N+1]`. Transitions — `none`, `compact`, `skill` (with per-round `{round}`-templated arguments), or an interactive `gate` where _you_ decide — plus `maxRounds`/`maxTimeMs`/manual stop. Loop definitions persist across restarts (atomically; a corrupt store is quarantined, never silently dropped). |
 | **Skills**              | Every `SKILL.md` pack omp discovers — user, project, and managed-skills sources — browsable with full bodies on demand; wire any one in as a loop transition.                                                                                               |
 | **Models**              | Live catalog from the omp registry (60+ providers + custom `models.yml`), used by every model picker.                                                                                                                                                       |
 | **Providers**           | Searchable catalog of every provider omp knows (70+, with model counts and base URLs), plus custom provider registration.                                                                                                                                   |
@@ -64,7 +64,7 @@ Requires **Bun ≥ 1.3.14** at runtime (the agent engine only runs under Bun) an
 
 | Doc                                      | What it covers                                                                                    |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| [Architecture](docs/ARCHITECTURE.md)     | System topology, the 6 packages, why the runtime is Bun, backend internals, security, operations. |
+| [Architecture](docs/ARCHITECTURE.md)     | System topology, the three packages, why the runtime is Bun, backend internals, security, operations. |
 | [API Reference](docs/API.md)             | Every REST endpoint + the realtime WebSocket protocol, with request/response shapes.              |
 | [Development Guide](docs/DEVELOPMENT.md) | Setup, build/run/test, adding a model, Docker, and where the engine code lives.                   |
 | [Changelog](docs/CHANGELOG.md)           | Release history.                                                                                  |
@@ -74,7 +74,6 @@ Requires **Bun ≥ 1.3.14** at runtime (the agent engine only runs under Bun) an
 ## Roadmap
 
 - Session transcript persistence into omp's real session store (currently engine-sessions are in-memory; disk transcripts are read-only).
-- Loop `skill`-transition picker with per-round argument templating.
 - API-key/role provisioning UX in the GUI (roles are already honored end-to-end across REST and the realtime ticket flow; keys are provisioned via env today).
 - Provider CRUD wired to the engine registry (add a provider from the GUI).
 - Skill create/import flow writing `SKILL.md` into user/project skill dirs.

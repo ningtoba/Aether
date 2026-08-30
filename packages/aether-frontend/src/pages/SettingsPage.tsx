@@ -165,6 +165,9 @@ function SettingRow({
             onChangeDraft(def.path, stringifyForInput(value));
             return;
           }
+          // Mirror the string row's diff guard below: a blur that did not
+          // change the parsed value must not fire a PUT.
+          if (Number(t) === Number(value)) return;
           onCommit(def.path, Number(t));
         }}
         onKeyDown={(e) => {

@@ -181,3 +181,89 @@ describe('LoopManager session disposal', () => {
     gate.resolve(); // let the round end so the chain settles cleanly
   });
 });
+
+/**
+ * start() reserves the loop slot BEFORE awaiting createSession: two
+ * concurrent calls (GUI double-click, client retry) used to both pass the
+ * runners.has(id) guard and leave the loop with TWO live runners and two
+ * omp sessions. A rejected createSession must also release the reservation
+ * so the loop is startable again, and a construction failure after session
+ * creation must dispose the session (no leak) rather than strand the slot.
+ */
+describe('LoopManager start race', () => {
+  it('rejects the second of two concurrent starts and creates exactly one session', async () => {
+    const gate = Promise.withResolvers<EngineSession>();
+    let creates = 0;
+    const engine = {
+      async createSession() {
+        creates++;
+        return gate.promise; // hold both starts inside the await window
+      },
+      async disposeSession() {
+        return true;
+      },
+    } as unknown as EngineService; // structural test double
+    const manager = new LoopManager(engine, fakeSkills);
+    manager.save(loopDef('race', '/tmp/aether-test-race'));
+
+    const first = manager.start('race');
+    const second = manager.start('race');
+    // Discriminator: pre-fix BOTH resolved (runners set twice after the await).
+    await expect(second).rejects.toThrow(/Loop already running/);
+
+    gate.resolve(completingSession());
+    await first;
+    expect(creates).toBe(1);
+    // No orphan: exactly one runner is tracked — the first call's.
+    expect(manager.listProgress()).toHaveLength(1);
+  });
+
+  it('releases the reservation when createSession rejects, so a retry can start', async () => {
+    let attempt = 0;
+    const engine = {
+      async createSession() {
+        attempt++;
+        if (attempt === 1) throw new Error('provider down');
+        return completingSession();
+      },
+      async disposeSession() {
+        return true;
+      },
+    } as unknown as EngineService; // structural test double
+    const manager = new LoopManager(engine, fakeSkills);
+    manager.save(loopDef('retry', '/tmp/aether-test-retry'));
+
+    await expect(manager.start('retry')).rejects.toThrow('provider down');
+    const progress = await manager.start('retry'); // slot must be free again
+    expect(attempt).toBe(2);
+    expect(progress.totalRounds).toBe(0);
+  });
+
+  it('disposes the session and frees the slot when runner construction fails', async () => {
+    const disposes: string[] = [];
+    const engine = {
+      async createSession() {
+        return completingSession();
+      },
+      async disposeSession(id: string) {
+        disposes.push(id);
+        return true;
+      },
+    } as unknown as EngineService; // structural test double
+    const manager = new LoopManager(engine, fakeSkills);
+    // LoopRunner's constructor rejects a blank prompt — this fires AFTER
+    // createSession resolved, so the session must be disposed by the start
+    // failure path itself (pre-fix it leaked, and the slot logic had no
+    // ownership contract at all).
+    manager.save({ ...loopDef('badprompt', '/tmp/aether-test-badprompt'), prompt: '   ' });
+    await expect(manager.start('badprompt')).rejects.toThrow(/Loop prompt is required/);
+    expect(disposes).toContain('ses_fake');
+
+    // Slot released: the SAME id starts cleanly once the definition is fixed.
+    manager.save({ ...loopDef('badprompt', '/tmp/aether-test-badprompt'), prompt: 'work' });
+    const done = terminalEvent(manager, 'badprompt');
+    await manager.start('badprompt');
+    await done;
+    expect(manager.progressOf('badprompt')?.status).toBe('completed');
+  });
+});

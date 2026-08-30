@@ -86,14 +86,21 @@ export interface SessionTranscript {
 
 /* ─── Loops ──────────────────────────────────────────────────────────── */
 
-/** The transition that runs AFTER each round (user-configurable in the GUI).
+/** The four transitions the runner understands. SINGLE source of truth for
+ *  the type, the save-route validation and the on-disk store guard.
  *  `[round N prompt] → [transition] → [round N+1]` */
-export type LoopTransitionKind = 'none' | 'compact' | 'skill' | 'gate';
+export const LOOP_TRANSITION_KINDS = ['none', 'compact', 'skill', 'gate'] as const;
+
+export type LoopTransitionKind = (typeof LOOP_TRANSITION_KINDS)[number];
 
 export interface LoopTransition {
   kind: LoopTransitionKind;
   /** Required when kind === 'skill' */
   skillName?: string;
+  /** Optional per-round instruction template for the skill transition. Every
+   *  `{round}` becomes the 1-based round number; the skill body is appended
+   *  after a blank line. Undefined/empty = the static skill prompt. */
+  args?: string;
 }
 
 export interface LoopDefinition {
@@ -130,6 +137,9 @@ export interface LoopProgress {
   status: LoopStatus;
   currentRound: number;
   rounds: LoopRoundResult[];
+  /** Rounds executed since the loop started — survives the rounds retention
+   *  window, so it is the only trustworthy count on long runs. */
+  totalRounds: number;
   startedAt?: string;
   stopReason?: string;
   /** Session the loop is running on (for live chat inspection). */

@@ -11,12 +11,13 @@
  *    fabricated 'reachable' + random latency.
  * The provider map is module-level state; every test drains it first.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AetherServer } from '../server.js';
 import type { EngineWiring } from '../server.js';
 import { LoopManager } from '../engine/loop-manager.js';
 import { WorkspacesService } from '../engine/workspaces.js';
 import type { EngineService, SkillsService, OmpFacade } from '../engine/index.js';
+import { providerStats, setProviderCatalogProbe } from './providers.js';
 
 const unusedEngine = {
   async createSession() {
@@ -136,4 +137,85 @@ describe('provider registry cap', () => {
     // Discriminator: the rejected POST must not have mutated the map.
     expect(await providerCount()).toBe(500);
   }, 30_000);
+});
+
+/**
+ * providerStats honesty: `healthy` used to be `providers.size` — the SAME
+ * fabricated number as `configured`, so "all providers healthy" was true by
+ * construction. It is now the LAST OBSERVED count from the real engine
+ * provider catalog (omp ModelRegistry via the facade's listProviders
+ * accessor), 0 whenever that source is unavailable. providerStats() drives a
+ * TTL-cached stale-while-revalidate refresh, so tests await the OBSERVED
+ * condition (vi.waitFor), never a guessed sleep.
+ */
+describe('providerStats health honesty (real catalog source)', () => {
+  afterEach(() => {
+    // Restore the default probe + clear the observation cache for isolation.
+    setProviderCatalogProbe(null);
+  });
+
+  /** providerStats() is sync-by-contract (getHealthStatus spreads it) while
+   *  the observation is async: kick it and await the real settled condition. */
+  async function settleHealthy(expected: number): Promise<{
+    configured: number;
+    healthy: number;
+  }> {
+    await vi.waitFor(() => expect(providerStats().healthy).toBe(expected));
+    return providerStats();
+  }
+
+  it('healthy reflects the catalog probe, never the simulated map size', async () => {
+    setProviderCatalogProbe(async () => 7);
+    await postProvider({ name: 'a', type: 'openai' });
+    await postProvider({ name: 'b', type: 'openai' });
+
+    const stats = await settleHealthy(7);
+    expect(stats.configured).toBe(2); // legacy CRUD records — honest for what they are
+    // Discriminator: pre-fix healthy === configured === 2. The catalog says 7.
+    expect(stats.healthy).toBe(7);
+  });
+
+  it('healthy is 0 when the real source is unavailable — NOT the registry size', async () => {
+    let ran = false;
+    setProviderCatalogProbe(async () => {
+      ran = true; // engine down / SDK degraded → unavailable, not guessed
+      return null;
+    });
+    await postProvider({ name: 'a', type: 'openai' });
+    await postProvider({ name: 'b', type: 'openai' });
+    await postProvider({ name: 'c', type: 'openai' });
+    providerStats(); // kick the observation (refresh is pull-driven, sync API)
+    await vi.waitFor(() => expect(ran).toBe(true));
+
+    const stats = providerStats();
+    expect(stats.configured).toBe(3);
+    // Discriminator: pre-fix this claimed 3 'healthy' simulated records.
+    expect(stats.healthy).toBe(0);
+  });
+
+  it('a throwing probe degrades to 0 loudly, never a fabricated figure', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      setProviderCatalogProbe(async () => {
+        throw new Error('registry exploded');
+      });
+      providerStats(); // kick the observation (refresh is pull-driven, sync API)
+      await vi.waitFor(() => expect(errSpy).toHaveBeenCalledTimes(1));
+      expect(providerStats().healthy).toBe(0);
+      expect(String(errSpy.mock.calls[0]?.[0] ?? '')).toMatch(/catalog probe failed/);
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('/health surfaces the observed figure through the unchanged shape', async () => {
+    setProviderCatalogProbe(async () => 5);
+    await settleHealthy(5);
+
+    const health = (await (await fetch(`${base()}/health`)).json()) as {
+      providers: { configured: number; healthy: number };
+    };
+    expect(health.providers.healthy).toBe(5);
+    expect(typeof health.providers.configured).toBe('number');
+  });
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { DashboardPage } from './pages/DashboardPage';
 import { ModelsPage } from './pages/ModelsPage';
 import { SessionsPage } from './pages/SessionsPage';
@@ -39,6 +39,49 @@ const NAV: NavItem[] = [
 ];
 
 const GROUPS: NavItem['group'][] = ['Engine', 'Control plane', 'System'];
+
+/* ── Hash routing ───────────────────────────────────────────────────── */
+
+/** '#/<page>[/<detailId>]' — detail ids are live-session and loop ids. */
+interface Route {
+  page: PageId;
+  param?: string;
+}
+
+/** Unknown page slugs render the dashboard but NEVER rewrite the URL: a
+ *  mistyped deep link stays visible for correction. */
+function parseHash(): Route {
+  const [seg, ...rest] = window.location.hash.replace(/^#\/?/, '').split('/');
+  let param = rest.length > 0 ? rest.join('/') : undefined;
+  if (param !== undefined) {
+    try {
+      param = decodeURIComponent(param);
+    } catch {
+      /* malformed %-escape — keep the raw text */
+    }
+  }
+  const page = NAV.some((n) => n.id === seg) ? (seg as PageId) : 'dashboard';
+  return { page, param };
+}
+
+/** location.hash is the navigation source of truth: nav clicks write it,
+ *  F5 / pasted links read it. The hashchange handler only PARSES, so a
+ *  self-triggered write lands on identical state and React bails — that is
+ *  what makes self-set hashes loop-free without suppression flags. */
+function useHashRoute(): [Route, (page: PageId, param?: string) => void] {
+  const [route, setRoute] = useState<Route>(() => parseHash());
+  useEffect(() => {
+    const onHash = () => setRoute(parseHash());
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const navigate = useCallback((page: PageId, param?: string) => {
+    const hash = `#/${page}${param !== undefined ? `/${encodeURIComponent(param)}` : ''}`;
+    if (window.location.hash !== hash) window.location.hash = hash;
+    else setRoute({ page, param }); // already on this exact route: sync anyway
+  }, []);
+  return [route, navigate];
+}
 
 /** Hand-authored logomark: rounded frame + "A" glyph, two-tone accent. */
 function Logomark(): React.ReactElement {
@@ -124,20 +167,20 @@ function footerStatus(probe: EngineProbe): {
 }
 
 export function App() {
-  const [page, setPage] = useState<PageId>('dashboard');
+  const [route, navigate] = useHashRoute();
   const probe = useHealthProbe();
   const status = footerStatus(probe);
 
   const render = () => {
-    switch (page) {
+    switch (route.page) {
       case 'dashboard':
-        return <DashboardPage onNavigate={setPage} />;
+        return <DashboardPage onNavigate={navigate} />;
       case 'models':
         return <ModelsPage />;
       case 'sessions':
-        return <SessionsPage />;
+        return <SessionsPage initialSessionId={route.param} />;
       case 'loops':
-        return <LoopsPage onNavigate={setPage} />;
+        return <LoopsPage onNavigate={navigate} initialLoopId={route.param} />;
       case 'skills':
         return <SkillsPage />;
       case 'providers':
@@ -147,7 +190,7 @@ export function App() {
       case 'settings':
         return <SettingsPage />;
       default:
-        return <DashboardPage onNavigate={setPage} />;
+        return <DashboardPage onNavigate={navigate} />;
     }
   };
 
@@ -169,9 +212,9 @@ export function App() {
               <button
                 key={n.id}
                 type="button"
-                className={page === n.id ? 'nav-item active' : 'nav-item'}
-                aria-current={page === n.id ? 'page' : undefined}
-                onClick={() => setPage(n.id)}
+                className={route.page === n.id ? 'nav-item active' : 'nav-item'}
+                aria-current={route.page === n.id ? 'page' : undefined}
+                onClick={() => navigate(n.id)}
               >
                 <span className="nav-icon">
                   <Icon name={n.icon} size={16} />

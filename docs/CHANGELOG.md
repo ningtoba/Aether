@@ -6,6 +6,70 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.6 — loop-engine integrity, GUI deep-links, dead weight cut (2026-08-30)
+
+Fourth audit iteration: three fresh-lens scouts (frontend correctness, loop
+semantics, package boundaries), every MAJOR claim source-verified before a
+fix, then two parallel implementation waves with discriminating tests.
+
+Dead weight removed (the "six packages" are three):
+
+- `aether-memory`, `aether-orchestrator` and `aether-tools` deleted — a
+  repo-wide grep proved zero importers outside their own packages. The
+  orchestrator's LangGraph node runners returned canned `{status:'ok'}`
+  outputs, and the tools sandboxes are superseded by the omp SDK's own
+  session tools; both dragged `@langchain/langgraph`, `dockerode` and
+  `playwright-core` through the whole build and into the runtime image.
+  Their 179 self-tests no longer pad the green count.
+
+Loop-engine integrity (all pinned by tests with pre-fix discriminators):
+
+- `EngineSession.prompt` now resolves `'ok' | 'busy' | 'error'` instead of
+  swallowing its two silent failure modes. A busy-rejected or errored/
+  zero-output round is recorded `errored: true` with a real reason — the
+  runner no longer marks such rounds successful with the PREVIOUS round's
+  reply as summary, which had been defeating round-error stop policies.
+- `LoopManager.start()` reserved its slot synchronously (the guard used to
+  sit across an `await createSession`: two concurrent starts got two
+  runners, one unstoppable).
+- The loop store is durable: `persist()` writes tmp + rename (a crash can no
+  longer truncate `loops.json`), a corrupt store is QUARANTINED to
+  `loops.json.corrupt-<ISO>` and reported — never silently dropped or
+  overwritten — and one bad entry is skipped loudly instead of taking the
+  healthy majority with it.
+- `transition.kind` is validated at the save route against the single
+  source-of-truth kind list; `LoopProgress.totalRounds` is typed (it had
+  been load-bearing past the 200-round retention window but untyped).
+- Roadmap closed: `skill` transitions take optional per-round `args` with
+  `{round}` substitution (GUI field + 1..3 preview; no-`args` prompt stays
+  byte-identical for existing loops).
+- Provider stats report a `healthy` count derived from the real engine
+  catalog, never from the size of the simulated registry.
+
+GUI correctness (frontend's first non-design audit):
+
+- CRITICAL: editing a saved loop silently reset its working directory to
+  the workspace root — the edit form never hydrated `cwd`. Fixed via a pure
+  `hydrateLoopFormEdit` helper pinned by a unit test.
+- The realtime client leaked one live WebSocket + reconnect loop per page
+  mount (nothing ever called `close()`); now an app-wide singleton with
+  exponential backoff (1 s→30 s) and an `onReconnect` resync so events
+  missed during a disconnect can't leave streaming blocks stuck forever.
+- Deep-link routing: `#/<view>` for all eight views plus
+  `#/sessions/<id>` / `#/loops/<id>` — F5 and shared links restore the
+  exact view (loop deep-links open the inspector).
+- Opening a live session showed an EMPTY console (the transcript endpoint
+  was never called); stale-response races on rapid session/inspector
+  switching; the per-second clock tick re-parsed every markdown block in
+  the transcript (tick scoped to the status line, rows memoized);
+  transcripts capped at 2000 items; api.ts header-merge order + default
+  30 s timeout; unchanged settings values no longer PUT.
+
+**548 tests / 33 files** (was 692 across six packages; 179 of those were
+deleted-package self-tests) — tsc, lint, format, and the full suite green;
+verified live in the browser against the rebuilt container, including the
+F5 deep-link scenarios and the loop-edit cwd round-trip.
+
 ## v0.3.5 — lifecycle discipline + the closed authz loop (2026-08-30)
 
 Third audit iteration: a lifecycle lens over the engine/loop object graph and

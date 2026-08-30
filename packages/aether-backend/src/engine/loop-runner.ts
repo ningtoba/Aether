@@ -120,6 +120,10 @@ export class LoopRunner {
     this.state.status = 'running';
     this.state.startedAt = new Date().toISOString();
     this.state.stopped = false;
+    // A run owns its stop reason from scratch: a stale reason from a previous
+    // run of this runner must not leak into the next finish() (which honours
+    // any reason already set on the state).
+    this.state.reason = undefined;
     this.finished = false;
     this.state.currentRound = 0;
     this.startWallMs = Date.now();
@@ -198,8 +202,22 @@ export class LoopRunner {
     const started = new Date().toISOString();
     const promptText = this.definition.prompt.replaceAll('{round}', String(round));
     try {
-      await this.session.prompt(promptText);
+      const outcome = await this.session.prompt(promptText);
       if (this.state.stopped || gen !== this.generation) return null;
+      // A turn that did not complete cleanly must never be recorded as a
+      // success. An errored round carries NO summary: `lastAssistantText`
+      // still holds the PREVIOUS round's reply, and reusing it as this
+      // round's summary made a transient provider failure masquerade as
+      // delivered output (errored:false + stale summary — the exact
+      // dishonesty this path existed to prevent).
+      if (outcome === 'busy' || outcome === 'error') {
+        const message =
+          outcome === 'busy'
+            ? 'round rejected: session busy — a previous turn was still running'
+            : 'round failed: model turn errored or produced no output (see session_error event)';
+        this.emit({ kind: 'loop:round_error', loopId: this.id, round, message });
+        return { round, startedAt: started, finishedAt: new Date().toISOString(), errored: true };
+      }
       const summary = await this.sessionReadLastText();
       return {
         round,
@@ -267,7 +285,29 @@ export class LoopRunner {
         // body is empty, treat as a no-op transition.
         const body = skill.body.trim();
         if (body) {
-          await this.session.prompt(`Apply the following skill and return the result:\n\n${body}`);
+          // Per-round instruction template: non-empty `args` replaces the
+          // static header with every {round} resolved to the round that just
+          // completed; the skill body follows after one blank line.
+          // args undefined/empty keeps the historical prompt byte-identical.
+          const args = transition.args?.trim();
+          const header = args
+            ? args.replaceAll('{round}', String(round))
+            : 'Apply the following skill and return the result:';
+          const outcome = await this.session.prompt(`${header}\n\n${body}`);
+          // Same honesty rule as a round: a skill turn that was rejected or
+          // errored must stop the loop, not silently advance it.
+          if (outcome === 'busy' || outcome === 'error') {
+            this.emit({
+              kind: 'loop:round_error',
+              loopId: this.id,
+              round,
+              message:
+                outcome === 'busy'
+                  ? 'skill prompt rejected: session busy — a previous turn was still running'
+                  : 'skill prompt failed: model turn errored or produced no output (see session_error event)',
+            });
+            return 'stop';
+          }
         }
         if (gen !== this.generation) return 'stop';
         return 'continue';
@@ -343,15 +383,18 @@ export class LoopRunner {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    this.state.reason = reason;
-    this.state.status = reason === 'completed' ? 'completed' : 'stopped';
-    if (reason === 'max rounds reached' || reason === 'completed') {
-      this.state.status = 'completed';
-      this.emit({ kind: 'loop:completed', loopId: this.id, reason });
-    } else if (reason !== 'manual stop') {
-      this.emit({ kind: 'loop:stop', loopId: this.id, reason });
+    // stop() already recorded the real cause on state.reason (manual stop /
+    // time limit landing mid-round or mid-transition). A generic caller
+    // reason like 'transition stop' must never clobber it — the GUI reads
+    // this string as THE reason the loop ended.
+    const finalReason = this.state.reason ?? reason;
+    this.state.reason = finalReason;
+    const completed = finalReason === 'max rounds reached' || finalReason === 'completed';
+    this.state.status = completed ? 'completed' : 'stopped';
+    if (completed) {
+      this.emit({ kind: 'loop:completed', loopId: this.id, reason: finalReason });
     } else {
-      this.emit({ kind: 'loop:stop', loopId: this.id, reason });
+      this.emit({ kind: 'loop:stop', loopId: this.id, reason: finalReason });
     }
   }
 

@@ -107,8 +107,5 @@ The Dockerfile is a two-stage build:
 | Path                           | What it is                                                           |
 | ------------------------------ | -------------------------------------------------------------------- |
 | `packages/aether-core`         | Foundation: events, lifecycle, config, types, utils, telemetry, RBAC |
-| `packages/aether-memory`       | Memory + vector stores, RAG                                          |
-| `packages/aether-orchestrator` | LangGraph workflow engine, checkpointing, visualizer                 |
-| `packages/aether-tools`        | Tool registry, shell/Docker/Playwright/Python-venv/TS sandboxes      |
 | `packages/aether-backend`      | HTTP/WS server, engine, loops, skills, models, static GUI            |
 | `packages/aether-frontend`     | React + Vite web GUI                                                 |

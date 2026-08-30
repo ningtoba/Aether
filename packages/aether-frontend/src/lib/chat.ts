@@ -28,8 +28,35 @@ function nid(): string {
   return `c${nextId++}`;
 }
 
-/** Append/update the transcript from one engine frame. Pure. */
+/** Transcript growth bound. A loop streaming for hours must not grow the
+ *  DOM + memo comparisons without limit; oldest items drop off behind a
+ *  persistent meta notice. */
+const MAX_TRANSCRIPT_ITEMS = 2000;
+const TRUNCATION_NOTICE = 'earlier items truncated';
+
+/** Keep at most MAX_TRANSCRIPT_ITEMS (newest end), prepending/keeping a
+ *  leading meta notice. Returns the SAME array while under the cap so React
+ *  memoization on item identity keeps working. */
+function capTranscript(items: ChatItem[]): ChatItem[] {
+  if (items.length <= MAX_TRANSCRIPT_ITEMS) return items;
+  const head = items[0];
+  if (head && head.kind === 'meta' && head.text === TRUNCATION_NOTICE) {
+    // Notice already leads: drop the oldest real item and keep the notice
+    // object (stable id → no remount churn on every subsequent append).
+    return [head, ...items.slice(2)];
+  }
+  return [
+    { id: nid(), kind: 'meta', text: TRUNCATION_NOTICE },
+    ...items.slice(1 - MAX_TRANSCRIPT_ITEMS),
+  ];
+}
+
+/** Append/update the transcript from one engine frame. Pure (growth-capped). */
 export function reduceChatFrame(items: ChatItem[], frame: RealtimeFrame): ChatItem[] {
+  return capTranscript(reduceFrameUncapped(items, frame));
+}
+
+function reduceFrameUncapped(items: ChatItem[], frame: RealtimeFrame): ChatItem[] {
   if (frame.payload?.namespace !== 'session') return items;
   const ev = frame.payload.event as Record<string, unknown> & { kind?: string };
   const kind = ev?.kind;
@@ -111,12 +138,12 @@ export function reduceChatFrame(items: ChatItem[], frame: RealtimeFrame): ChatIt
 
 /** Append a user prompt (from the input box or a loop round). */
 export function appendUser(items: ChatItem[], text: string): ChatItem[] {
-  return [...items, { id: nid(), kind: 'user', text }];
+  return capTranscript([...items, { id: nid(), kind: 'user', text }]);
 }
 
 /** Append a loop-round boundary (used by the loop inspector). */
 export function appendMeta(items: ChatItem[], text: string): ChatItem[] {
-  return [...items, { id: nid(), kind: 'meta', text }];
+  return capTranscript([...items, { id: nid(), kind: 'meta', text }]);
 }
 
 /**
@@ -126,11 +153,12 @@ export function appendMeta(items: ChatItem[], text: string): ChatItem[] {
 export function fromMessages(
   messages: Array<{ role: string; text: string; timestamp?: string }>,
 ): ChatItem[] {
-  return messages.map((m) => ({
+  const items = messages.map((m) => ({
     id: nid(),
     kind: m.role === 'user' ? ('user' as const) : ('assistant' as const),
     text: m.text,
   }));
+  return capTranscript(items);
 }
 /** Convert a backend transcript entry to a ChatItem. */
 export function fromTranscriptEntries(
@@ -143,7 +171,7 @@ export function fromTranscriptEntries(
     isError?: boolean;
   }>,
 ): ChatItem[] {
-  return entries.map((e) => {
+  const items: ChatItem[] = entries.map((e) => {
     switch (e.kind) {
       case 'user':
         return { id: nid(), kind: 'user', text: String(e.text ?? '') };
@@ -164,4 +192,5 @@ export function fromTranscriptEntries(
         return { id: nid(), kind: 'meta', text: String(e.text ?? '') };
     }
   });
+  return capTranscript(items);
 }

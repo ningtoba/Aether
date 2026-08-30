@@ -12,7 +12,7 @@
  * formatting, so what the agent replies with formats the way it does in omp.
  * Styles live in ../chat.css (imported here so any host screen gets them).
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -51,15 +51,6 @@ export interface ChatConsoleProps {
   sendDisabledReason?: string;
   /** Replaces the default "no messages" empty state (e.g. actionable CTA). */
   emptyState?: React.ReactNode;
-}
-
-function useNow(intervalMs = 1000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const iv = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(iv);
-  }, [intervalMs]);
-  return now;
 }
 
 /** Markdown body with GFM + code highlighting; loose on partial/streamed md. */
@@ -167,7 +158,11 @@ function ToolBlock({
   );
 }
 
-function Line({ item }: { item: ChatItem }) {
+/** One transcript row. Memoized: the reducers only replace the item object
+ *  they mutate (identity is stable for untouched rows), so a parent re-render
+ *  — a draft keystroke, a page state tick — never re-parses every markdown
+ *  block in the transcript. */
+const ItemRow = memo(function ItemRow({ item }: { item: ChatItem }) {
   switch (item.kind) {
     case 'user':
       return (
@@ -201,7 +196,7 @@ function Line({ item }: { item: ChatItem }) {
     case 'meta':
       return <div className="chat-text meta">{item.text}</div>;
   }
-}
+});
 
 function StatusLine({ stats, model }: { stats?: ChatStats | null; model?: string }) {
   if (!stats) return null;
@@ -244,7 +239,6 @@ export function ChatConsole({
   const scrollRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const [draft, setDraft] = useState('');
-  useNow(1000); // re-render to refresh timestamps/status
 
   // Auto-scroll only while the user is near the bottom — scrolling up to read
   // history must not be yanked back by the next streamed delta.
@@ -282,7 +276,7 @@ export function ChatConsole({
             />
           ))}
         {items.map((it) => (
-          <Line key={it.id} item={it} />
+          <ItemRow key={it.id} item={it} />
         ))}
       </div>
       {onSend && (

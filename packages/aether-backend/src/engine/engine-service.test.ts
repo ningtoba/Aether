@@ -372,3 +372,118 @@ describe('EngineService — disposeAll / compact guard / createdAt stability', (
     }
   });
 });
+
+/* ─── prompt() outcome contract: 'ok' | 'busy' | 'error' ─────────────────── */
+
+/**
+ * LoopRunner (and anything else awaiting a turn) must be able to tell a
+ * failed turn from a good one WITHOUT re-reading mutable session state:
+ * prompt() resolves 'busy' when the busy guard rejects, 'error' on the
+ * turnErrored / zero-output paths, 'ok' otherwise. The session_error events
+ * themselves are unchanged — the GUI wire stays identical.
+ */
+describe('EngineSession — prompt outcome contract', () => {
+  it('resolves ok when the turn streamed assistant output', async () => {
+    const { session } = makeSession({
+      emitOnPrompt: (emit) =>
+        emit({
+          type: 'message_update',
+          assistantMessageEvent: { type: 'text_delta', delta: 'hi' },
+        }),
+    });
+    await expect(session.prompt('hello')).resolves.toBe('ok');
+  });
+
+  it('resolves error on the zero-output path (event unchanged)', async () => {
+    const { session, events } = makeSession({ emitOnPrompt: () => {} });
+    await expect(session.prompt('hello')).resolves.toBe('error');
+    expect(sessionError(events)).toMatch(/no output/);
+    expect(session.status).toBe('error');
+  });
+
+  it('resolves error when omp surfaced an errored message_end', async () => {
+    const { session, events } = makeSession({
+      emitOnPrompt: (emit) => emit(erroredMessageEnd({ errorMessage: '404 no such model' })),
+    });
+    await expect(session.prompt('hello')).resolves.toBe('error');
+    expect(sessionError(events)).toContain('404 no such model');
+  });
+
+  it('resolves busy — never a silent success — while a turn is in flight', async () => {
+    const gate = Promise.withResolvers<void>();
+    const events: SessionTurnEvent[] = [];
+    const session = new EngineSession({
+      id: 'ses_test',
+      cwd: '/tmp',
+      onEvent: (ev) => events.push(ev),
+    });
+    session.attach({
+      sessionId: 'omp-session',
+      sessionName: 'omp-session',
+      model: { provider: 'local-server', id: 'deepseek-ai/DeepSeek-V4-Flash' },
+      subscribe: () => () => {},
+      subscribeRunState: () => () => {},
+      prompt: () => gate.promise, // hold the first turn open
+      compact: async () => {},
+      dispose: async () => {},
+    } as Parameters<EngineSession['attach']>[0]);
+
+    const first = session.prompt('a');
+    // Discriminator: pre-fix the busy guard returned void — indistinguishable
+    // from a completed turn, which is how LoopRunner recorded a stale-summary
+    // "successful" round.
+    await expect(session.prompt('b')).resolves.toBe('busy');
+    expect(sessionError(events)).toMatch(/busy/i);
+
+    gate.resolve();
+    await first; // settles on the (unrelated) zero-output path — just awaited
+  });
+
+  it('a busy rejection does not poison the session: the next prompt still runs', async () => {
+    const gate = Promise.withResolvers<void>();
+    let resolveNext: () => void = () => {};
+    const events: SessionTurnEvent[] = [];
+    const session = new EngineSession({
+      id: 'ses_test',
+      cwd: '/tmp',
+      onEvent: (ev) => events.push(ev),
+    });
+    let calls = 0;
+    let listener: ((ev: unknown) => void) | null = null;
+    session.attach({
+      sessionId: 'omp-session',
+      sessionName: 'omp-session',
+      model: { provider: 'local-server', id: 'deepseek-ai/DeepSeek-V4-Flash' },
+      subscribe: (l) => {
+        listener = l;
+        return () => {};
+      },
+      subscribeRunState: () => () => {},
+      prompt: async () => {
+        calls++;
+        if (calls === 1) await gate.promise;
+        else {
+          await new Promise<void>((r) => {
+            resolveNext = r;
+            // produce output so the second turn is 'ok'
+            listener?.({
+              type: 'message_update',
+              assistantMessageEvent: { type: 'text_delta', delta: 'second' },
+            });
+          });
+        }
+      },
+      compact: async () => {},
+      dispose: async () => {},
+    } as Parameters<EngineSession['attach']>[0]);
+
+    const first = session.prompt('a');
+    await expect(session.prompt('rejected')).resolves.toBe('busy');
+    gate.resolve();
+    await first;
+
+    const second = session.prompt('b');
+    resolveNext();
+    await expect(second).resolves.toBe('ok');
+  });
+});

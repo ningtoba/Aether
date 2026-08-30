@@ -231,3 +231,51 @@ describe('session prompt/compact route safety', () => {
     });
   });
 });
+
+describe('POST /api/loops transition validation', () => {
+  it('rejects a transition kind outside none|compact|skill|gate', async () => {
+    // Discriminator: pre-fix ANY kind persisted — the runner then silently
+    // treated the unknown kind as 'none' (a user-configured gate just… lost).
+    const res = await postLoop({ transition: { kind: 'teleport' } });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toMatch(/transition\.kind/);
+    expect(body.error).toContain('gate');
+  });
+
+  it('persists skill args verbatim; response shape stays { loop }', async () => {
+    const res = await postLoop({
+      transition: { kind: 'skill', skillName: 'review', args: 'apply to round {round}' },
+    });
+    expect(res.status).toBe(201);
+    const { loop } = (await res.json()) as {
+      loop: { transition: { kind: string; skillName?: string; args?: string } };
+    };
+    expect(loop.transition).toEqual({
+      kind: 'skill',
+      skillName: 'review',
+      args: 'apply to round {round}',
+    });
+  });
+
+  it('normalises empty args to undefined (static skill prompt back-compat)', async () => {
+    const res = await postLoop({ transition: { kind: 'skill', skillName: 'review', args: '' } });
+    expect(res.status).toBe(201);
+    const { loop } = (await res.json()) as { loop: { transition: { args?: string } } };
+    expect(loop.transition.args).toBeUndefined();
+  });
+
+  it('rejects non-string args / skillName instead of storing a poison value', async () => {
+    expect((await postLoop({ transition: { kind: 'skill', args: 42 } })).status).toBe(400);
+    expect(
+      (await postLoop({ transition: { kind: 'skill', skillName: { nested: true } } })).status,
+    ).toBe(400);
+  });
+
+  it('defaults a missing transition to none (back-compat)', async () => {
+    const res = await postLoop({});
+    expect(res.status).toBe(201);
+    const { loop } = (await res.json()) as { loop: { transition: { kind: string } } };
+    expect(loop.transition.kind).toBe('none');
+  });
+});

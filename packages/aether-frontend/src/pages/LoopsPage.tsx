@@ -18,11 +18,12 @@ import {
   type ModelGroup,
   type SkillRecord,
 } from '../lib/api';
-import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
+import { getRealtimeClient, type RealtimeFrame } from '../lib/realtime';
 import { ChatConsole } from '../components/ChatConsole';
 import type { ChatStats } from '../components/ChatConsole';
 import { CwdPicker } from '../components/CwdPicker';
 import { reduceChatFrame, appendMeta, fromTranscriptEntries, type ChatItem } from '../lib/chat';
+import { hydrateLoopFormEdit } from '../lib/loops';
 import type { PageId } from '../App';
 import {
   Card,
@@ -61,7 +62,13 @@ function fmtTime(iso?: string): string {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleTimeString();
 }
 
-export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) {
+export function LoopsPage({
+  onNavigate,
+  initialLoopId,
+}: {
+  onNavigate?: (p: PageId) => void;
+  initialLoopId?: string;
+}) {
   const [loops, setLoops] = useState<LoopDefinition[]>([]);
   const [progress, setProgress] = useState<Record<string, LoopProgress>>({});
   const [form, setForm] = useState<Partial<LoopDefinition>>({ ...EMPTY });
@@ -73,13 +80,17 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
   const [cwd, setCwd] = useState<string | undefined>(undefined);
-  const [rt, setRt] = useState<RealtimeClient | null>(null);
   /** Loop live-chat inspector: { loopId, sessionId } to stream. */
   const [inspect, setInspect] = useState<{ loopId: string; sessionId?: string } | null>(null);
   const [inspectItems, setInspectItems] = useState<ChatItem[]>([]);
   const [inspectStats, setInspectStats] = useState<ChatStats | null>(null);
   const [loopQuery, setLoopQuery] = useState('');
   const closeInspectRef = useRef<HTMLButtonElement>(null);
+  /** listLoops settled (success OR failure) — deep-link resolution must not
+   *  confuse "still loading" with "loop does not exist". */
+  const [loopsLoaded, setLoopsLoaded] = useState(false);
+  // Inspector-load generation: only the newest openInspect may write items.
+  const inspectReqRef = useRef(0);
 
   const refresh = useCallback(() => {
     listLoops()
@@ -97,7 +108,8 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
             .catch(() => {});
         }
       })
-      .catch((e) => setError(e.message));
+      .catch((e) => setError(e.message))
+      .finally(() => setLoopsLoaded(true));
     listModels()
       .then((r) => setModels(r.groups))
       .catch(() => {});
@@ -126,21 +138,13 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
     if (first && !opts.includes(selectedModel)) setSelectedModel(first);
   }, [models, selectedModel]);
 
-  // Discover the realtime port from /health (SessionsPage pattern).
-  useEffect(() => {
-    fetch('/health')
-      .then((r) => r.json())
-      .then((h) => {
-        if (!h?.realtime?.port) return;
-        setRt((prev) => prev ?? new RealtimeClient(h.realtime.port));
-      })
-      .catch(() => {});
-  }, []);
+  // Frames missed while the socket was down are gone forever: on every
+  // (re)connect after the first, re-pull loops/progress/models wholesale.
+  useEffect(() => getRealtimeClient().onReconnect(refresh), [refresh]);
 
   // Live-update loop progress from realtime 'loop' namespace events.
   useEffect(() => {
-    if (!rt) return;
-    const unsub = rt.subscribe((frame: RealtimeFrame) => {
+    const unsub = getRealtimeClient().subscribe((frame: RealtimeFrame) => {
       if (frame.payload?.namespace !== 'loop') return;
       const ev = frame.payload.event as Record<string, unknown> & {
         kind?: string;
@@ -163,7 +167,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
       }
     });
     return unsub;
-  }, [rt]);
+  }, []);
   // Keep the live event stream pinned to the newest line.
   useEffect(() => {
     eventLogRef.current?.scrollTo({ top: eventLogRef.current.scrollHeight });
@@ -171,8 +175,8 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
 
   // Loop live-chat inspector: stream the loop's session transcript live.
   useEffect(() => {
-    if (!rt || !inspect) return;
-    const unsub = rt.subscribe((frame: RealtimeFrame) => {
+    if (!inspect) return;
+    const unsub = getRealtimeClient().subscribe((frame: RealtimeFrame) => {
       const sid = frame.payload?.sessionId;
       if (frame.payload?.namespace === 'loop') {
         const ev = frame.payload.event as Record<string, unknown> & {
@@ -193,7 +197,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
       setInspectItems((it) => reduceChatFrame(it, frame));
     });
     return unsub;
-  }, [rt, inspect]);
+  }, [inspect]);
 
   // Focus management for the inspector dialog: autofocus its Close button so
   // Escape (handled on the overlay) and keyboard use work immediately.
@@ -202,6 +206,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   }, [inspect]);
 
   const openInspect = (loopId: string, sessionId?: string) => {
+    const reqId = ++inspectReqRef.current;
     setInspect({ loopId, sessionId });
     setInspectStats(null);
     setInspectItems([]);
@@ -216,10 +221,16 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
         return;
       }
       getSessionTranscript(sid)
-        .then((d) => setInspectItems(fromTranscriptEntries(d.transcript.entries)))
+        .then((d) => {
+          if (inspectReqRef.current !== reqId) return; // superseded inspect
+          setInspectItems(fromTranscriptEntries(d.transcript.entries));
+        })
         .catch(() => {});
       getSession(sid)
-        .then((r) => setInspectStats(r.session.stats ?? null))
+        .then((r) => {
+          if (inspectReqRef.current !== reqId) return;
+          setInspectStats(r.session.stats ?? null);
+        })
         .catch(() => {});
     };
     if (sessionId) {
@@ -227,6 +238,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
     } else {
       getLoop(loopId)
         .then((d) => {
+          if (inspectReqRef.current !== reqId) return;
           const sid = d.progress?.sessionId;
           setInspect((prev) => (prev ? { ...prev, sessionId: sid } : prev));
           loadSession(sid);
@@ -241,7 +253,11 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   };
 
   const modelOptions = models.flatMap((g) => g.models.map((m) => ({ g: g.provider, m })));
-  const previewRounds = [1, 2, 3].map((n) => (form.prompt ?? '').replace(/\{round\}/g, String(n)));
+  const previewArgs = form.transition?.kind === 'skill' ? (form.transition.args ?? '') : '';
+  const previewRounds = [1, 2, 3].map((n) => ({
+    prompt: (form.prompt ?? '').replace(/\{round\}/g, String(n)),
+    args: previewArgs.replace(/\{round\}/g, String(n)),
+  }));
 
   // Client-side filter over the already-loaded saved-loops list only.
   const filteredLoops = useMemo(() => {
@@ -256,21 +272,36 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   const reset = () => {
     setForm({ ...EMPTY });
     setEditingId(null);
+    // The picker must return to "unset": leaving the last edited loop's cwd
+    // behind makes the next NEW loop silently inherit it on save.
+    setCwd(undefined);
   };
 
   const loadIntoForm = (loop: LoopDefinition) => {
-    setForm({
-      id: loop.id,
-      name: loop.name,
-      description: loop.description,
-      prompt: loop.prompt,
-      transition: { ...loop.transition },
-      maxRounds: loop.maxRounds,
-      maxTimeMs: loop.maxTimeMs,
-    });
-    setSelectedModel(`${loop.model.provider}/${loop.model.modelId}`);
+    const h = hydrateLoopFormEdit(loop);
+    setForm(h.form);
+    setSelectedModel(h.modelKey);
+    // Hydrate the picker from the loop: save() sends the picker state, so an
+    // edit that skipped this silently dropped the loop's working directory.
+    setCwd(h.cwd);
     setEditingId(loop.id);
   };
+
+  // Deep link (#/loops/<id>): once the saved list has settled, highlight the
+  // loop in the editor and open its live-chat inspector (F5 restores both).
+  const deepOpenedRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const id = initialLoopId;
+    if (!id || !loopsLoaded || deepOpenedRef.current === id) return;
+    deepOpenedRef.current = id;
+    const loop = loops.find((l) => l.id === id);
+    if (!loop) {
+      setError(`Loop “${id}” not found — nothing to open.`);
+      return;
+    }
+    loadIntoForm(loop);
+    openInspect(id);
+  }, [initialLoopId, loopsLoaded, loops]);
 
   const save = async () => {
     if (!form.name?.trim() || !form.prompt?.trim()) {
@@ -429,7 +460,11 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                       running
                     </StatusPill>
                   )}
-                  <ConfirmButton onConfirm={() => del(loop.id)} title={`Delete “${loop.name}”`}>
+                  <ConfirmButton
+                    onConfirm={() => del(loop.id)}
+                    title={`Delete “${loop.name}”`}
+                    ariaLabel={`Delete loop ${loop.name}`}
+                  >
                     <Icon name="trash" size={13} />
                   </ConfirmButton>
                 </div>
@@ -528,10 +563,16 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                 <div className="muted" style={{ marginBottom: 4 }}>
                   Preview rounds 1-3:
                 </div>
-                {previewRounds.map((text, i) => (
+                {previewRounds.map((p, i) => (
                   <div key={i} style={{ marginTop: 2 }}>
                     Round {i + 1}:{' '}
-                    {text.length > 90 ? `${text.slice(0, 90)}…` : text || '(empty)'}
+                    {p.prompt.length > 90 ? `${p.prompt.slice(0, 90)}…` : p.prompt || '(empty)'}
+                    {previewArgs && (
+                      <>
+                        {' · args: '}
+                        {p.args.length > 90 ? `${p.args.slice(0, 90)}…` : p.args}
+                      </>
+                    )}
                   </div>
                 ))}
               </div>
@@ -560,6 +601,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
               </select>
             </div>
             {form.transition?.kind === 'skill' && (
+              <>
               <div className="field">
                 <label htmlFor="loop-skill">Skill</label>
                 <select
@@ -567,7 +609,12 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                   className="select"
                   value={form.transition?.skillName ?? ''}
                   onChange={(e) =>
-                    setForm({ ...form, transition: { kind: 'skill', skillName: e.target.value } })
+                    setForm({
+                      ...form,
+                      // Spread first: re-picking the skill must not wipe the
+                      // already-entered args.
+                      transition: { ...form.transition, kind: 'skill', skillName: e.target.value },
+                    })
                   }
                 >
                   <option value="">Select…</option>
@@ -578,6 +625,26 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                   ))}
                 </select>
               </div>
+              <div className="field">
+                <label htmlFor="loop-skill-args">Round arguments (optional)</label>
+                <input
+                  id="loop-skill-args"
+                  className="input"
+                  value={form.transition?.args ?? ''}
+                  placeholder="e.g. Audit round {round} — focus on gaps found last time"
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      transition: { ...form.transition, kind: 'skill', args: e.target.value },
+                    })
+                  }
+                />
+                <div className="help">
+                  Sent with the skill every round; <code>{'{round}'}</code> is replaced with the
+                  round number.
+                </div>
+              </div>
+              </>
             )}
             <div className="grid cols-2">
               <div className="field">

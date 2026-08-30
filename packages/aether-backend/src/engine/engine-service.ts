@@ -169,14 +169,19 @@ export class EngineSession {
     omp.subscribe((ev) => this.#onOmpEvent(ev));
   }
 
-  async prompt(message: string): Promise<void> {
+  /** Run one turn. Resolves with the turn's honest outcome instead of void:
+   *  'busy' when the busy guard rejects the prompt, 'error' when the turn
+   *  errored (explicit engine error or a zero-output turn), 'ok' otherwise.
+   *  Callers like LoopRunner must NOT treat a failed turn as a good round —
+   *  the events themselves stay unchanged (session_error rides both paths). */
+  async prompt(message: string): Promise<'ok' | 'busy' | 'error'> {
     const omp = this.#require();
     if (this.status === 'running') {
       this.onEvent({
         kind: 'session_error',
         message: 'Session is busy — the previous turn is still running',
       });
-      return;
+      return 'busy';
     }
     this.status = 'running';
     this.turnHadOutput = false;
@@ -184,13 +189,16 @@ export class EngineSession {
     this.turnErrored = false;
     try {
       await omp.prompt(message);
+      // An explicit turn failure already surfaced its session_error event
+      // (#onOmpEvent) — still report the turn as failed to the caller.
+      if (this.turnErrored) return 'error';
       // A "clean" turn can still produce zero assistant output when the model
       // is not actually served by the configured provider — omp resolves it
       // without an error event. Never present that as a successful answer.
       // Reached only when omp surfaced no error detail, so stay factual.
       // A turn that streamed thinking but no text is a model response, not a
       // silent failure — only a fully empty, error-free turn is an error.
-      if (!this.turnHadOutput && !this.turnErrored && !this.turnHadThinking) {
+      if (!this.turnHadOutput && !this.turnHadThinking) {
         this.status = 'error';
         this.onEvent({
           kind: 'session_error',
@@ -198,7 +206,9 @@ export class EngineSession {
             'Model returned no output — the turn ended without assistant text and omp reported no error. Try a different model.',
           ),
         });
+        return 'error';
       }
+      return 'ok';
     } finally {
       if (this.status === 'running') this.status = 'idle';
     }

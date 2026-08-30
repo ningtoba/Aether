@@ -24,6 +24,12 @@ const startTime = Date.now();
 
 export function getHealthStatus(): HealthStatus {
   const mem = process.memoryUsage();
+  // One snapshot per health payload: providerStats() drives the REAL
+  // engine-catalog observation (stale-while-revalidate), so `configured`
+  // counts legacy /api/providers records while `healthy` is the last
+  // observed count of engine providers with working credentials — 0 when
+  // the engine is unavailable. Never a copy of `configured`.
+  const providers = providerStats();
   return {
     status: 'ok',
     version: '0.1.0',
@@ -35,8 +41,8 @@ export function getHealthStatus(): HealthStatus {
       external: mem.external,
     },
     providers: {
-      configured: providerStats().configured,
-      healthy: providerStats().healthy,
+      configured: providers.configured,
+      healthy: providers.healthy,
     },
     timestamp: new Date().toISOString(),
   };

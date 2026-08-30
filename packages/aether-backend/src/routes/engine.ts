@@ -13,7 +13,8 @@ import type { EngineService, EngineSession } from '../engine/index.js';
 import { EngineUnavailableError } from '../engine/index.js';
 import type { LoopManager } from '../engine/index.js';
 import type { SkillsService } from '../engine/index.js';
-import type { LoopDefinition } from '../engine/index.js';
+import type { LoopDefinition, LoopTransitionKind } from '../engine/index.js';
+import { LOOP_TRANSITION_KINDS } from '../engine/types.js';
 import type { WorkspacesService } from '../engine/index.js';
 
 export interface EngineRouteContext {
@@ -54,6 +55,12 @@ function handleEngineError(res: ServerResponse, err: unknown): void {
 function msg(err: unknown): string {
   if (err instanceof EngineUnavailableError) return `engine unavailable: ${err.message}`;
   return err instanceof Error ? err.message : String(err);
+}
+
+/** JSON is untyped: the loop transition kind arrives as an arbitrary string.
+ *  Type guard so the validated `kind` narrows for LoopDefinition. */
+function isTransitionKind(value: unknown): value is LoopTransitionKind {
+  return typeof value === 'string' && (LOOP_TRANSITION_KINDS as readonly string[]).includes(value);
 }
 
 /* ─── Models ─────────────────────────────────────────────────────────── */
@@ -242,6 +249,24 @@ export async function saveLoop(
   if (!body.model || !body.model.provider || !body.model.modelId) {
     return badRequest(res, 'loop.model.provider and loop.model.modelId required');
   }
+  // The runner dereferences transition fields blindly — validate the whole
+  // transition at the edge instead of 500-ing (or silently misbehaving) at
+  // start() time.
+  const kind = body.transition?.kind ?? 'none';
+  if (!isTransitionKind(kind)) {
+    return badRequest(
+      res,
+      `loop.transition.kind must be one of ${LOOP_TRANSITION_KINDS.join('|')}`,
+    );
+  }
+  const rawSkillName = body.transition?.skillName;
+  if (rawSkillName !== undefined && typeof rawSkillName !== 'string') {
+    return badRequest(res, 'loop.transition.skillName must be a string when provided');
+  }
+  const rawArgs = body.transition?.args;
+  if (rawArgs !== undefined && typeof rawArgs !== 'string') {
+    return badRequest(res, 'loop.transition.args must be a string when provided');
+  }
   const cwd = ctx.workspaces.resolveCwd(body.cwd);
   if ('error' in cwd) return badRequest(res, cwd.error);
   const definition: LoopDefinition = {
@@ -250,8 +275,11 @@ export async function saveLoop(
     description: body.description,
     prompt: body.prompt,
     transition: {
-      kind: body.transition?.kind ?? 'none',
-      skillName: body.transition?.skillName,
+      kind,
+      skillName: rawSkillName,
+      // Persist args ONLY as string|undefined; an empty string carries the
+      // same meaning as absent (static skill prompt) — normalise it away.
+      args: rawArgs === '' ? undefined : rawArgs,
     },
     maxRounds: body.maxRounds && body.maxRounds > 0 ? body.maxRounds : undefined,
     maxTimeMs: body.maxTimeMs && body.maxTimeMs > 0 ? body.maxTimeMs : undefined,
