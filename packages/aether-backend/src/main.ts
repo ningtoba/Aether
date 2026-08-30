@@ -53,12 +53,7 @@ const workspaces = new WorkspacesService(process.env.AETHER_WORKSPACES);
 // locally without creating stray root dirs. LOOP_STORE_DIR overrides it.
 const DEFAULT_LOOP_STORE = join(homedir(), '.omp', 'agent', 'aether', 'loops');
 const LOOP_STORE_DIR = process.env.LOOP_STORE_DIR ?? DEFAULT_LOOP_STORE;
-// Loops saved without a cwd (older GUI builds) start in the first workspace
-// root, never the backend's own process dir (/app under Docker).
-const loops = new LoopManager(engine, skills, {
-  storeDir: LOOP_STORE_DIR,
-  defaultCwd: workspaces.listRoots()[0]?.path,
-});
+const loops = new LoopManager(engine, skills, { storeDir: LOOP_STORE_DIR });
 const facade = new OmpFacade();
 
 let realtime: BunRealtimeHub | null = null;

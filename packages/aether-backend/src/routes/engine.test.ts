@@ -48,7 +48,7 @@ afterAll(() => {
 
 beforeEach(async () => {
   diskCalls = [];
-  const loops = new LoopManager(unusedEngine, unusedSkills, { defaultCwd: root });
+  const loops = new LoopManager(unusedEngine, unusedSkills);
   const wiring: EngineWiring = {
     engine: unusedEngine,
     loops,

@@ -10,15 +10,11 @@ import { LoopRunner } from './loop-runner.js';
 import type { EngineService, EngineSession } from './engine-service.js';
 import type { SkillsService } from './skills.js';
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, isAbsolute } from 'node:path';
 
 export interface LoopManagerOptions {
   /** Directory for persistent loop definitions (JSON). Omit for in-memory only. */
   storeDir?: string;
-  /** Fallback cwd for loop definitions saved without one (legacy entries or
-   *  direct-store edits). main.ts passes the first workspace root, so loops
-   *  start in a real workspace instead of the backend's process cwd (/app). */
-  defaultCwd?: string;
 }
 
 export class LoopManager {
@@ -27,12 +23,11 @@ export class LoopManager {
   private engine: EngineService;
   private skills: SkillsService;
   private storeFile: string | null = null;
-  private defaultCwd: string | null;
 
   constructor(engine: EngineService, skills: SkillsService, opts: LoopManagerOptions = {}) {
     this.engine = engine;
     this.skills = skills;
-    this.defaultCwd = opts.defaultCwd ?? null;
+
     if (opts.storeDir) {
       try {
         mkdirSync(opts.storeDir, { recursive: true });
@@ -114,13 +109,20 @@ export class LoopManager {
       this.runners.delete(id);
     }
 
+    // LoopDefinition.cwd is required and the save route always stores the
+    // WorkspacesService-validated ABSOLUTE path. A blank or relative cwd means
+    // a corrupt/legacy store entry — refuse to start rather than silently run
+    // the loop in a guessed directory (the old process.cwd() fallback meant
+    // /app in Docker, i.e. the backend's own source tree).
+    if (!definition.cwd || !isAbsolute(definition.cwd)) {
+      throw new Error(
+        `Loop ${id} has no absolute working directory — open it in the GUI, pick a directory, and save before starting`,
+      );
+    }
     const session = await this.engine.createSession({
-      // Legacy/blank definitions must not inherit the backend's process cwd
-      // (/app under Docker) — prefer the configured workspace default.
-      cwd: definition.cwd || this.defaultCwd || process.cwd(),
+      cwd: definition.cwd,
       model: definition.model,
     });
-
     const runner = new LoopRunner(definition, session, {
       onEvent: (ev) => {
         if (this.onBroadcast) this.onBroadcast(ev);

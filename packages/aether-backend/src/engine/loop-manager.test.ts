@@ -1,8 +1,11 @@
 /**
- * LoopManager cwd contract: a loop definition WITHOUT a cwd must start on the
- * configured defaultCwd (workspace root), never the backend's process cwd —
- * under Docker that fallback silently ran loops in /app while the GUI showed a
- * host directory. An explicit definition.cwd must win over the default.
+ * LoopManager cwd contract: LoopDefinition.cwd is required and the save route
+ * always persists the WorkspacesService-validated absolute path. A blank or
+ * relative cwd in the store therefore means corruption or a legacy entry —
+ * start() must fail LOUDLY and must not create a session. The old
+ * `cwd || process.cwd()` fallback silently ran such loops in /app under
+ * Docker (the backend's own source tree), which is exactly the silent
+ * wrong-directory behavior this guard removes.
  */
 import { describe, it, expect } from 'vitest';
 import { LoopManager } from './loop-manager.js';
@@ -62,40 +65,31 @@ function terminalEvent(manager: LoopManager, id: string): Promise<LoopEvent> {
   return promise;
 }
 
-describe('LoopManager cwd resolution', () => {
-  it('starts a blank-cwd definition on defaultCwd, not process.cwd()', async () => {
+describe('LoopManager cwd contract', () => {
+  it('refuses to start a blank-cwd definition instead of using process.cwd()', async () => {
     const recorded: string[] = [];
-    const manager = new LoopManager(fakeEngine(recorded), fakeSkills, {
-      defaultCwd: '/workspace/root',
-    });
+    const manager = new LoopManager(fakeEngine(recorded), fakeSkills);
     manager.save(loopDef('blank', ''));
-    const done = terminalEvent(manager, 'blank');
-    await manager.start('blank');
-    await done;
-    expect(recorded).toEqual(['/workspace/root']);
-    // Discriminator: pre-fix this was process.cwd() (=/app in Docker).
-    expect(recorded[0]).not.toBe(process.cwd());
+    // Discriminator: pre-fix this started on process.cwd() (=/app in Docker).
+    await expect(manager.start('blank')).rejects.toThrow(/working directory/);
+    expect(recorded).toEqual([]);
   });
 
-  it('prefers an explicit definition.cwd over defaultCwd', async () => {
+  it('refuses a relative cwd from a corrupt store entry', async () => {
     const recorded: string[] = [];
-    const manager = new LoopManager(fakeEngine(recorded), fakeSkills, {
-      defaultCwd: '/workspace/root',
-    });
+    const manager = new LoopManager(fakeEngine(recorded), fakeSkills);
+    manager.save(loopDef('relative', 'some/relative/dir'));
+    await expect(manager.start('relative')).rejects.toThrow(/working directory/);
+    expect(recorded).toEqual([]);
+  });
+
+  it('starts an absolute definition.cwd verbatim (no rewriting, no defaults)', async () => {
+    const recorded: string[] = [];
+    const manager = new LoopManager(fakeEngine(recorded), fakeSkills);
     manager.save(loopDef('explicit', '/home/user/projects/app'));
     const done = terminalEvent(manager, 'explicit');
     await manager.start('explicit');
     await done;
     expect(recorded).toEqual(['/home/user/projects/app']);
-  });
-
-  it('falls back to process.cwd() only when no default is configured', async () => {
-    const recorded: string[] = [];
-    const manager = new LoopManager(fakeEngine(recorded), fakeSkills);
-    manager.save(loopDef('nDefault', ''));
-    const done = terminalEvent(manager, 'nDefault');
-    await manager.start('nDefault');
-    await done;
-    expect(recorded).toEqual([process.cwd()]);
   });
 });
