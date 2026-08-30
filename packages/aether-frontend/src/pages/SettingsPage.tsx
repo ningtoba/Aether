@@ -155,7 +155,7 @@ function SettingRow({
       <input
         className="input"
         type="number"
-        style={{ width: '100%' }}
+        style={{ width: '100%', maxWidth: 420 }}
         disabled={saving}
         value={shown}
         onChange={(e) => onChangeDraft(def.path, e.target.value)}
@@ -180,7 +180,7 @@ function SettingRow({
       <input
         className="input"
         type="password"
-        style={{ width: '100%' }}
+        style={{ width: '100%', maxWidth: 420 }}
         autoComplete="new-password"
         disabled={saving}
         placeholder="stored — leave blank to keep current"
@@ -199,7 +199,7 @@ function SettingRow({
       <input
         className="input"
         type="text"
-        style={{ width: '100%' }}
+        style={{ width: '100%', maxWidth: 420 }}
         disabled={saving}
         value={shown}
         onChange={(e) => onChangeDraft(def.path, e.target.value)}
@@ -217,7 +217,7 @@ function SettingRow({
       <input
         className="input mono"
         type="text"
-        style={{ width: '100%' }}
+        style={{ width: '100%', maxWidth: 420 }}
         disabled={saving}
         value={shown}
         onChange={(e) => onChangeDraft(def.path, e.target.value)}

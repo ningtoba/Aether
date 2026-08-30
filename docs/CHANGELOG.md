@@ -6,6 +6,95 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.5.0 — honest frames, honest loops, honest 200s; core shrunk to what it
+actually is (2026-08-30)
+
+- **Large WebSocket frames were corrupt on the wire (MAJOR).** `createFrame`
+  built the 64-bit extended payload length with `>>` shifts — JS shift counts
+  are mod 32, so every frame ≥ 64 KB declared a duplicated-half length
+  (measured: a 65 536-byte payload announced 281 474 976 776 192) and killed
+  the legacy WS client reading it. The header now splits high/low halves
+  arithmetically, and the vacuous old test that only checked the marker byte
+  is replaced by decode-the-actual-length assertions at 65 536 / 70 000,
+  around 2³², and at `Number.MAX_SAFE_INTEGER`.
+- **Provider CRUD lost updates (MAJOR).** create/delete of custom providers
+  did unserialized load→modify→save on `models.yml`: a concurrent pair merged
+  the same stale base and the last writer silently reverted the other. All
+  read-modify-write cycles now run through a rejection-safe promise-chain
+  mutex; the pin forces the stale-base interleave with a load barrier (a
+  real interleaving, not a sleep race) and fails 3 tests when the mutex is
+  neutered.
+- **Saved loops could silently vanish (MAJOR).** The save route accepted
+  non-integer `maxRounds`/`maxTimeMs` (and non-string model fields) that the
+  boot validator then rejected — the loop saved fine and disappeared at next
+  restart. Now 400 at the edge with exact messages; 2.5, "5", 0, -3, NaN all
+  rejected, absent still allowed, validated values persist verbatim.
+- **Honest loop lifecycle:** a manual stop mid-round no longer records a
+  spurious errored round + `round_end` (the catch path lacked the
+  stopped/generation guard the success path had); `stop()` on a finished run
+  can no longer clobber its `stopReason`; unknown advance actions are 400
+  instead of silently meaning `continue`; a 64-definition cap (409 on new
+  loops, edits always allowed) matches the sessions/providers caps; loop
+  error responses log the real cause server-side and answer a fixed
+  `Internal server error` instead of echoing SDK/fs paths.
+- **Honest compaction:** `compact()` resolves `false` when omp no-ops on a
+  raced turn, and the route answers 409 `compact skipped — a turn started`
+  (previously a lying 200 `{ok:true}`; pre-fix proof: `expected 200 to be 409`).
+- **Engine degrades recoverably:** a transient refresh error no longer latches
+  every engine route to 501 for the process lifetime — the next call retries
+  (only a permanent SDK-load failure latches); concurrent `start()` calls
+  share one attempt. `dispose()` now calls omp's unsubscribe, so late frames
+  cannot resurrect a closed session or ghost-broadcast. `/api/models` reports
+  `total` + `truncated` instead of silently slicing each provider at 200.
+- **Journal reads are bounded.** A disk-session transcript is now stat-gated
+  at 32 MiB (refused without reading) and parse-capped at 100 000 entries
+  with an additive `truncated` flag — an indefinite-loop session's journal
+  can no longer block the event loop in a sync read + JSON.parse.
+- **First frontend test suite: +132 tests this round (101 frontend).** api.ts
+  (55: every endpoint's exact URL/method/body/headers, 30s abort, error
+  precedence, auth-header invariants), realtime.ts (14: one ticket per
+  attempt, ws/wss derivation, 1→30 s backoff ladder, `everOpened` reconnect
+  semantics, manual-close latch), the chat reducer (21: frame transitions,
+  2000-item cap semantics) and the fmt helpers (11). Several pinned actual
+  behaviors that read like bugs (`fmtCompact(999_999) → "1000K"`; a failed
+  `/health` schedules backoff rather than bare-connecting).
+- **Dead weight purged.** `@aether/core` is now what its only consumer uses —
+  the RBAC surface. EventBus, LifecycleManager, ConfigManager, the domain/
+  utils/telemetry namespaces (15 test files, −277 tests) and their 9
+  OpenTelemetry packages + pino are gone; the orphaned
+  `@tailwindcss/oxide-win32-x64-msvc` pin (no parent package, wrong version,
+  never installs here), the redundant `lightningcss-win32-x64-msvc`
+  duplicate, a dead frontend→core dependency and unused `concurrently` are
+  removed; `@eslint/js` is declared instead of relying on hoisting.
+- **GUI honesty pass — 10 deltas from a designer review that first refuted
+  7 of its own vision claims against source; all applied deltas verified in
+  the browser against the redeployed container** (row-font delta confirmed in
+  source diff + live on its Loops-page twin): control heights unified to the
+  shell's 32 px metric; provider MODELS counts become right-aligned mono
+  `td.num` cells instead of status pills that read like "stopped"; the
+  sessions rail says `showing 60 of 116` instead of silently slicing; agent
+  cards became real buttons (whole-card activation, `aria-pressed`, no
+  nested button); uptime renders `up 1m 37s`; two off-scale `12.5px` row
+  titles return to the type scale; the WS pill reads `ws live` (not `live`
+  beside "No active session"); skill rows drop their pill line (~20 px off
+  all 79 rows); settings scalar inputs cap at 420 px; search placeholders
+  name what they search.
+- **A flake was caught by count-asserting the gates** (a
+  `479 passed (480)` line amid otherwise-identical exit-0 summaries) and ran
+  to ground with captured evidence: `Test timed out in 5000ms` errors that
+  ROTATED between unrelated files (provider probe, then health endpoint,
+  100k-line journal parse, static traversal across different runs) — the
+  signature of contention starving the tight 5 s default budget, not a
+  per-file defect. Fixed at the right layer: vitest worker fan-out capped
+  at 8 with a documented global `testTimeout: 15_000` (real HTTP/WS
+  handshakes stop losing to CPU oversubscription on a 12-core box; hangs
+  still fail, just later), verified green on 12 consecutive full runs;
+  the CI shard jobs re-adjudicate on a quiet runner.
+- 480 tests green (625 − 277 purged + 132 new); `tsc -b --force`, lint
+  (0 errors), `format:check` clean.
+
+---
+
 ## v0.4.0 — the image ships what CI type-checks; bounded realtime; last simulated
 plane gone (2026-08-30)
 

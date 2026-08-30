@@ -123,6 +123,10 @@ export interface SessionTranscriptDto {
   name?: string;
   cwd?: string;
   messages: Array<{ role: string; text: string; timestamp?: string }>;
+  /** True when the on-disk journal held more entries than this facade parsed
+   *  (SESSION_JOURNAL_MAX_LINES): the messages shown are a PREFIX of the
+   *  transcript. Absent for a complete read (shape stays byte-identical). */
+  truncated?: boolean;
 }
 
 /**
@@ -221,6 +225,14 @@ const errCap = (name: string, error: unknown): FacadeCapability => ({
   available: false,
   error: error instanceof Error ? error.message : String(error),
 });
+
+/* Synchronous journal reads block the event loop for their whole duration,
+ * so readDiskSession bounds both of its steps: a stat gates the byte cap
+ * BEFORE any content is read, and the parse stops at the line cap (flagging
+ * the transcript `truncated`). Files under both caps behave exactly as
+ * before. */
+const SESSION_JOURNAL_MAX_BYTES = 32 * 1024 * 1024; // hard file-size cap
+const SESSION_JOURNAL_MAX_LINES = 100_000; // hard cap on parsed journal lines
 
 /* ─── Facade ─────────────────────────────────────────────────────────── */
 
@@ -764,10 +776,14 @@ export class OmpFacade {
 
   /** Read a persisted session's transcript by file path. The path arrives
    *  from the GUI as a raw query value, so it is CONFINED to the omp session
-   *  roots first (see confineSessionPath). Every rejection — outside, wrong
-   *  extension, missing, not a regular file, symlink escape — answers the
-   *  same fixed message: no fs error text, no path echo (no filesystem
-   *  oracle). */
+   *  roots first (see confineSessionPath). Every confinement rejection —
+   *  outside, wrong extension, missing, not a regular file, symlink escape —
+   *  answers the same fixed message: no fs error text, no path echo (no
+   *  filesystem oracle). The read itself is BOUNDED: the file is stat'd and
+   *  refused over SESSION_JOURNAL_MAX_BYTES without its content ever being
+   *  read, and parsing stops at SESSION_JOURNAL_MAX_LINES with
+   *  `truncated: true` on the transcript — a huge journal can never pin the
+   *  event loop. */
   async readDiskSession(
     path: string,
   ): Promise<{ ok: boolean; transcript?: SessionTranscriptDto; error?: string }> {
@@ -777,8 +793,18 @@ export class OmpFacade {
     const confined = confineSessionPath(path, defaultSessionRoots(this.sdk?.SessionManager));
     if (!confined.ok) return { ok: false, error: 'session not found' };
     try {
+      // Bound the sync read BEFORE touching content (stat is O(1)): an
+      // oversized journal is refused, never slurped into the event loop.
+      const stat = fs.statSync(confined.path);
+      if (!stat.isFile()) return { ok: false, error: 'session not found' };
+      if (stat.size > SESSION_JOURNAL_MAX_BYTES) {
+        return { ok: false, error: 'session transcript too large' };
+      }
       const raw = fs.readFileSync(confined.path, 'utf8');
       const lines = raw.split('\n').filter((l) => l.trim());
+      // Bound the parse too: past the cap the transcript is a truncated prefix.
+      const truncated = lines.length > SESSION_JOURNAL_MAX_LINES;
+      if (truncated) lines.length = SESSION_JOURNAL_MAX_LINES;
       const messages: SessionTranscriptDto['messages'] = [];
       let id = '';
       let name: string | undefined;
@@ -810,7 +836,13 @@ export class OmpFacade {
       }
       return {
         ok: true,
-        transcript: { id: id || confined.path, path: confined.path, name, messages },
+        transcript: {
+          id: id || confined.path,
+          path: confined.path,
+          name,
+          messages,
+          ...(truncated ? { truncated: true } : {}),
+        },
       };
     } catch {
       // Vanished/raced between confinement and read: fixed answer, no oracle.

@@ -26,7 +26,8 @@ import {
   startLoop as startLoopRoute,
 } from '../routes/engine.js';
 import type { EngineRouteContext } from '../routes/engine.js';
-import { ModelsYamlStore } from './providers-store.js';
+import { ModelsYamlStore, type StoreResult } from './providers-store.js';
+import { LoopUserError } from './loop-manager.js';
 import type { SessionTurnEvent } from './types.js';
 
 /**
@@ -42,6 +43,7 @@ function makeSession(
 ) {
   const events: SessionTurnEvent[] = [];
   let listener: ((ev: unknown) => void) | null = null;
+  let unsubscribeCalls = 0;
   const session = new EngineSession({
     id: 'ses_test',
     cwd: '/tmp',
@@ -53,7 +55,9 @@ function makeSession(
     model: { provider: 'local-server', id: 'deepseek-ai/DeepSeek-V4-Flash' },
     subscribe: (l) => {
       listener = l;
-      return () => {};
+      return () => {
+        unsubscribeCalls += 1;
+      };
     },
     subscribeRunState: () => () => {},
     prompt: async () => {
@@ -64,7 +68,13 @@ function makeSession(
     },
     dispose: async () => {},
   } as Parameters<EngineSession['attach']>[0]);
-  return { session, events, emit: (ev: Record<string, unknown>) => listener?.(ev) };
+  return {
+    session,
+    events,
+    emit: (ev: Record<string, unknown>) => listener?.(ev),
+    /** Calls of the unsubscribe fn omp.subscribe() returned. */
+    unsubscribes: () => unsubscribeCalls,
+  };
 }
 
 /** The error annotation appended by EngineSession to every session error. */
@@ -217,19 +227,31 @@ const sdk = vi.hoisted(() => ({
   ompSessionFile: undefined as string | undefined,
   /** When set, createAgentSession returns this as modelFallbackMessage. */
   fallbackMessage: null as string | null,
+  /** Remaining ModelRegistry.refresh() failures (transient-startup seam). */
+  failRefresh: 0,
+  /** Total refresh() calls (shared-attempt pin). */
+  refreshCalls: 0,
+  /** Catalog the fake registry serves to listModels(). */
+  availableModels: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock('@oh-my-pi/pi-coding-agent', () => ({
   discoverAuthStorage: async () => ({ getApiKey: async () => undefined }),
   ModelRegistry: class {
     constructor(_auth: unknown) {}
-    async refresh(): Promise<void> {}
+    async refresh(): Promise<void> {
+      sdk.refreshCalls += 1;
+      if (sdk.failRefresh > 0) {
+        sdk.failRefresh -= 1;
+        throw new Error('transient refresh flake');
+      }
+    }
     find(provider: string, id: string) {
       // No baseUrl → the served-model preflight skips its fetch entirely.
       return { provider, id };
     }
     getAvailable() {
-      return [];
+      return sdk.availableModels;
     }
   },
   SessionManager: {
@@ -391,30 +413,37 @@ describe('EngineService — disposeAll / compact guard / createdAt stability', (
     }
   });
 
-  it('compact() refuses while a turn is running and emits session_error', async () => {
+  it('compact() refuses while a turn is running: resolves false, no omp call', async () => {
     let compactCalls = 0;
+    let racing: Promise<boolean> | null = null;
     const { session, events } = makeSession({
       onCompact: () => {
         compactCalls += 1;
       },
       emitOnPrompt: () => {
         // Synchronous with the turn: status is 'running' at this point.
-        void session.compact('racing');
+        racing = session.compact('racing');
       },
     });
     await session.prompt('go');
     expect(sessionError(events)).toMatch(/busy/i);
     expect(compactCalls).toBe(0); // omp.compact was never reached
+    // Discriminator (finding #5): pre-fix compact() resolved undefined, so
+    // the route could not tell the busy no-op from a real compaction and
+    // answered 200 {ok:true} while nothing happened.
+    expect(await racing!).toBe(false);
   });
 
-  it('compact() runs normally on an idle session', async () => {
+  it('compact() on an idle session runs the compaction and resolves true', async () => {
     let compactCalls = 0;
     const { session } = makeSession({
       onCompact: () => {
         compactCalls += 1;
       },
     });
-    await session.compact('housekeeping');
+    // Discriminator: pre-fix this resolved undefined (Promise<void>),
+    // indistinguishable from the busy no-op by the awaited caller.
+    expect(await session.compact('housekeeping')).toBe(true);
     expect(compactCalls).toBe(1);
   });
 
@@ -434,6 +463,43 @@ describe('EngineService — disposeAll / compact guard / createdAt stability', (
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/* ─── Post-dispose listener detach (finding #6) ──────────────────────────── */
+
+describe('EngineSession — dispose detaches the omp listener', () => {
+  it('dispose() calls the unsubscribe fn from subscribe(); a late frame cannot resurrect or ghost-broadcast', async () => {
+    const { session, events, emit, unsubscribes } = makeSession();
+    await session.dispose();
+    // Discriminator: pre-fix attach() DISCARDED the unsubscribe fn omp
+    // returned, so nothing could ever detach the listener.
+    expect(unsubscribes()).toBe(1);
+    events.length = 0;
+    // Simulate a frame already in flight inside the emitter's dispatch when
+    // dispose ran — the detach cannot catch this one, the guard must.
+    emit({ type: 'agent_end' });
+    // Pre-fix BOTH assertions fail: status resurrects 'closed' → 'idle' and
+    // the event ghost-broadcasts on a sessionId the map no longer holds.
+    expect(session.status).toBe('closed');
+    expect(events).toEqual([]);
+  });
+
+  it('attach() tolerates an older omp whose subscribe() returns no unsubscribe', async () => {
+    const session = new EngineSession({ id: 's', cwd: '/tmp', onEvent: () => {} });
+    session.attach({
+      sessionId: 'omp',
+      sessionName: 'omp',
+      model: { provider: 'p', id: 'm' },
+      // Older SDK shape: subscribe() returns undefined, not an unsubscribe.
+      subscribe: () => undefined as unknown as () => void,
+      subscribeRunState: () => () => {},
+      prompt: async () => {},
+      compact: async () => {},
+      dispose: async () => {},
+    } as Parameters<EngineSession['attach']>[0]);
+    await expect(session.dispose()).resolves.toBeUndefined();
+    expect(session.status).toBe('closed');
   });
 });
 
@@ -759,7 +825,7 @@ describe('EngineService — durable sessions (disk-backed create, confined resum
         workspaces: { resolveCwd: () => ({ path: '/tmp/proj' }) },
         loops: {
           start: async () => {
-            throw new Error(loopMsg);
+            throw new LoopUserError(loopMsg);
           },
         },
         skills: {},
@@ -799,12 +865,17 @@ describe('EngineService — provider control plane (cast-injected warm engine)',
    * production codecs, and a small fake satisfies OmpRegistryLike /
    * OmpAuthStorageLike surface used by these methods.
    */
-  function warmEngine(registryExtra: Record<string, unknown> = {}) {
+  function warmEngine(
+    registryExtra: Record<string, unknown> = {},
+    makeStore?: (path: string) => ModelsYamlStore,
+  ) {
     const dir = mkdtempSync(join(tmpdir(), 'aether-prov-'));
-    const store = new ModelsYamlStore(join(dir, 'models.yml'), {
-      parse: (t: string) => JSON.parse(t),
-      stringify: (v: unknown) => JSON.stringify(v, null, 2),
-    });
+    const store = makeStore
+      ? makeStore(join(dir, 'models.yml'))
+      : new ModelsYamlStore(join(dir, 'models.yml'), {
+          parse: (t: string) => JSON.parse(t),
+          stringify: (v: unknown) => JSON.stringify(v, null, 2),
+        });
     const engine = new EngineService();
     const injected = engine as unknown as {
       started: boolean;
@@ -889,5 +960,151 @@ describe('EngineService — provider control plane (cast-injected warm engine)',
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  /**
+   * Finding #3 discriminator. A store whose load() forces every CONCURRENT
+   * pair of read-modify-write cycles onto the SAME base config: each load
+   * reads the file, announces arrival, and holds its caller until a second
+   * load has ARRIVED (or a 50ms watchdog fires). Pre-fix, create+delete both
+   * reach load() before either save runs (a save is only reachable after its
+   * own load resolves, and a load only resolves at arrivals≥2), the barrier
+   * releases both with the stale base {mine}, and the last writer silently
+   * reverts the first. Post-fix, the store mutex serializes the cycles: only
+   * ONE load is ever in flight, the barrier never fills, and the watchdog
+   * merely adds latency — the second cycle loads strictly AFTER the first
+   * save, so both effects stack.
+   */
+  class StaleBaseStore extends ModelsYamlStore {
+    private arrivals = 0;
+    private readonly barrier = Promise.withResolvers<void>();
+    constructor(path: string) {
+      super(path, {
+        parse: (t: string) => JSON.parse(t),
+        stringify: (v: unknown) => JSON.stringify(v, null, 2),
+      });
+    }
+    override async load(): Promise<StoreResult<Record<string, unknown>>> {
+      const loaded = await super.load();
+      this.arrivals += 1;
+      if (this.arrivals >= 2) this.barrier.resolve();
+      // Real 50ms watchdog on purpose (documented test-timer exception): the
+      // race lives in production microtasks, not a timer fake clocks could
+      // drive — and post-fix the timeout is pure latency, never correctness.
+      await Promise.race([this.barrier.promise, new Promise((r) => setTimeout(r, 50))]);
+      return loaded;
+    }
+  }
+
+  it('concurrent create+delete keep BOTH effects — no lost update on models.yml', async () => {
+    const { engine, store, dir } = warmEngine(
+      { hasProvider: () => false },
+      (p) => new StaleBaseStore(p),
+    );
+    try {
+      await store.save({
+        providers: { mine: { baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'sk-KEEPME' } },
+        theme: 'dark',
+      });
+      await Promise.all([
+        engine.createCustomProvider({
+          name: 'probe-gpu',
+          baseUrl: 'http://127.0.0.1:9/v1',
+          auth: 'none',
+        }),
+        engine.deleteCustomProvider('mine'),
+      ]);
+      const final = await store.load();
+      if (!final.ok) throw new Error('store unreadable after concurrent CRUD');
+      const names = Object.keys((final.value.providers ?? {}) as Record<string, unknown>);
+      // Pre-fix the interleaved stale saves collapse to ONE final state that
+      // lost an effect either way: delete-last → probe-gpu vanished,
+      // create-last → mine resurrected. Serialized, both effects hold.
+      expect(names).toContain('probe-gpu');
+      expect(names).not.toContain('mine');
+      expect(final.value.theme).toBe('dark');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/* ─── Transient startup stays retryable (finding #7) ─────────────────────── */
+
+describe('EngineService — transient start failure stays retryable', () => {
+  beforeEach(() => {
+    sdk.failRefresh = 0;
+    sdk.refreshCalls = 0;
+    sdk.availableModels = [];
+  });
+
+  it('a refresh flake degrades WITHOUT latching: the next engine call re-inits and recovers', async () => {
+    sdk.failRefresh = 1; // first refresh throws, later ones succeed
+    const engine = new EngineService({ force: true });
+    await engine.start();
+    // Discriminator (finding #7): pre-fix start() consumed `started` BEFORE
+    // the attempt and set available=false in the catch — one flake 501'd
+    // every engine route for the process lifetime. Post-fix only the
+    // unrecoverable SDK-load failure latches (via #importSdk).
+    expect(engine.isAvailable).toBe(true);
+    expect(engine.availabilityError).toMatch(/transient refresh flake/);
+    // Recovery rides the route-facing call itself: listModels → start() →
+    // re-attempt succeeds.
+    sdk.availableModels = [{ provider: 'p', id: 'm1' }];
+    const groups = await engine.listModels();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].models.map((m) => m.id)).toEqual(['m1']);
+  });
+
+  it('while the failure persists every call degrades to EngineUnavailableError, yet stays retryable', async () => {
+    sdk.failRefresh = 3;
+    const engine = new EngineService({ force: true });
+    await expect(engine.listModels()).rejects.toBeInstanceOf(EngineUnavailableError);
+    await expect(engine.listModels()).rejects.toBeInstanceOf(EngineUnavailableError);
+    sdk.failRefresh = 0;
+    sdk.availableModels = [{ provider: 'p', id: 'm9' }];
+    const groups = await engine.listModels();
+    expect(groups[0].total).toBe(1);
+  });
+
+  it('concurrent start() calls share ONE init attempt', async () => {
+    const engine = new EngineService({ force: true });
+    await Promise.all([engine.start(), engine.start(), engine.start()]);
+    expect(sdk.refreshCalls).toBe(1);
+  });
+});
+
+/* ─── /api/models honesty under the 200-row slice (finding #12) ──────────── */
+
+describe('EngineService — /api/models reports total + truncated', () => {
+  beforeEach(() => {
+    sdk.failRefresh = 0;
+    sdk.availableModels = [];
+  });
+
+  it('a 201-model provider slices to 200 but reports total 201, truncated true', async () => {
+    const engine = await makeCappedEngine();
+    sdk.availableModels = Array.from({ length: 201 }, (_, i) => ({ provider: 'p', id: `m${i}` }));
+    const groups = await engine.listModels();
+    expect(groups).toHaveLength(1);
+    expect(groups[0].models).toHaveLength(200);
+    // Discriminator: pre-fix the group carried NO total/truncated, so a GUI
+    // rendered a truncated group as the complete catalog (undefined ≠ 201).
+    expect(groups[0].total).toBe(201);
+    expect(groups[0].truncated).toBe(true);
+    // Existing fields keep working: the slice holds the FIRST 200 in order.
+    expect(groups[0].models[0].id).toBe('m0');
+    expect(groups[0].models[199].id).toBe('m199');
+  });
+
+  it('a non-truncated group is honest too: total == models.length, truncated false', async () => {
+    const engine = await makeCappedEngine();
+    sdk.availableModels = [
+      { provider: 'q', id: 'a' },
+      { provider: 'q', id: 'b' },
+    ];
+    const groups = await engine.listModels();
+    expect(groups[0].total).toBe(2);
+    expect(groups[0].truncated).toBe(false);
   });
 });

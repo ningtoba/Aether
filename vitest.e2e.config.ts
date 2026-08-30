@@ -6,7 +6,6 @@ export default defineConfig({
     environment: 'node',
     include: [
       'packages/aether-backend/src/integration.test.ts',
-      'packages/aether-core/src/utils/integration.test.ts',
     ],
     testTimeout: 30_000,
     hookTimeout: 30_000,

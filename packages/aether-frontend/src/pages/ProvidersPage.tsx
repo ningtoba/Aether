@@ -546,7 +546,7 @@ export function ProvidersPage() {
                   <thead>
                     <tr>
                       <th>Provider</th>
-                      <th>Models</th>
+                      <th className="num">Models</th>
                       <th>Base URL</th>
                       <th>Auth</th>
                       <th>Discoverable</th>
@@ -577,9 +577,7 @@ export function ProvidersPage() {
                                 </div>
                               )}
                             </td>
-                            <td>
-                              <StatusPill tone="idle">{p.modelCount}</StatusPill>
-                            </td>
+                            <td className="num">{p.modelCount}</td>
                             <td className="mono muted" style={{ maxWidth: 280 }}>
                               <span
                                 className="truncate"

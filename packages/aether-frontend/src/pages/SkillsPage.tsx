@@ -388,11 +388,6 @@ export function SkillsPage() {
                             >
                               {s.name}
                             </span>
-                            <span style={{ display: 'block', marginTop: 2 }}>
-                              <StatusPill tone={sourceTone(s.source)}>
-                                {s.source.replace(':', ' · ')}
-                              </StatusPill>
-                            </span>
                             <span
                               className="muted clamp-2"
                               style={{ fontSize: 'var(--fs-xs)' }}
@@ -400,6 +395,13 @@ export function SkillsPage() {
                             >
                               {s.description}
                             </span>
+                          </span>
+                          {/* Source metadata trails on the same line (right-aligned),
+                              keeping the row at its clamp-2 height. */}
+                          <span style={{ marginLeft: 'auto', flexShrink: 0 }}>
+                            <StatusPill tone={sourceTone(s.source)}>
+                              {s.source.replace(':', ' · ')}
+                            </StatusPill>
                           </span>
                         </button>
                         {open && (

@@ -14,6 +14,11 @@
  *    instead of silently advancing it.
  *  - finish() must never clobber a stop reason already recorded by stop()
  *    ('manual stop' / 'time limit' landing on a gated or transitioning loop).
+ *  - a prompt rejection landing AFTER a manual stop (the session is disposed
+ *    under the in-flight prompt) records NOTHING — no errored round, no
+ *    round_end after the stop.
+ *  - stop() on an already-finished run must not overwrite the recorded
+ *    finish reason (finish() latches the stopped state).
  */
 import { describe, it, expect, vi } from 'vitest';
 import { LoopRunner } from './loop-runner.js';
@@ -212,5 +217,58 @@ describe('LoopRunner — finish() keeps the recorded stop reason', () => {
     expect(runner.progress.stopReason).toBe('time limit');
     const stopEv = events.find((e) => e.kind === 'loop:stop');
     expect(stopEv !== undefined && 'reason' in stopEv ? stopEv.reason : '').toBe('time limit');
+  });
+});
+
+describe('LoopRunner — stop() vs the catch path and finished runs', () => {
+  it('a prompt rejection landing after a manual stop records NO round at all', async () => {
+    // Real mid-round-stop shape: LoopManager.stop() disposes the session under
+    // the in-flight prompt, so the prompt REJECTS ('Session is not attached')
+    // after stop() has already resolved.
+    let rejectPrompt!: (err: Error) => void;
+    const session = {
+      id: 'ses_detached',
+      status: 'idle' as const,
+      lastAssistantText: 'STALE',
+      prompt: () =>
+        new Promise<'ok'>((_res, rej) => {
+          rejectPrompt = rej;
+        }),
+      compact: async () => {},
+    } as unknown as EngineSession;
+    const events: LoopEvent[] = [];
+    const runner = makeRunner(loopDef({ maxRounds: 5 }), session, events);
+    const done = runner.start(); // synchronously reaches the in-flight prompt
+    await runner.stop('manual stop');
+    rejectPrompt(new Error('Session is not attached'));
+    await done;
+
+    // Discriminator: pre-fix the catch had no stopped/gen guard (the try path
+    // does) — this recorded an errored round and emitted loop:round_error +
+    // loop:round_end AFTER the stop, and totalRounds counted a round that
+    // never ran.
+    const p = runner.progress;
+    expect(p.totalRounds).toBe(0);
+    expect(p.rounds).toHaveLength(0);
+    expect(events.some((e) => e.kind === 'loop:round_error')).toBe(false);
+    expect(events.some((e) => e.kind === 'loop:round_end')).toBe(false);
+    expect(p.stopReason).toBe('manual stop');
+    expect(p.status).toBe('stopped');
+    const stopEv = events.find((e) => e.kind === 'loop:stop');
+    expect(stopEv !== undefined && 'reason' in stopEv ? stopEv.reason : '').toBe('manual stop');
+  });
+
+  it('stop() on an already-finished run keeps the recorded finish reason', async () => {
+    const { session } = scriptedSession(['ok']);
+    const runner = makeRunner(loopDef({ maxRounds: 1 }), session, []);
+    await runner.start();
+    expect(runner.progress.stopReason).toBe('max rounds reached');
+
+    await runner.stop('manual stop');
+    // Discriminator: finish() never marked state.stopped, so this stop()
+    // sailed past its own latch and clobbered the reason the GUI reads —
+    // a completed loop reported 'manual stop'.
+    expect(runner.progress.stopReason).toBe('max rounds reached');
+    expect(runner.status).toBe('completed');
   });
 });

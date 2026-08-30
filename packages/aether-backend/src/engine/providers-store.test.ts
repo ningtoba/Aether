@@ -342,3 +342,83 @@ describe('ModelsYamlStore (injected codecs, atomic write)', () => {
     expect(fs.statSync(fresh.filePath).mode & 0o777).toBe(0o600);
   });
 });
+
+/* ─── withLock: whole read-modify-write cycle serialization ──────────────── */
+
+describe('ModelsYamlStore.withLock (lost-update prevention)', () => {
+  let dir: string;
+  beforeAll(() => {
+    dir = mkdtempSync(join(tmpdir(), 'aether-lock-'));
+  });
+  afterAll(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+  function freshStore(): ModelsYamlStore {
+    return new ModelsYamlStore(
+      join(dir, `lock-${Math.random().toString(36).slice(2)}.yml`),
+      jsonCodecs,
+    );
+  }
+
+  it('serializes overlapping cycles: the second cycle sees the first write', async () => {
+    const store = freshStore();
+    await store.save(baseConfig());
+    const order: string[] = [];
+    // Two interleaving-shaped cycles fired in the SAME tick — the exact
+    // shape of concurrent provider CRUD. Without the mutex both loads read
+    // the same base and the later save reverts the earlier writer.
+    const first = store.withLock(async () => {
+      const loaded = await store.load();
+      if (!loaded.ok) throw new Error('unreadable');
+      await new Promise((r) => setTimeout(r, 10)); // widen the interleave window
+      const merged = mergeNewProvider(loaded.value, GOOD_CREATE);
+      if (!merged.ok) throw new Error('merge rejected');
+      await store.save(merged.value.config);
+      order.push('first-save');
+    });
+    const second = store.withLock(async () => {
+      const loaded = await store.load();
+      order.push('second-load');
+      if (!loaded.ok) throw new Error('unreadable');
+      // THE discriminator: serialized, this load MUST see first's provider.
+      expect(providerNamesIn(loaded.value)).toContain('mylocal');
+      await store.save({ ...loaded.value, theme: 'light' });
+    });
+    await Promise.all([first, second]);
+    expect(order).toEqual(['first-save', 'second-load']);
+    const final = await store.load();
+    if (!final.ok) throw new Error('unreadable');
+    // First cycle's write SURVIVES the second (a stale-base save would have
+    // silently dropped it pre-serialization).
+    expect(providerNamesIn(final.value)).toEqual(['legacy-one', 'mylocal']);
+    expect(final.value.theme).toBe('light');
+  });
+
+  it('a rejected cycle reaches its caller verbatim and never poisons the chain', async () => {
+    const store = freshStore();
+    await expect(
+      store.withLock(async () => {
+        throw new Error('boom');
+      }),
+    ).rejects.toThrow('boom');
+    // Pre-fix there is no chain to poison — but the mutex must not become a
+    // deadlock source either: callers queued behind a failure still run.
+    expect(await store.withLock(async () => 42)).toBe(42);
+  });
+
+  it('cycles run strictly in call order even under contention', async () => {
+    const store = freshStore();
+    await store.save(baseConfig());
+    const order: number[] = [];
+    const cycles = [0, 1, 2, 3].map((i) =>
+      store.withLock(async () => {
+        await new Promise((r) => setTimeout(r, 4 - i)); // later calls finish FASTER unserialized
+        order.push(i);
+      }),
+    );
+    await Promise.all(cycles);
+    // Pre-fix the inversions (3 before 0) were exactly how lost updates
+    // ordered; with the chain, completion order == call order.
+    expect(order).toEqual([0, 1, 2, 3]);
+  });
+});

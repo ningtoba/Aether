@@ -37,11 +37,11 @@ The omp SDK (`@oh-my-pi/pi-coding-agent`) only runs under the **Bun** runtime (i
 
 | Package           | Depends on                                  | Responsibilities                                                                                                                                                                     |
 | ----------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `aether-core`     | —                                           | Events (`EventBus`), lifecycle, config, shared types, utils, telemetry (pino + OpenTelemetry), security (RBAC). Merged from the former types/utils/core/telemetry/security packages. |
+| `aether-core`     | —                                           | Security (RBAC) only: `RBACGuard`, hierarchical roles/permissions, glob resource matching. Iteration 8 deleted the zero-consumer `EventBus`/`LifecycleManager`/`ConfigManager` and the `types`/`utils`/`telemetry` namespaces — and with them the package's entire OpenTelemetry + pino dependency tree. |
 | `aether-backend`  | `aether-core` + `@oh-my-pi/pi-coding-agent` | HTTP/WS server, engine service, loop manager, skills service, model catalog, static GUI hosting.                                                                                     |
-| `aether-frontend` | `aether-core`                               | React + Vite web GUI.                                                                                                                                                                |
+| `aether-frontend` | —                                           | React + Vite web GUI. No workspace dependencies (iteration 8 removed its declared-but-unimported `aether-core` link).                                                                       |
 
-Dependency flow is strictly leaf → root: `core → backend → frontend`.
+`@aether/backend` is the sole consumer of `@aether/core` (the RBAC route gate in `server.ts`); the frontend depends on no workspace package.
 
 The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are gone: the SDK/provider layer is superseded by the embedded omp engine and its model registry; the Electron shell by the web GUI. In v0.3.6 `aether-memory`, `aether-orchestrator`, and `aether-tools` were deleted too: a repo-wide grep proved zero importers (the orchestrator's node runners returned canned outputs, and the tools sandboxes are superseded by the omp SDK's own session tools).
 

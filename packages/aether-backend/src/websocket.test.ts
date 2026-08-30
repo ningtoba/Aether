@@ -45,13 +45,40 @@ describe('WebSocketManager', () => {
       expect(frame.readUInt16BE(2)).toBe(200);
     });
 
-    it('should encode large payload (>65535 bytes) with 8-byte extended length', () => {
-      const data = 'x'.repeat(70000);
-      const frame = (wsm as any).createTextFrame(data);
-      expect(frame[0]).toBe(0x81);
-      expect(frame[1]).toBe(127);
-      // Total frame length should be 10 header bytes + 70000 payload
-      expect(frame.length).toBe(70010);
+    // Typed view into the private framing API (no `any` in new tests).
+    const framing = () =>
+      wsm as unknown as {
+        createTextFrame(data: string): Buffer;
+        createFrameHeader(opcode: number, length: number): Buffer;
+      };
+
+    it('should encode large payload (>65535 bytes) with an exact 8-byte extended length', () => {
+      for (const size of [65536, 70000]) {
+        const data = 'x'.repeat(size);
+        const frame = framing().createTextFrame(data);
+        expect(frame[0]).toBe(0x81);
+        expect(frame[1]).toBe(127);
+        // Decode the 8-byte extended length exactly. Buffer.readUIntBE caps at
+        // 6 bytes, so sum the two 32-bit halves instead.
+        const declared = frame.readUInt32BE(2) * 2 ** 32 + frame.readUInt32BE(6);
+        expect(declared).toBe(size);
+        // Header (10 bytes) must equal the frame minus the payload.
+        expect(frame.length).toBe(size + 10);
+      }
+    });
+
+    it('writes the exact 64-bit length for sizes adjacent to 2^32 and beyond', () => {
+      // JS shift counts are mod 32: `(len >> 32)` aliases to `(len >> 0)`, so a
+      // shift-based encoder corrupts the high half from 65536 up and degenerates
+      // to 0 at 2^32. These sizes pin the arithmetic high/low split.
+      for (const size of [4294967295, 4294967296, 4294967297, Number.MAX_SAFE_INTEGER]) {
+        const header = framing().createFrameHeader(0x01, size);
+        expect(header.length).toBe(10);
+        expect(header[0]).toBe(0x81);
+        expect(header[1]).toBe(127);
+        const declared = header.readUInt32BE(2) * 2 ** 32 + header.readUInt32BE(6);
+        expect(declared).toBe(size);
+      }
     });
   });
 

@@ -263,6 +263,10 @@ export class EngineSession {
    *  so the value is stable across reads (it used to be a fresh new Date()
    *  per summary, so the same session "changed" on every poll). */
   readonly createdAtMs = Date.now();
+  /** omp.subscribe()'s unsubscribe handle (finding #6): dispose() MUST call
+   *  it — the discarded handle let late emitter frames resurrect a closed
+   *  session and ghost-broadcast on a dead sessionId. */
+  private detachOmpListener: (() => void) | null = null;
   private omp: OmpSessionLike | null = null;
   /** omp session file captured at attach — keeps the identity readable
    *  after dispose() clears the omp handle. See the live sessionFile getter. */
@@ -292,9 +296,15 @@ export class EngineSession {
 
   /** Attach the underlying omp session (called by EngineService after creation). */
   attach(omp: OmpSessionLike): void {
+    // Re-attach safety: drop any listener held from a previous handle.
+    this.detachOmpListener?.();
+    this.detachOmpListener = null;
     this.omp = omp;
     this.attachedSessionFile = omp.sessionFile;
-    omp.subscribe((ev) => this.#onOmpEvent(ev));
+    const detach = omp.subscribe((ev) => this.#onOmpEvent(ev));
+    // Feature-detected: older SDK builds may return nothing from subscribe()
+    // — the post-dispose guard in #onOmpEvent is the backstop either way.
+    this.detachOmpListener = typeof detach === 'function' ? detach : null;
   }
 
   /** Absolute path of omp's on-disk session file (undefined until omp
@@ -361,7 +371,12 @@ export class EngineSession {
     this.onEvent({ kind: 'session_error', message: this.annotate(`Prompt failed: ${cause}`) });
   }
 
-  async compact(customInstructions?: string): Promise<void> {
+  /** Compact the session context. Resolves TRUE only when compaction was
+   *  actually initiated on omp; FALSE when the busy guard no-oped the call
+   *  (a turn started between the route's pre-check and here). The route
+   *  layer maps false → 409; the session_error event still rides the busy
+   *  branch for WS watchers. */
+  async compact(customInstructions?: string): Promise<boolean> {
     const omp = this.#require();
     // Mirror prompt's busy guard: compacting while a turn is in flight races
     // the model's own context management — refuse loudly instead.
@@ -370,15 +385,29 @@ export class EngineSession {
         kind: 'session_error',
         message: 'Session is busy — cannot compact while a turn is running',
       });
-      return;
+      return false;
     }
     await omp.compact(customInstructions);
+    return true;
   }
 
   async dispose(): Promise<void> {
     const omp = this.omp;
+    const detach = this.detachOmpListener;
+    this.detachOmpListener = null;
     this.omp = null;
     this.status = 'closed';
+    // Detach the omp listener BEFORE disposing the handle: without it,
+    // in-flight emitter frames re-entered #onOmpEvent on a session the map
+    // no longer held — status resurrected 'closed' → active and every such
+    // event ghost-broadcast on a dead sessionId.
+    if (detach) {
+      try {
+        detach();
+      } catch {
+        /* emitter already torn down: nothing left to detach */
+      }
+    }
     if (omp) await omp.dispose();
   }
 
@@ -528,6 +557,10 @@ export class EngineSession {
     const e = ev as Record<string, unknown>;
     const type = e?.type as string | undefined;
     if (!type) return;
+    // Post-dispose backstop (finding #6): dispose() detaches the listener,
+    // but a frame already queued inside the emitter's dispatch can still
+    // arrive — a closed session must never flip back to active nor emit.
+    if (this.status === 'closed') return;
     switch (type) {
       case 'agent_start':
         this.status = 'running';
@@ -652,6 +685,17 @@ export interface EngineServiceOptions {
   maxLiveSessions?: number;
 }
 
+/** One provider's group in the /api/models payload. `total` is the FULL
+ *  pre-slice count and `truncated` says whether rows were dropped, so a GUI
+ *  can never render a capped group as the complete catalog (a local ollama
+ *  catalog can exceed the 200-row slice). */
+export interface ModelCatalogGroup extends ProviderModelGroup {
+  total: number;
+  truncated: boolean;
+}
+
+/** Per-provider row cap for the /api/models payload. */
+const MODEL_GROUP_CAP = 200;
 /** Default live-session cap when MAX_LIVE_SESSIONS is unset or invalid. */
 const DEFAULT_MAX_LIVE_SESSIONS = 64;
 
@@ -674,6 +718,9 @@ export class EngineService {
   private sessions = new Map<string, EngineSession>();
   private nextSessionId = 1;
   private started = false;
+  /** In-flight startup attempt shared by concurrent callers; cleared when it
+   *  settles so a FAILED attempt stays retryable (see start()). */
+  private starting: Promise<void> | null = null;
   /** Live-session cap (constructor override → MAX_LIVE_SESSIONS → 64). */
   private maxLiveSessions: number;
   /** One-shot latch: warn only the first time the cap meets an all-busy set. */
@@ -683,6 +730,11 @@ export class EngineService {
    *  injects a tmp-path store / fake fetch through a cast to exercise these
    *  paths without the Bun runtime. */
   private modelsStore: ModelsYamlStore | null = null;
+  /** In-flight #requireModelsStore build. Shared so concurrent first-use
+   *  callers can never build TWO store instances — the CRUD read-modify-write
+   *  mutex is per-instance, a second instance would write models.yml outside
+   *  the lock held by the first. */
+  private modelsStoreInit: Promise<ModelsYamlStore> | null = null;
   /** SDK ModelsConfigFile handle (invalidate() after writes) when reachable. */
   private modelsConfigFile: unknown = null;
   /** HTTP probe seam for verifyProvider (tests inject a deterministic fetch). */
@@ -708,22 +760,44 @@ export class EngineService {
     return this.loadError;
   }
 
-  /** Idempotent startup: realize the model registry snapshot. */
+  /** Startup: realize the model registry snapshot. Idempotent once warm;
+   *  concurrent callers share one attempt. The success latch is ONE-WAY:
+   *  only a fully successful init sets `started`. A transient auth-storage
+   *  discovery or registry refresh failure records availabilityError but
+   *  leaves the service RETRYABLE — the next start() (every engine route
+   *  calls it) re-attempts. Pre-fix, `started` was consumed before the
+   *  attempt and any single refresh flake 501'd every engine route for the
+   *  process lifetime. Only #importSdk's SDK-load failure (which latches
+   *  available=false itself) is treated as permanent. Meanwhile every
+   *  registry-backed route degrades via the null-registry
+   *  EngineUnavailableError (routes → 501). */
   async start(): Promise<void> {
     if (this.started) return;
-    this.started = true;
+    if (this.starting) return this.starting;
     if (!this.available) return;
-    try {
-      const { ModelRegistry, discoverAuthStorage } = await this.#importSdk();
-      const auth = await discoverAuthStorage();
-      const registry = new ModelRegistry(auth);
-      await registry.refresh();
-      this.authStorage = auth;
-      this.registry = registry;
-    } catch (err) {
-      this.available = false;
-      this.loadError = err instanceof Error ? err.message : String(err);
-    }
+    const attempt = (async (): Promise<void> => {
+      try {
+        const { ModelRegistry, discoverAuthStorage } = await this.#importSdk();
+        const auth = await discoverAuthStorage();
+        const registry = new ModelRegistry(auth);
+        await registry.refresh();
+        this.authStorage = auth;
+        this.registry = registry;
+        this.started = true;
+      } catch (err) {
+        // #importSdk already latched available=false for the permanent case.
+        // Everything else (auth discovery, refresh network flake) is
+        // transient: record the cause, keep `started` false, retry later.
+        this.loadError = err instanceof Error ? err.message : String(err);
+      }
+    })();
+    this.starting = attempt;
+    // attempt never rejects (the catch above absorbs everything), so this
+    // cleanup always runs and a failed attempt leaves nothing latched.
+    void attempt.then(() => {
+      if (this.starting === attempt) this.starting = null;
+    });
+    await attempt;
   }
 
   /** Dynamic import of the Bun-only SDK (never at module scope). */
@@ -737,7 +811,7 @@ export class EngineService {
     }
   }
 
-  async listModels(): Promise<ProviderModelGroup[]> {
+  async listModels(): Promise<ModelCatalogGroup[]> {
     await this.start();
     if (!this.registry) throw new EngineUnavailableError();
     const registry = this.registry as {
@@ -763,7 +837,9 @@ export class EngineService {
       }
       return Array.from(byProvider.entries()).map(([provider, models]) => ({
         provider,
-        models: models.slice(0, 200),
+        models: models.slice(0, MODEL_GROUP_CAP),
+        total: models.length,
+        truncated: models.length > MODEL_GROUP_CAP,
       }));
     } catch (err) {
       throw new EngineUnavailableError(
@@ -1216,13 +1292,19 @@ export class EngineService {
     }
     if (known) throw new ProviderOpError(409, 'provider already exists');
     const store = await this.#requireModelsStore();
-    const loaded = await store.load();
-    if (!loaded.ok) throw new ProviderOpError(loaded.status, loaded.error);
-    const merged = mergeNewProvider(loaded.value, { ...input, name });
-    if (!merged.ok) throw new ProviderOpError(merged.status, merged.error);
-    await this.#writeModelsConfig(store, merged.value.config);
-    await this.#refreshAfterConfigWrite(registry, merged.value.name);
-    return merged.value.name;
+    // The ENTIRE load → merge → save → refresh cycle runs under the store's
+    // read-modify-write mutex: concurrent CRUD callers must never build on
+    // the same stale base config (pre-fix the later save silently dropped
+    // the earlier writer's change).
+    return store.withLock(async () => {
+      const loaded = await store.load();
+      if (!loaded.ok) throw new ProviderOpError(loaded.status, loaded.error);
+      const merged = mergeNewProvider(loaded.value, { ...input, name });
+      if (!merged.ok) throw new ProviderOpError(merged.status, merged.error);
+      await this.#writeModelsConfig(store, merged.value.config);
+      await this.#refreshAfterConfigWrite(registry, merged.value.name);
+      return merged.value.name;
+    });
   }
 
   /** Remove a models.yml-owned provider: entry + stored key + refresh.
@@ -1231,17 +1313,21 @@ export class EngineService {
   async deleteCustomProvider(provider: string): Promise<void> {
     const { registry, auth } = await this.#requireProviderWarm();
     const store = await this.#requireModelsStore();
-    const loaded = await store.load();
-    if (!loaded.ok) throw new ProviderOpError(loaded.status, loaded.error);
-    const merged = mergeRemovedProvider(loaded.value, provider);
-    if (!merged.ok) throw new ProviderOpError(merged.status, merged.error);
-    await this.#writeModelsConfig(store, merged.value);
-    try {
-      await auth.remove(provider);
-    } catch {
-      console.error(`[EngineService] authStorage.remove failed for provider ${provider}`);
-    }
-    await this.#refreshAfterConfigWrite(registry, provider);
+    // Serialized against create (same store mutex): a delete racing a create
+    // must never resurrect the created entry from its stale base load.
+    await store.withLock(async () => {
+      const loaded = await store.load();
+      if (!loaded.ok) throw new ProviderOpError(loaded.status, loaded.error);
+      const merged = mergeRemovedProvider(loaded.value, provider);
+      if (!merged.ok) throw new ProviderOpError(merged.status, merged.error);
+      await this.#writeModelsConfig(store, merged.value);
+      try {
+        await auth.remove(provider);
+      } catch {
+        console.error(`[EngineService] authStorage.remove failed for provider ${provider}`);
+      }
+      await this.#refreshAfterConfigWrite(registry, provider);
+    });
   }
 
   /** Aggregate counts for /health: distinct catalog provider count vs the
@@ -1376,29 +1462,39 @@ export class EngineService {
    *  Bun-gated provider ops ever reach here. */
   async #requireModelsStore(): Promise<ModelsYamlStore> {
     if (this.modelsStore) return this.modelsStore;
-    try {
-      const bunMod: unknown = await import('bun');
-      const cfgMod: unknown = await import('@oh-my-pi/pi-coding-agent/config/config-file');
-      const modelsMod: unknown = await import('@oh-my-pi/pi-coding-agent/config/models-config');
-      const bun = bunMod as { YAML: { parse(text: string): unknown } };
-      const cfg = cfgMod as { stringifyYamlConfig(value: unknown): string };
-      const modelsFile = modelsMod as {
-        ModelsConfigFile?: { path?(): string; invalidate?(): void };
-      };
-      this.modelsConfigFile = modelsFile.ModelsConfigFile ?? null;
-      const path =
-        modelsFile.ModelsConfigFile?.path?.() ?? join(homedir(), '.omp', 'agent', 'models.yml');
-      const codecs: YamlCodecs = {
-        parse: (text) => bun.YAML.parse(text),
-        stringify: (value) => cfg.stringifyYamlConfig(value),
-      };
-      this.modelsStore = new ModelsYamlStore(path, codecs);
-      return this.modelsStore;
-    } catch (err) {
-      throw new EngineUnavailableError(
-        `models.yml store unavailable: ${err instanceof Error ? err.message : String(err)}`,
-      );
-    }
+    if (this.modelsStoreInit) return this.modelsStoreInit;
+    const init = (async (): Promise<ModelsYamlStore> => {
+      try {
+        const bunMod: unknown = await import('bun');
+        const cfgMod: unknown = await import('@oh-my-pi/pi-coding-agent/config/config-file');
+        const modelsMod: unknown = await import('@oh-my-pi/pi-coding-agent/config/models-config');
+        const bun = bunMod as { YAML: { parse(text: string): unknown } };
+        const cfg = cfgMod as { stringifyYamlConfig(value: unknown): string };
+        const modelsFile = modelsMod as {
+          ModelsConfigFile?: { path?(): string; invalidate?(): void };
+        };
+        this.modelsConfigFile = modelsFile.ModelsConfigFile ?? null;
+        const path =
+          modelsFile.ModelsConfigFile?.path?.() ?? join(homedir(), '.omp', 'agent', 'models.yml');
+        const codecs: YamlCodecs = {
+          parse: (text) => bun.YAML.parse(text),
+          stringify: (value) => cfg.stringifyYamlConfig(value),
+        };
+        this.modelsStore = new ModelsYamlStore(path, codecs);
+        return this.modelsStore;
+      } catch (err) {
+        throw new EngineUnavailableError(
+          `models.yml store unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+    })();
+    this.modelsStoreInit = init;
+    // A failed build is not cached — the next call re-attempts; concurrent
+    // callers of THIS call still share the same (rejected) attempt.
+    void init.catch(() => {
+      if (this.modelsStoreInit === init) this.modelsStoreInit = null;
+    });
+    return init;
   }
 
   /** Atomic models.yml write + invalidate the SDK's own file cache so its

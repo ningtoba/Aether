@@ -8,7 +8,7 @@
  * wrong-directory behavior this guard removes.
  */
 import { describe, it, expect } from 'vitest';
-import { LoopManager } from './loop-manager.js';
+import { LoopLimitError, LoopManager, MAX_LOOP_DEFINITIONS } from './loop-manager.js';
 import type { EngineService, EngineSession } from './engine-service.js';
 import type { SkillsService } from './skills.js';
 import type { LoopDefinition, LoopEvent } from './types.js';
@@ -265,5 +265,50 @@ describe('LoopManager start race', () => {
     await manager.start('badprompt');
     await done;
     expect(manager.progressOf('badprompt')?.status).toBe('completed');
+  });
+});
+
+/**
+ * Definitions are the LAST unbounded keyed surface (sessions ≤64, providers
+ * ≤500): every save() rewrites the whole loops.json, so uncapped POSTs meant
+ * unbounded memory + O(n²) write amplification. MAX_LOOP_DEFINITIONS caps
+ * NEW inserts only — an existing id stays editable even at/over cap, and a
+ * rejected save must leave memory (and the store) untouched.
+ */
+describe('LoopManager definition cap', () => {
+  function seeded(count = MAX_LOOP_DEFINITIONS): LoopManager {
+    const manager = new LoopManager(fakeEngine([]), fakeSkills);
+    for (let i = 0; i < count; i++) {
+      manager.save(loopDef(`cap-${i}`, '/tmp/aether-cap'));
+    }
+    return manager;
+  }
+
+  it('refuses a NEW definition at cap with LoopLimitError, store untouched', () => {
+    const manager = seeded();
+    expect(manager.list()).toHaveLength(MAX_LOOP_DEFINITIONS);
+
+    // Discriminator: pre-fix save() had no bound — this succeeded and the
+    // store grew without limit.
+    expect(() => manager.save(loopDef('cap-overflow', '/tmp/aether-cap'))).toThrow(LoopLimitError);
+    try {
+      manager.save(loopDef('cap-overflow', '/tmp/aether-cap'));
+    } catch (err) {
+      expect(err).toBeInstanceOf(LoopLimitError);
+      expect((err as Error).message).toBe(`loop limit reached (${MAX_LOOP_DEFINITIONS})`);
+    }
+
+    expect(manager.list()).toHaveLength(MAX_LOOP_DEFINITIONS);
+    expect(manager.get('cap-overflow')).toBeUndefined();
+  });
+
+  it('replacing an existing id always works, even at cap', () => {
+    const manager = seeded();
+    const renamed = { ...loopDef('cap-0', '/tmp/aether-cap'), name: 'renamed at cap' };
+    const saved = manager.save(renamed);
+    expect(saved.name).toBe('renamed at cap');
+    expect(manager.get('cap-0')?.name).toBe('renamed at cap');
+    // Replace, not grow.
+    expect(manager.list()).toHaveLength(MAX_LOOP_DEFINITIONS);
   });
 });

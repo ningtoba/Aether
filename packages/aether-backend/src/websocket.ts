@@ -571,20 +571,34 @@ export class WebSocketManager {
   }
 
   private createFrame(opcode: number, payload: Buffer): Buffer {
-    const length = payload.length;
-    const header: number[] = [0x80 | opcode]; // FIN + opcode
+    return Buffer.concat([this.createFrameHeader(opcode, payload.length), payload]);
+  }
 
+  /**
+   * RFC 6455 §5.2 framing header for a payload of `length` bytes.
+   * The 64-bit branch must NOT use `>>`: JS shift counts are taken mod 32, so
+   * `length >> 32` silently aliases back to `length >> 0` and the high half
+   * duplicated the low half (len 70000 declared 300647710790000). Split the
+   * length arithmetically instead — exact for every length up to 2^53-1.
+   */
+  private createFrameHeader(opcode: number, length: number): Buffer {
     if (length < 126) {
-      header.push(length);
-    } else if (length < 65536) {
-      header.push(126, (length >> 8) & 0xff, length & 0xff);
-    } else {
-      header.push(127);
-      for (let i = 7; i >= 0; i--) {
-        header.push((length >> (i * 8)) & 0xff);
-      }
+      return Buffer.from([0x80 | opcode, length]);
     }
-
-    return Buffer.concat([Buffer.from(header), payload]);
+    if (length < 65536) {
+      const header = Buffer.allocUnsafe(4);
+      header[0] = 0x80 | opcode;
+      header[1] = 126;
+      header.writeUInt16BE(length, 2);
+      return header;
+    }
+    const header = Buffer.allocUnsafe(10);
+    header[0] = 0x80 | opcode;
+    header[1] = 127;
+    const high = Math.floor(length / 0x1_0000_0000);
+    const low = length - high * 0x1_0000_0000;
+    header.writeUInt32BE(high, 2);
+    header.writeUInt32BE(low, 6);
+    return header;
   }
 }

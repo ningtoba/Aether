@@ -292,15 +292,16 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
   };
 
   // Client-side filter over the already-loaded persisted list only.
-  const filteredDisk = useMemo(() => {
+  const diskMatches = useMemo(() => {
     const q = query.trim().toLowerCase();
-    const list = q
+    return q
       ? diskSessions.filter((s) =>
           `${s.displayName ?? ''} ${s.name} ${s.id} ${s.cwd}`.toLowerCase().includes(q),
         )
       : diskSessions;
-    return list.slice(0, 60);
   }, [diskSessions, query]);
+  // The rail renders at most 60 rows; the footer below discloses any truncation.
+  const filteredDisk = useMemo(() => diskMatches.slice(0, 60), [diskMatches]);
 
   const modelFull = activeModel || model;
   // basename after the final '/': the model id is the identifying part.
@@ -424,7 +425,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
             </span>
             <input
               className="input"
-              placeholder="Search persisted…"
+              placeholder="Search by name, path or id…"
               aria-label="Search persisted sessions"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
@@ -456,7 +457,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
                         textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
                         fontWeight: 600,
-                        fontSize: 12.5,
+                        fontSize: 'var(--fs-sm)',
                       }}
                       title={isUuidish(label) ? label : undefined}
                     >
@@ -511,6 +512,15 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
                 </div>
               );
             })}
+            {diskMatches.length > filteredDisk.length && (
+              <div
+                className="muted"
+                style={{ fontSize: 'var(--fs-2xs)', padding: 'var(--s-2) var(--s-3)' }}
+              >
+                showing {filteredDisk.length} of {diskMatches.length}
+                {query.trim() ? ' matches' : ''} — narrow with search
+              </div>
+            )}
             {filteredDisk.length === 0 &&
               (diskSessions.length === 0 ? (
                 <EmptyState
@@ -581,7 +591,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
               {viewingDisk && <StatusPill tone="idle">persisted transcript</StatusPill>}
               <div className="spacer" />
               <StatusPill tone={wsState === 'open' ? 'ok' : 'running'} dot>
-                {wsState === 'open' ? 'live' : 'connecting'}
+                {wsState === 'open' ? 'ws live' : 'ws connecting'}
               </StatusPill>
               {current && (
                 <>

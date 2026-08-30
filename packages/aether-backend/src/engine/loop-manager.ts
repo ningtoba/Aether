@@ -17,6 +17,35 @@ export interface LoopManagerOptions {
   /** Directory for persistent loop definitions (JSON). Omit for in-memory only. */
   storeDir?: string;
 }
+/** Hard cap on loop DEFINITIONS (the store, not concurrent runs). Every other
+ *  keyed surface is bounded — live sessions ≤64, providers ≤500, retained
+ *  rounds ≤200 — and definitions was the last unbounded one: each save()
+ *  rewrites the WHOLE loops.json, so uncapped POSTs are unbounded memory plus
+ *  O(n²) write amplification on the default loopback API. */
+export const MAX_LOOP_DEFINITIONS = 64;
+
+/** save() refused to CREATE a definition because the store is already at cap.
+ *  Replacing an existing id never throws this. The route maps it to
+ *  409 { error: 'loop limit reached (64)' }. */
+export class LoopLimitError extends Error {
+  constructor(readonly limit: number = MAX_LOOP_DEFINITIONS) {
+    super(`loop limit reached (${limit})`);
+    this.name = 'LoopLimitError';
+  }
+}
+
+/** Rejections LoopManager composes ITSELF — actionable, GUI-facing guidance
+ *  ("Loop not found: …", "Loop already running: …", the no-absolute-cwd
+ *  prompt). The routes echo ONLY this class (plus the engine's typed errors)
+ *  verbatim; a rethrown raw SDK/fs error (absolute paths, store internals)
+ *  is indistinguishable from these by shape alone, so echo-by-type here is
+ *  what closes the path-disclosure passthrough. */
+export class LoopUserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'LoopUserError';
+  }
+}
 
 export class LoopManager {
   private definitions = new Map<string, LoopDefinition>();
@@ -132,9 +161,16 @@ export class LoopManager {
     return this.definitions.get(id);
   }
 
-  /** Persist a loop definition (create or replace by id). */
+  /** Persist a loop definition (create or replace by id). NEW definitions are
+   *  capped (MAX_LOOP_DEFINITIONS); replacing an existing id always works —
+   *  even when the store is at/over cap (a legacy hand-edited store must
+   *  never become un-editable). Throws BEFORE insert/persist: a rejected save
+   *  leaves memory and loops.json untouched. */
   save(definition: LoopDefinition): LoopDefinition {
     const id = definition.id || crypto.randomUUID();
+    if (!this.definitions.has(id) && this.definitions.size >= MAX_LOOP_DEFINITIONS) {
+      throw new LoopLimitError();
+    }
     const saved: LoopDefinition = { ...definition, id };
     this.definitions.set(id, saved);
     this.persist();
@@ -158,18 +194,18 @@ export class LoopManager {
   /** Start (or resume) a defined loop on a fresh session. */
   async start(id: string): Promise<LoopProgress> {
     const definition = this.definitions.get(id);
-    if (!definition) throw new Error(`Loop not found: ${id}`);
+    if (!definition) throw new LoopUserError(`Loop not found: ${id}`);
     if (this.runners.has(id)) {
       const existing = this.runners.get(id)!;
       if (existing.status === 'running' || existing.status === 'gated') {
-        throw new Error(`Loop already running: ${id}`);
+        throw new LoopUserError(`Loop already running: ${id}`);
       }
       this.runners.delete(id);
     }
     if (this.starting.has(id)) {
       // The runner does not exist yet, but the slot is claimed: report the
       // same error text the settled-runner guard uses (callers/tests pin it).
-      throw new Error(`Loop already running: ${id}`);
+      throw new LoopUserError(`Loop already running: ${id}`);
     }
 
     // LoopDefinition.cwd is required and the save route always stores the
@@ -178,7 +214,7 @@ export class LoopManager {
     // the loop in a guessed directory (the old process.cwd() fallback meant
     // /app in Docker, i.e. the backend's own source tree).
     if (!definition.cwd || !isAbsolute(definition.cwd)) {
-      throw new Error(
+      throw new LoopUserError(
         `Loop ${id} has no absolute working directory — open it in the GUI, pick a directory, and save before starting`,
       );
     }

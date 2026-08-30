@@ -168,7 +168,14 @@ export function AgentsPage() {
               {filtered.map((a) => {
                 const isSel = selected === a.name;
                 return (
-                  <div key={a.name} className={`card card-ghost${isSel ? ' is-selected' : ''}`}>
+                  <button
+                    type="button"
+                    key={a.name}
+                    className={`card card-ghost${isSel ? ' is-selected' : ''}`}
+                    aria-pressed={isSel}
+                    aria-label={`Inspect agent ${a.name}`}
+                    onClick={() => setSelected(isSel ? null : a.name)}
+                  >
                     <div className="card-header">
                       <span
                         className="truncate"
@@ -179,13 +186,9 @@ export function AgentsPage() {
                       </span>
                       <StatusPill tone={KIND_TONE[a.source]}>{a.source}</StatusPill>
                       <span className="spacer" />
-                      <button
-                        className="btn ghost sm"
-                        aria-pressed={isSel}
-                        onClick={() => setSelected(isSel ? null : a.name)}
-                      >
-                        {isSel ? 'Close' : 'Inspect'}
-                      </button>
+                      {/* The whole card toggles selection now; the old Inspect button
+                          cannot nest in it — keep a read-only state pill instead. */}
+                      <StatusPill tone="idle">{isSel ? 'open' : 'inspect'}</StatusPill>
                     </div>
                     <div className="card-body stack" style={{ gap: 6, alignItems: 'flex-start' }}>
                       <span
@@ -205,7 +208,7 @@ export function AgentsPage() {
                         </span>
                       )}
                     </div>
-                  </div>
+                  </button>
                 );
               })}
             </div>

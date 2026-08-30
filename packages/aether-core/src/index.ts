@@ -1,27 +1,16 @@
 /**
- * @aether/core — merged foundation package.
+ * @aether/core — security foundation for the Aether platform.
  *
- * Absorbs the former aether-core (events/lifecycle/config), aether-types,
- * aether-utils, aether-telemetry and aether-security into a single
- * dependency-free-ish foundation. External consumers import from the package
- * root; the telemetry/types/utils surfaces are additionally exposed as
- * namespaces (`core.telemetry`, `core.types`, `core.utils`) so identifier
- * collisions (e.g. `LogLevel`) never leak into the top-level barrel.
+ * RBAC only: hierarchical role-based access control with glob resource
+ * matching (`RBACGuard`, `BUILTIN_ROLES`, `permissionMatches`). This is the
+ * sole surface with production consumers — `@aether/backend`'s route gate.
+ *
+ * The package's former foundation payload (EventBus, LifecycleManager,
+ * ConfigManager, and the types/utils/telemetry namespaces) was deleted in
+ * iteration 8: a repo-wide grep proved zero consumers outside this package,
+ * and with it went the entire OpenTelemetry + pino dependency tree.
  *
  * @module @aether/core
  */
 
-// ── Core (events / lifecycle / config) ─────────────────────────────────────
-export { EventBus } from './events.js';
-export type { EventHandler, EventBusOptions } from './events.js';
-export { LifecycleManager } from './lifecycle.js';
-export type { LifecycleStage, LifecycleHook } from './lifecycle.js';
-export { ConfigManager } from './config.js';
-
-// ── Security (RBAC) — top level so `import { RBACGuard } from '@aether/core'` works.
 export * from './security/index.js';
-
-// ── Namespaced subsystems (collision-safe) ────────────────────────────────
-export * as types from './domain/index.js';
-export * as utils from './utils/index.js';
-export * as telemetry from './telemetry/index.js';

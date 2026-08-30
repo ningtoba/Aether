@@ -19,6 +19,7 @@ import {
   Skeleton,
   StatCard,
   StatusPill,
+  fmtUptime,
   type IconName,
 } from '../components/ui';
 import type { PageId } from '../App';
@@ -331,7 +332,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
                   engine {engineLive ? 'live' : 'unavailable'}
                 </StatusPill>
                 <StatusPill tone="idle">v{health.version}</StatusPill>
-                <StatusPill tone="idle">up {health.uptime}s</StatusPill>
+                <StatusPill tone="idle">up {fmtUptime(health.uptime)}</StatusPill>
               </div>
               {health.memory && (
                 <div className="row">

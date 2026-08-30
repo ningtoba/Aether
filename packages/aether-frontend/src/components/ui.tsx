@@ -482,6 +482,14 @@ export function fmtRelative(input: number | string): string {
   return `${Math.floor(months / 12)}y ago`;
 }
 
+/** Seconds → coarse uptime: 42 → '42s', 429 → '7m 9s', 3725 → '1h 2m'. Invalid → ''. */
+export function fmtUptime(s: number): string {
+  if (!Number.isFinite(s) || s < 0) return '';
+  if (s < 60) return `${Math.floor(s)}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
 /** Best-effort clipboard write: async Clipboard API with a same-document fallback. */
 async function writeClipboard(text: string): Promise<boolean> {
   try {

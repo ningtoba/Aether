@@ -14,6 +14,10 @@ import { EngineUnavailableError } from '../engine/index.js';
 // Error classes the classification below depends on. Deep import (the engine
 // barrel is untouched by this slice; it re-exports none of these yet).
 import { EngineUserError, SessionResumeRejectedError } from '../engine/engine-service.js';
+// Loop lifecycle error taxonomy (also deep imports — the engine barrel stays
+// untouched by this slice): LoopUserError marks LoopManager's OWN composed
+// guidance, LoopLimitError the definition-cap rejection mapped to 409 below.
+import { LoopLimitError, LoopUserError } from '../engine/loop-manager.js';
 import type { LoopManager } from '../engine/index.js';
 import type { SkillsService } from '../engine/index.js';
 import type { LoopDefinition, LoopTransitionKind } from '../engine/index.js';
@@ -66,22 +70,26 @@ function handleEngineError(res: ServerResponse, err: unknown): void {
   serverError(res);
 }
 
-/** Loop lifecycle errors are LoopManager's OWN composed validation messages
- *  ("Loop not found: …", "Loop already running: …", "… has no absolute working
- *  directory — open it in the GUI, pick a directory, and save before starting")
- *  which the GUI must keep showing verbatim. They are plain Errors — typed
- *  classification would require touching loop-manager.ts (outside this slice),
- *  so these two routes keep the message passthrough. */
+/** Loop lifecycle errors: echo policy by TYPE, never by construction.
+ *  LoopManager's own composed guidance (LoopUserError — "Loop not found: …",
+ *  "Loop already running: …", the no-absolute-cwd GUI prompt) and the
+ *  engine's EngineUserError catalog verdicts stay verbatim; the GUI copy is
+ *  built on them. start() ALSO rethrows whatever createSession threw — raw
+ *  SDK/fs errors carrying absolute cwds and ~/.omp journal paths — so the
+ *  old blanket passthrough leaked internals while handleEngineError had
+ *  closed exactly that for every sibling route. Anything untyped is logged
+ *  server-side and answered with the fixed 'Internal server error'. */
 function handleLoopError(res: ServerResponse, err: unknown): void {
   if (err instanceof EngineUnavailableError) {
     jsonResponse(res, 501, { error: err.message });
     return;
   }
-  if (err instanceof EngineUserError) {
+  if (err instanceof EngineUserError || err instanceof LoopUserError) {
     serverError(res, err.message);
     return;
   }
-  serverError(res, err instanceof Error ? err.message : String(err));
+  console.error('[Engine] unexpected loop route failure:', err);
+  serverError(res);
 }
 
 function msg(err: unknown): string {
@@ -265,7 +273,15 @@ export async function compactSession(
     });
   }
   try {
-    await session.compact();
+    const compacted = await session.compact();
+    // omp's own busy guard can no-op the call after our pre-check (a turn
+    // started in between). false means nothing was compacted — say so
+    // instead of claiming success.
+    if (compacted === false) {
+      return jsonResponse(res, 409, {
+        error: `Session ${session.id} compact skipped — a turn started; try again`,
+      });
+    }
     jsonResponse(res, 200, { ok: true });
   } catch (err) {
     handleEngineError(res, err);
@@ -310,7 +326,16 @@ export async function saveLoop(
   if (typeof body.prompt !== 'string' || !body.prompt.trim()) {
     return badRequest(res, 'loop.prompt required');
   }
-  if (!body.model || !body.model.provider || !body.model.modelId) {
+  // typeof, not just truthiness: isProviderModel on the next boot requires
+  // STRINGS, and a persisted number ("provider": 5) made the entry fail the
+  // store guard — the saved loop silently vanished on restart.
+  if (
+    !body.model ||
+    typeof body.model.provider !== 'string' ||
+    !body.model.provider ||
+    typeof body.model.modelId !== 'string' ||
+    !body.model.modelId
+  ) {
     return badRequest(res, 'loop.model.provider and loop.model.modelId required');
   }
   // The runner dereferences transition fields blindly — validate the whole
@@ -331,6 +356,17 @@ export async function saveLoop(
   if (rawArgs !== undefined && typeof rawArgs !== 'string') {
     return badRequest(res, 'loop.transition.args must be a string when provided');
   }
+  // The store guard (isLoopDefinition) DROPS the whole entry at next boot for
+  // a non-integer/≤0 maxRounds, and the old coercion here persisted exactly
+  // that (2.5, "5") while silently vanishing 0/negatives. Save/load symmetry:
+  // validate with the store's own rule at the edge — absent stays allowed,
+  // present must be a positive integer.
+  if (body.maxRounds !== undefined && !(Number.isInteger(body.maxRounds) && body.maxRounds > 0)) {
+    return badRequest(res, 'maxRounds must be a positive integer');
+  }
+  if (body.maxTimeMs !== undefined && !(Number.isInteger(body.maxTimeMs) && body.maxTimeMs > 0)) {
+    return badRequest(res, 'maxTimeMs must be a positive integer');
+  }
   const cwd = ctx.workspaces.resolveCwd(body.cwd);
   if ('error' in cwd) return badRequest(res, cwd.error);
   const definition: LoopDefinition = {
@@ -345,15 +381,26 @@ export async function saveLoop(
       // same meaning as absent (static skill prompt) — normalise it away.
       args: rawArgs === '' ? undefined : rawArgs,
     },
-    maxRounds: body.maxRounds && body.maxRounds > 0 ? body.maxRounds : undefined,
-    maxTimeMs: body.maxTimeMs && body.maxTimeMs > 0 ? body.maxTimeMs : undefined,
+    // Already validated above: undefined stays undefined (no cap), a present
+    // value is guaranteed a positive integer — what the store guard demands.
+    maxRounds: body.maxRounds,
+    maxTimeMs: body.maxTimeMs,
     // Persist the VALIDATED path (undefined body.cwd resolves to the first
     // workspace root). Falling back to process.cwd() here would store the
     // backend's own directory (/app in Docker) instead of a real workspace.
     cwd: cwd.path,
     model: body.model,
   };
-  const saved = ctx.loops.save(definition);
+  let saved: LoopDefinition;
+  try {
+    saved = ctx.loops.save(definition);
+  } catch (err) {
+    if (err instanceof LoopLimitError) {
+      // 409: LoopManager threw BEFORE insert/persist — store untouched.
+      return jsonResponse(res, 409, { error: err.message });
+    }
+    throw err; // genuine faults → the server's logged fixed-500 policy
+  }
   jsonResponse(res, 201, { loop: saved });
 }
 
@@ -416,10 +463,16 @@ export async function advanceLoop(
   ctx: EngineRouteContext,
 ): Promise<void> {
   const id = params.id as string;
-  const body = await jsonBody<{ action?: 'continue' | 'stop' }>(req, res, 'action');
+  const body = await jsonBody<{ action?: unknown }>(req, res, 'action');
   if (!body) return;
-  const action = body.action === 'stop' ? 'stop' : 'continue';
-  const progress = ctx.loops.advance(id, action);
+  // The gate is the human decision point — every other enum in this file is
+  // 400-validated, and the old coercion made ANY garbage ('delet-everything',
+  // 'Continue', null) mean CONTINUE, the costly direction. Strict set check:
+  // only the two actions the runner actually implements.
+  if (body.action !== 'continue' && body.action !== 'stop') {
+    return badRequest(res, 'unknown action');
+  }
+  const progress = ctx.loops.advance(id, body.action);
   if (!progress) return notFound(res, 'Loop not found');
   jsonResponse(res, 200, { progress });
 }

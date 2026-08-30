@@ -287,6 +287,28 @@ export class ModelsYamlStore {
   get filePath(): string {
     return this.path;
   }
+  /** Promise-chain mutex serializing whole read-modify-write CYCLES
+   *  (load → merge → save) issued against this store instance. save() is
+   *  atomic per file, but a cycle spanning awaits is not: two concurrent
+   *  CRUD callers would both load the same base config and the later save
+   *  would silently drop the earlier writer's change (lost update).
+   *  Callers hold the lock across the ENTIRE cycle via withLock(). */
+  private writeChain: Promise<unknown> = Promise.resolve();
+
+  /** Run fn with exclusive access to this store's read-modify-write cycle.
+   *  Cycles run strictly in call order; a rejected cycle is returned to its
+   *  caller verbatim but never poisons the chain (the next caller still
+   *  runs). NEVER call withLock while already holding the lock. */
+  withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.writeChain.then(fn, fn);
+    // Swallow this cycle's outcome for the chain link only — rejections
+    // reach the caller through `run`, never as unhandled rejections here.
+    this.writeChain = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
+  }
 
   /** Parse the file. Missing file → {} (a fresh models.yml is legitimately
    *  absent until first write). Errors return fixed-text rejections — no

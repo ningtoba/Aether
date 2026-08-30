@@ -227,6 +227,13 @@ export class LoopRunner {
         errored: false,
       };
     } catch (err) {
+      // EXACT mirror of the success path's guard above: a rejection racing a
+      // manual stop (LoopManager.stop disposes the session under the in-flight
+      // prompt, so the prompt then throws 'Session is not attached') or a
+      // generation advance is the expected unwind of a stopped loop — NOT a
+      // round result. Pre-fix this recorded a spurious errored round and
+      // emitted round_end after the stop.
+      if (this.state.stopped || gen !== this.generation) return null;
       this.emit({
         kind: 'loop:round_error',
         loopId: this.id,
@@ -379,6 +386,12 @@ export class LoopRunner {
   private finish(reason: string): void {
     if (this.finished) return; // exactly one terminal transition per run
     this.finished = true;
+    // Terminal ALSO means stopped for stop()'s latch: without this, a manual
+    // stop() landing on an ALREADY-FINISHED run sails past stop()'s own
+    // `stopped` check and overwrites the recorded reason — the GUI then reads
+    // 'manual stop' for a loop that completed by cap. (start() re-arms
+    // stopped=false per run, so restart semantics are unchanged.)
+    this.state.stopped = true;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;

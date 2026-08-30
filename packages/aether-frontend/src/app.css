@@ -508,7 +508,7 @@ svg {
   align-items: center;
   justify-content: center;
   gap: var(--s-2);
-  height: 30px;
+  height: 32px;
   padding: 0 var(--s-3);
   border: 1px solid var(--hairline);
   border-radius: var(--r-sm);
@@ -569,7 +569,7 @@ svg {
   font-size: var(--fs-xs);
 }
 .btn.icon {
-  width: 30px;
+  width: 32px;
   padding: 0;
 }
 .btn.sm.icon {
@@ -607,6 +607,15 @@ svg {
     border-color var(--t-fast) var(--ease),
     box-shadow var(--t-fast) var(--ease);
 }
+/* 32px control baseline (matches .nav-item): fixed height, text vertically
+ * centered by the native single-line box; .textarea keeps the padded metric
+ * above plus its own min-height rules (app.css/chat.css). */
+.input,
+.select {
+  height: 32px;
+  padding: 0 var(--s-3);
+}
+
 .input::placeholder,
 .textarea::placeholder {
   color: var(--text-faint);

@@ -443,7 +443,7 @@ export function LoopsPage({
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
                       fontWeight: 600,
-                      fontSize: 12.5,
+                      fontSize: 'var(--fs-sm)',
                     }}
                   >
                     {loop.name}

@@ -148,7 +148,7 @@ export function ModelsPage() {
                     <StatusPill tone="idle">not configured</StatusPill>
                   </span>
                 )}
-                <StatusPill tone="idle">{group.models.length} models</StatusPill>
+                <span className="mono muted">{group.models.length} models</span>
               </>
             }
           >
