@@ -8,9 +8,12 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { RouteParams } from '../router.js';
 import { jsonResponse, parseBody, badRequest, serverError } from '../utils.js';
 import { OmpFacade } from '../engine/index.js';
+import type { WorkspacesService } from '../engine/index.js';
 
 export interface FacadeRouteContext {
   facade: OmpFacade;
+  /** Workspace roots used to validate an optional ?cwd= scope. */
+  workspaces?: WorkspacesService;
 }
 
 /** Parse a JSON body guarding against non-object/array/empty payloads. */
@@ -139,12 +142,23 @@ export async function listFacadeSkills(
 /* ─── On-disk sessions (omp's persisted sessions) ────────────────────── */
 
 export async function listDiskSessions(
-  _req: IncomingMessage,
+  req: IncomingMessage,
   res: ServerResponse,
   _p: RouteParams,
   ctx: FacadeRouteContext,
 ): Promise<void> {
-  const r = await ctx.facade.listDiskSessions();
+  // Optional ?cwd= scopes the listing to a workspace the GUI picked; the path
+  // goes through the same validation as session/loop creation (roots only).
+  const url = new URL(req.url ?? '', 'http://localhost');
+  const raw = url.searchParams.get('cwd');
+  let cwd: string | undefined;
+  if (raw) {
+    if (!ctx.workspaces) return badRequest(res, 'cwd scoping not available');
+    const resolved = ctx.workspaces.resolveCwd(raw);
+    if ('error' in resolved) return badRequest(res, resolved.error);
+    cwd = resolved.path;
+  }
+  const r = await ctx.facade.listDiskSessions(cwd);
   if (!r.ok) return jsonResponse(res, 501, { error: r.error ?? 'sessions unavailable' });
   jsonResponse(res, 200, { sessions: r.sessions });
 }

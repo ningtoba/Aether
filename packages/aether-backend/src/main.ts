@@ -12,7 +12,13 @@
  * the browser — Bun's node:http layer cannot host WebSockets itself.
  */
 import { AetherServer } from './server.js';
-import { EngineService, LoopManager, OmpFacade, SkillsService } from './engine/index.js';
+import {
+  EngineService,
+  LoopManager,
+  OmpFacade,
+  SkillsService,
+  WorkspacesService,
+} from './engine/index.js';
 import { BunRealtimeHub } from './realtime/bun-realtime.js';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -39,12 +45,20 @@ const API_KEY = process.env.AETHER_API_KEY;
 // ── Engine wiring (Bun runtime only) ────────────────────────────────────
 const engine = new EngineService();
 const skills = new SkillsService({ projectRoot: process.cwd() });
+// Single source of truth for workspace roots (AETHER_WORKSPACES, default
+// home). Shared by the browse/validate routes and the loop start fallback.
+const workspaces = new WorkspacesService(process.env.AETHER_WORKSPACES);
 // Loop definitions persist across restarts. Prefer the omp agent data dir
 // (~/.omp/agent/aether), which persists in Docker via the ~/.omp mount and
 // locally without creating stray root dirs. LOOP_STORE_DIR overrides it.
 const DEFAULT_LOOP_STORE = join(homedir(), '.omp', 'agent', 'aether', 'loops');
 const LOOP_STORE_DIR = process.env.LOOP_STORE_DIR ?? DEFAULT_LOOP_STORE;
-const loops = new LoopManager(engine, skills, { storeDir: LOOP_STORE_DIR });
+// Loops saved without a cwd (older GUI builds) start in the first workspace
+// root, never the backend's own process dir (/app under Docker).
+const loops = new LoopManager(engine, skills, {
+  storeDir: LOOP_STORE_DIR,
+  defaultCwd: workspaces.listRoots()[0]?.path,
+});
 const facade = new OmpFacade();
 
 let realtime: BunRealtimeHub | null = null;
@@ -79,9 +93,9 @@ const server = new AetherServer({
   // and authorizes via RBAC (admin role). Leave unset for open local dev.
   ...(API_KEY ? { auth: { apiKey: API_KEY } } : {}),
   engine: { engine, loops, skills, facade },
+  workspaces,
 });
 
-// Wire the Bun WebSocket hub as the realtime engine-event target.
 if (realtime) {
   server.broadcastRealtime = (type, payload) => realtime.broadcast(type, payload);
   server.healthExtras = {

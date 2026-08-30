@@ -15,6 +15,10 @@ import { join } from 'node:path';
 export interface LoopManagerOptions {
   /** Directory for persistent loop definitions (JSON). Omit for in-memory only. */
   storeDir?: string;
+  /** Fallback cwd for loop definitions saved without one (legacy entries or
+   *  direct-store edits). main.ts passes the first workspace root, so loops
+   *  start in a real workspace instead of the backend's process cwd (/app). */
+  defaultCwd?: string;
 }
 
 export class LoopManager {
@@ -23,10 +27,12 @@ export class LoopManager {
   private engine: EngineService;
   private skills: SkillsService;
   private storeFile: string | null = null;
+  private defaultCwd: string | null;
 
   constructor(engine: EngineService, skills: SkillsService, opts: LoopManagerOptions = {}) {
     this.engine = engine;
     this.skills = skills;
+    this.defaultCwd = opts.defaultCwd ?? null;
     if (opts.storeDir) {
       try {
         mkdirSync(opts.storeDir, { recursive: true });
@@ -109,7 +115,9 @@ export class LoopManager {
     }
 
     const session = await this.engine.createSession({
-      cwd: definition.cwd || process.cwd(),
+      // Legacy/blank definitions must not inherit the backend's process cwd
+      // (/app under Docker) — prefer the configured workspace default.
+      cwd: definition.cwd || this.defaultCwd || process.cwd(),
       model: definition.model,
     });
 

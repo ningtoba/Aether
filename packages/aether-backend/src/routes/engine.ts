@@ -242,7 +242,10 @@ export async function saveLoop(
     },
     maxRounds: body.maxRounds && body.maxRounds > 0 ? body.maxRounds : undefined,
     maxTimeMs: body.maxTimeMs && body.maxTimeMs > 0 ? body.maxTimeMs : undefined,
-    cwd: body.cwd || process.cwd(),
+    // Persist the VALIDATED path (undefined body.cwd resolves to the first
+    // workspace root). Falling back to process.cwd() here would store the
+    // backend's own directory (/app in Docker) instead of a real workspace.
+    cwd: cwd.path,
     model: body.model,
   };
   const saved = ctx.loops.save(definition);

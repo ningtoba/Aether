@@ -297,7 +297,7 @@ export class AetherServer {
 
     // Omp facade control-plane (engine-wired: status, settings, providers,
     // agents, skills, persisted sessions — else 501 like the rest).
-    const fakerCtx = ctx ? { facade: ctx.facade } : null;
+    const fakerCtx = ctx ? { facade: ctx.facade, workspaces: this.workspaces } : null;
     const bindF =
       <P extends RouteParams>(
         fn: (

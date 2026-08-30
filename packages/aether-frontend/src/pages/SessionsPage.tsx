@@ -45,12 +45,14 @@ export function SessionsPage() {
     listSessions()
       .then((r) => setSessions(r.sessions))
       .catch((e) => setError(e.message));
-    listDiskSessions()
+    // Scope persisted-session browsing to the picked working directory so the
+    // list matches the directory new sessions will run in.
+    listDiskSessions(cwd)
       .then((r) => setDiskSessions(r.sessions))
       .catch(() => {
         /* disk-session browsing is optional (non-Bun mode) */
       });
-  }, []);
+  }, [cwd]);
   // Load the active session's stats + model for the status line.
   const loadActive = useCallback((id: string) => {
     getSession(id)

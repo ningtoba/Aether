@@ -361,7 +361,10 @@ export interface DiskSessionInfo {
   firstUserMessage?: string;
 }
 
-export const listDiskSessions = () => request<{ sessions: DiskSessionInfo[] }>('/api/omp/sessions');
+export const listDiskSessions = (cwd?: string) =>
+  request<{ sessions: DiskSessionInfo[] }>(
+    `/api/omp/sessions${cwd ? `?cwd=${encodeURIComponent(cwd)}` : ''}`,
+  );
 export const readDiskSession = (path: string) =>
   request<{
     transcript: {

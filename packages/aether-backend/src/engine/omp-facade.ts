@@ -24,7 +24,7 @@
  * Bun; under Node every method resolves to `unavailable`.
  */
 import * as fs from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { join, dirname, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 
@@ -618,8 +618,12 @@ export class OmpFacade {
 
   /* ─── On-disk sessions (omp's real persisted sessions) ──────────────── */
 
-  /** List persisted omp sessions for the default agent dir and project. */
-  async listDiskSessions(): Promise<{ ok: boolean; sessions?: SessionInfoDto[]; error?: string }> {
+  /** List persisted omp sessions for `cwd`'s project dir (default: process
+   *  cwd). The GUI passes the chosen workspace so its session list matches
+   *  the directory the sessions actually run in. */
+  async listDiskSessions(
+    cwd?: string,
+  ): Promise<{ ok: boolean; sessions?: SessionInfoDto[]; error?: string }> {
     if (!(await this.ensure())) return { ok: false, error: 'engine unavailable' };
     try {
       let rows: unknown[] | undefined;
@@ -628,21 +632,31 @@ export class OmpFacade {
       } else if (typeof this.sdk?.listSessionsReadOnly === 'function') {
         rows = (await this.sdk.listSessionsReadOnly()) as unknown[] | undefined;
       } else if (this.sdk?.SessionManager) {
-        rows = await this.#listViaSessionManager(this.sdk.SessionManager);
+        rows = await this.#listViaSessionManager(this.sdk.SessionManager, cwd);
       }
       if (!rows) return { ok: false, error: 'session listing unavailable' };
-      return { ok: true, sessions: rows.map((r) => this.#mapSessionInfo(r)) };
+      const sessions = rows.map((r) => this.#mapSessionInfo(r));
+      // The all-sessions paths are global; scope them to the chosen workspace
+      // like the SessionManager project-dir fallback does. Rows whose cwd is
+      // unknown (unexpected omp shape) stay visible — never hide on parse drift.
+      const scoped = cwd
+        ? sessions.filter((s) => !s.cwd || s.cwd === cwd || s.cwd.startsWith(cwd + sep))
+        : sessions;
+      return { ok: true, sessions: scoped };
     } catch (err) {
       return { ok: false, error: `sessions: ${msg(err)}` };
     }
   }
 
-  async #listViaSessionManager(manager: OmpSessionManager): Promise<unknown[] | undefined> {
+  async #listViaSessionManager(
+    manager: OmpSessionManager,
+    cwd?: string,
+  ): Promise<unknown[] | undefined> {
     if (typeof manager.listAllSessions === 'function') {
       return (await manager.listAllSessions()) as unknown[] | undefined;
     }
     if (typeof manager.list === 'function' && typeof manager.getDefaultSessionDir === 'function') {
-      const dir = manager.getDefaultSessionDir(process.cwd());
+      const dir = manager.getDefaultSessionDir(cwd ?? process.cwd());
       return (await manager.list(dir)) as unknown[] | undefined;
     }
     return undefined;
