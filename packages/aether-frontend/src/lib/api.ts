@@ -292,19 +292,6 @@ export interface SkillRecord {
 
 export const listSkills = () => request<{ skills: SkillRecord[] }>('/api/skills');
 
-/* ── Legacy control-plane (agents) ──────────────────────────────────── */
-
-export interface AgentRecord {
-  id: string;
-  name: string;
-  config: Record<string, unknown>;
-  status: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export const listAgents = () => request<{ agents: AgentRecord[] }>('/api/agents');
-
 /* ── Omp facade (settings / providers / agents / skills / disk sessions) ── */
 
 export interface FacadeCapability {

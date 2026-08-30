@@ -47,6 +47,17 @@ const STATUS_TONE: Record<string, StatusTone> = {
   closed: 'idle',
 };
 
+// omp persists sessions under uuid names and long host paths: never let a
+// tail-ellipsis eat the identifying part — show an explicit prefix/basename
+// with the full value in the title instead.
+function isUuidish(v: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(v);
+}
+function pathParts(p: string): [dirname: string, basename: string] {
+  const i = p.lastIndexOf('/');
+  return i >= 0 ? [p.slice(0, i + 1), p.slice(i + 1)] : ['', p];
+}
+
 export function SessionsPage({ initialSessionId }: { initialSessionId?: string }) {
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [diskSessions, setDiskSessions] = useState<DiskSessionInfo[]>([]);
@@ -192,11 +203,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
     const modelId = model.slice(slash + 1);
     setCreating(true);
     try {
-      const { session, warning } = await createSession(
-        { provider, modelId },
-        info.cwd,
-        info.path,
-      );
+      const { session, warning } = await createSession({ provider, modelId }, info.cwd, info.path);
       setCurrent(session.id);
       loadActive(session.id);
       setViewingDisk(null);
@@ -296,10 +303,15 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
   }, [diskSessions, query]);
 
   const modelFull = activeModel || model;
-  const modelShort = modelFull.length > 26 ? `…${modelFull.slice(-26)}` : modelFull;
+  // basename after the final '/': the model id is the identifying part.
+  // The provider stays reachable via the pill's title (full model id).
+  const modelShort = modelFull.slice(modelFull.lastIndexOf('/') + 1);
 
   return (
-    <div className="fill chat-page" style={{ display: 'flex', flexDirection: 'row', gap: 'var(--s-4)' }}>
+    <div
+      className="fill chat-page"
+      style={{ display: 'flex', flexDirection: 'row', gap: 'var(--s-4)' }}
+    >
       <div style={{ flexBasis: 300, flexShrink: 0, width: 300 }} className="panel">
         <div className="chat-header">
           <span style={{ fontWeight: 600 }}>Sessions</span>
@@ -358,6 +370,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
                 >
                   <span
                     className="mono"
+                    title={s.id}
                     style={{
                       flex: 1,
                       minWidth: 0,
@@ -367,7 +380,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
                       fontSize: 12,
                     }}
                   >
-                    {s.id.slice(0, 8)}
+                    {s.id.slice(0, 12)}
                   </span>
                   <span className="muted" style={{ fontSize: 11 }}>
                     {fmtRelative(s.createdAt)}
@@ -403,7 +416,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
               color: 'var(--text-faint)',
             }}
           >
-            Persisted (omp on disk)
+            Persisted (omp on disk · {diskSessions.length})
           </div>
           <span className="search" style={{ marginBottom: 'var(--s-2)' }}>
             <span className="search-icon">
@@ -418,62 +431,86 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
             />
           </span>
           <div className="stack">
-            {filteredDisk.map((s) => (
-              <div key={s.path} className="row" style={{ gap: 'var(--s-2)' }}>
-                <button
-                  className="selectable-row"
-                  style={{
-                    flex: 1,
-                    minWidth: 0,
-                    flexDirection: 'column',
-                    alignItems: 'flex-start',
-                    gap: 2,
-                  }}
-                  aria-pressed={viewingDisk === s.path}
-                  onClick={() => openDiskSession(s)}
-                  title={s.path}
-                >
-                  <span
+            {filteredDisk.map((s) => {
+              const label = s.displayName || s.name || s.id;
+              const [cwdDir, cwdBase] = pathParts(s.cwd);
+              return (
+                <div key={s.path} className="row" style={{ gap: 'var(--s-2)' }}>
+                  <button
+                    className="selectable-row"
                     style={{
-                      maxWidth: '100%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontWeight: 600,
-                      fontSize: 12.5,
+                      flex: 1,
+                      minWidth: 0,
+                      flexDirection: 'column',
+                      alignItems: 'flex-start',
+                      gap: 2,
                     }}
+                    aria-pressed={viewingDisk === s.path}
+                    onClick={() => openDiskSession(s)}
+                    title={s.path}
                   >
-                    {s.displayName || s.name || s.id}
-                  </span>
-                  <span
-                    className="muted mono"
-                    style={{
-                      maxWidth: '100%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      fontSize: 11,
-                    }}
+                    <span
+                      style={{
+                        maxWidth: '100%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        fontWeight: 600,
+                        fontSize: 12.5,
+                      }}
+                      title={isUuidish(label) ? label : undefined}
+                    >
+                      {isUuidish(label) ? `${label.slice(0, 12)}…` : label}
+                    </span>
+                    <span
+                      className="mono"
+                      title={s.cwd}
+                      style={{
+                        maxWidth: '100%',
+                        minWidth: 0,
+                        display: 'flex',
+                        alignItems: 'baseline',
+                        fontSize: 11,
+                      }}
+                    >
+                      {/* dim dirname shrinks first; bright basename always survives */}
+                      <span
+                        style={{
+                          color: 'var(--text-faint)',
+                          minWidth: 0,
+                          flexShrink: 1,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {cwdDir}
+                      </span>
+                      <span style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>{cwdBase}</span>
+                      {s.modified ? (
+                        <span className="muted" style={{ flexShrink: 0, whiteSpace: 'nowrap' }}>
+                          {' · '}
+                          {fmtRelative(s.modified)}
+                        </span>
+                      ) : null}
+                    </span>
+                  </button>
+                  <button
+                    className="btn sm"
+                    onClick={() => void resumeDiskSession(s)}
+                    disabled={creating || !model}
+                    title={
+                      model
+                        ? `Resume as a new live session (${model})`
+                        : 'Select a model first — resume needs one'
+                    }
+                    aria-label={`Resume persisted session ${s.displayName || s.name || s.id}`}
                   >
-                    {s.cwd}
-                    {s.modified ? ` · ${fmtRelative(s.modified)}` : ''}
-                  </span>
-                </button>
-                <button
-                  className="btn sm"
-                  onClick={() => void resumeDiskSession(s)}
-                  disabled={creating || !model}
-                  title={
-                    model
-                      ? `Resume as a new live session (${model})`
-                      : 'Select a model first — resume needs one'
-                  }
-                  aria-label={`Resume persisted session ${s.displayName || s.name || s.id}`}
-                >
-                  <Icon name="play" size={13} /> Resume
-                </button>
-              </div>
-            ))}
+                    <Icon name="play" size={13} /> Resume
+                  </button>
+                </div>
+              );
+            })}
             {filteredDisk.length === 0 &&
               (diskSessions.length === 0 ? (
                 <EmptyState
@@ -505,7 +542,9 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
           model={activeModel}
           sendDisabled={!current}
           sendDisabledReason={
-            viewingDisk ? 'Viewing a persisted transcript — open a live session to prompt' : 'No active session'
+            viewingDisk
+              ? 'Viewing a persisted transcript — open a live session to prompt'
+              : 'No active session'
           }
           emptyState={
             <EmptyState
@@ -531,7 +570,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
                 }}
                 title={current ?? viewingDisk ?? undefined}
               >
-                {current ?? viewingDisk ?? 'No active session'}
+                {current ? current.slice(0, 12) : viewingDisk ? pathParts(viewingDisk)[1] : '—'}
               </span>
               {current && <CopyButton text={current} title="Copy session id" />}
               {!viewingDisk && (
@@ -546,7 +585,11 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
               </StatusPill>
               {current && (
                 <>
-                  <button className="btn sm" onClick={doCompact} title="Compact the session context">
+                  <button
+                    className="btn sm"
+                    onClick={doCompact}
+                    title="Compact the session context"
+                  >
                     Compact
                   </button>
                   <ConfirmButton onConfirm={close} title="Dispose this session">

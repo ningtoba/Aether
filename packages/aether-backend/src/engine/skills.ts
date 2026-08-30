@@ -70,11 +70,6 @@ export class SkillsService {
     this.ttlMs = opts.ttlMs ?? DEFAULT_SKILLS_TTL_MS;
   }
 
-  /** Drop the memo so the next list() rescans the filesystem. */
-  invalidate(): void {
-    this.cache = null;
-  }
-
   /** List every discovered skill, deduped by name (first root wins).
    *  Serves the memo while fresh (ttlMs); a miss rescans synchronously. */
   list(): SkillRecord[] {

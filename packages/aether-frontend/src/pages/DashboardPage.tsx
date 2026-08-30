@@ -152,6 +152,10 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
   const { health, facade, errors, loading } = agg;
   const engineLive = health?.engine?.available;
   const ompReady = facade?.available === true;
+  /* Capability split: exported SDK features stay visible; the "not exported"
+   * set is internal debug noise and gets collapsed behind a disclosure. */
+  const exportedCaps = (facade?.capabilities ?? []).filter((c) => c.available);
+  const internalCaps = (facade?.capabilities ?? []).filter((c) => !c.available);
   const iconBtn: React.CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
@@ -169,8 +173,6 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
               : engineLive
                 ? 'engine live'
                 : 'engine down'}
-            {' · omp '}
-            {facade?.version ?? 'unknown'}
             {health?.realtime?.port ? ` · realtime :${health.realtime.port}` : ''}
           </>
         }
@@ -186,8 +188,7 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
         <ErrorState
           message={
             <>
-              Some data unreachable — {errors.join(' · ')}. Everything that did load is shown
-              below.
+              Some data unreachable — {errors.join(' · ')}. Everything that did load is shown below.
             </>
           }
           onRetry={() => setReloadKey((k) => k + 1)}
@@ -206,16 +207,17 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
               label="Sessions"
               icon="sessions"
               tone="info"
-              /* The persisted count is the informative total; live count moves
-               * to the hint. While disk data is absent (null) the live number
-               * stands alone — never a fabricated total. */
-              value={loading.sessions ? <Skeleton rows={1} /> : (agg.diskSessions ?? agg.sessions)}
+              /* Headline is the live engine-session count; the hint states the whole
+               * pair in the same wording as the Sessions view header, so headline and
+               * caption can never contradict each other. Disk data that has not
+               * resolved is omitted — never a fabricated total. */
+              value={loading.sessions ? <Skeleton rows={1} /> : agg.sessions}
               hint={
                 loading.sessions
                   ? 'loading…'
                   : agg.diskSessions === null
-                    ? 'live sessions'
-                    : `live right now: ${agg.sessions} live`
+                    ? `${agg.sessions} live`
+                    : `${agg.sessions} live · ${agg.diskSessions} on disk`
               }
             />
           </button>
@@ -283,21 +285,29 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
                     runtime {facade?.runtime}
                   </span>
                 </div>
-                {facade?.capabilities && facade.capabilities.length > 0 && (
-                  <div className="row" style={{ flexWrap: 'wrap' }}>
-                    {facade.capabilities.map((c) => (
-                      <span
-                        key={c.name}
-                        title={
-                          c.available ? undefined : (c.error ?? 'not exported by this SDK build')
-                        }
-                      >
-                        {/* Absent SDK exports are optional — always an idle grey pill, never error. */}
-                        <StatusPill tone={c.available ? 'ok' : 'idle'} dot>
-                          {c.available ? c.name : `${c.name} · not exported`}
-                        </StatusPill>
-                      </span>
+                {exportedCaps.length + internalCaps.length > 0 && (
+                  <div className="row" style={{ flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    {exportedCaps.map((c) => (
+                      <StatusPill key={c.name} tone="ok" dot>
+                        {c.name}
+                      </StatusPill>
                     ))}
+                    {internalCaps.length > 0 && (
+                      <details>
+                        <summary
+                          style={{ display: 'inline-flex', cursor: 'pointer', listStyle: 'none' }}
+                        >
+                          <StatusPill tone="idle">+ {internalCaps.length} internal</StatusPill>
+                        </summary>
+                        <div className="row" style={{ flexWrap: 'wrap', marginTop: 'var(--s-2)' }}>
+                          {internalCaps.map((c) => (
+                            <span key={c.name} title={c.error ?? 'not exported by this SDK build'}>
+                              <StatusPill tone="idle">{c.name}</StatusPill>
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    )}
                   </div>
                 )}
               </div>

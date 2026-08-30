@@ -85,7 +85,7 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 
 ## Testing & verification
 
-- **562 vitest tests** (`npm test`) across the three packages — run under Node, never importing the Bun-only omp SDK.
+- Full vitest suite (`npm test`) across the three packages — run under Node, never importing the Bun-only omp SDK.
 - `npm run build` = `tsc -b --force` (whole monorepo); `npm run lint` and `npm run format:check` gate CI.
 - CI: lint/format/madge, type-check, tests, then a Docker image build (`package.yml`).
 
@@ -97,6 +97,4 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 
 ## Roadmap
 
-- Persist engine session transcripts into omp's real session store (loop definitions already persist across restarts).
-- GUI-driven provider CRUD into the engine registry.
 - API-key/role provisioning UX (roles are already honored end-to-end across REST and the realtime ticket flow; keys are provisioned via env today).

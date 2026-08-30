@@ -267,8 +267,8 @@ export function ProvidersPage() {
       {status && !engineAvailable && (
         <Card>
           <span className="muted">
-            The omp engine is unavailable (it needs the Bun runtime), so keys, custom providers
-            and verification are disabled; the catalog below may be stale.
+            The omp engine is unavailable (it needs the Bun runtime), so keys, custom providers and
+            verification are disabled; the catalog below may be stale.
             {status.error ? ` (${status.error})` : ''}
           </span>
         </Card>
@@ -278,13 +278,15 @@ export function ProvidersPage() {
         <Card title="Add custom provider">
           {!engineAvailable && (
             <div className="muted" style={{ fontSize: 12, marginBottom: 10 }}>
-              Disabled until the engine is back — providers are written to
-              ~/.omp/agent/models.yml.
+              Disabled until the engine is back — providers are written to ~/.omp/agent/models.yml.
             </div>
           )}
           <div className="field">
             <label htmlFor="pv-name">
-              Name <span className="req" aria-hidden="true">*</span>{' '}
+              Name{' '}
+              <span className="req" aria-hidden="true">
+                *
+              </span>{' '}
               <span className="key">name</span>
             </label>
             <input
@@ -328,7 +330,10 @@ export function ProvidersPage() {
           </div>
           <div className="field">
             <label htmlFor="pv-url">
-              Base URL <span className="req" aria-hidden="true">*</span>{' '}
+              Base URL{' '}
+              <span className="req" aria-hidden="true">
+                *
+              </span>{' '}
               <span className="key">baseUrl</span>
             </label>
             <input
@@ -511,7 +516,9 @@ export function ProvidersPage() {
             {!catalogLoading && filtered.length === 0 && (
               <EmptyState
                 icon="providers"
-                title={providers.length === 0 ? 'No providers in the catalog' : 'No providers match'}
+                title={
+                  providers.length === 0 ? 'No providers in the catalog' : 'No providers match'
+                }
                 message={
                   providers.length === 0
                     ? 'The catalog comes from the omp model registry (~/.omp/agent/models.yml + installed providers).'
@@ -611,7 +618,9 @@ export function ProvidersPage() {
                                   <StatusPill tone="info">discoverable</StatusPill>
                                 </span>
                               ) : (
-                                <span className="muted">—</span>
+                                <span className="muted" title="not probed">
+                                  —
+                                </span>
                               )}
                             </td>
                             <td>

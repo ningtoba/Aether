@@ -10,7 +10,6 @@ import { Router, type RouteParams } from './router.js';
 import { WebSocketManager } from './websocket.js';
 import { badRequest, jsonResponse, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
 import { getHealthStatus } from './routes/health.js';
-import * as agentRoutes from './routes/agents.js';
 import { RBACGuard, type RoleId } from '@aether/core';
 import * as workspaceRoutes from './routes/workspaces.js';
 import { WorkspacesService } from './engine/index.js';
@@ -260,9 +259,9 @@ export class AetherServer {
    *  `system:*`/`agents:*` read) cannot browse directories or slurp raw
    *  session transcripts. */
   private routePermission(method: string, pathname: string): { resource: string; action: string } {
-    if (pathname.startsWith('/api/agents')) {
-      return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'write' };
-    }
+    // The simulated /api/agents in-memory CRUD is GONE (clean cutover) — its
+    // agents:* branch went with the routes. agents:* is still mapped BELOW for
+    // the real planes that use it (/api/sessions, /api/loops, /api/omp/agents).
     // Provider control plane (omp): catalog reads, key/config mutations —
     // same providers:config mapping the legacy /api/providers CRUD used.
     if (pathname.startsWith('/api/omp/providers')) {
@@ -342,12 +341,10 @@ export class AetherServer {
       });
     });
 
-    // Agents
-    this.router.get('/api/agents', agentRoutes.listAgents);
-    this.router.post('/api/agents', agentRoutes.createAgent);
-    this.router.get('/api/agents/:id', agentRoutes.getAgent);
-    this.router.put('/api/agents/:id', agentRoutes.updateAgent);
-    this.router.delete('/api/agents/:id', agentRoutes.deleteAgent);
+    // Agents: the simulated /api/agents in-memory CRUD is GONE (clean
+    // cutover). The real agent plane lives at /api/omp/agents below, backed by
+    // the engine's live omp agent catalog. Unregistered paths answer the
+    // router's uniform 404 — no shim handlers by design (mirrors providers).
 
     // Providers: the simulated /api/providers in-memory CRUD is GONE (clean
     // cutover). The provider control plane lives under /api/omp/providers*
@@ -541,7 +538,7 @@ export class AetherServer {
     try {
       route = this.router.match(method, url);
     } catch {
-      // Malformed percent-encoding in a path param (e.g. '/api/agents/%zz')
+      // Malformed percent-encoding in a path param (e.g. '/api/sessions/%zz')
       // makes decodeURIComponent throw; surface it as a 400, never a 500/hang.
       return badRequest(res, 'Malformed URL');
     }

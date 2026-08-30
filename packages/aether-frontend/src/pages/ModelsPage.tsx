@@ -82,7 +82,7 @@ export function ModelsPage() {
               </span>
               <input
                 className="input"
-                placeholder="Search model id, name or URL…"
+                placeholder="Search models…"
                 aria-label="Search models"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
@@ -157,8 +157,8 @@ export function ModelsPage() {
                 <thead>
                   <tr>
                     <th>Model</th>
-                    <th>Context window</th>
-                    <th>Max tokens</th>
+                    <th className="num">Context window</th>
+                    <th className="num">Max tokens</th>
                     <th>Base URL</th>
                   </tr>
                 </thead>

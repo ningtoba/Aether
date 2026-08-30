@@ -111,6 +111,45 @@ export function authorizeRealtimeUpgrade(
   return 'allow';
 }
 
+/**
+ * Per-client outbound bound (bytes) for `broadcast()`. Parity with the legacy
+ * manager's `MAX_WS_OUTBOUND_BACKLOG` (websocket.ts, 1 MB): that implementation
+ * counted bytes stuck in a socket's write queue and `destroy()`ed the
+ * connection past the cap so a peer that stops reading cannot make the server
+ * buffer frames without limit. Bun queues per-socket instead, so the same cap
+ * is measured with `getBufferedAmount()` after each send — without it, one
+ * stalled consumer could grow Bun's per-socket send queue unboundedly.
+ */
+export const MAX_BUFFERED_BYTES = 1_000_000;
+
+/**
+ * The outbound-bound decision as a pure function (test seam — `broadcast()`
+ * delegates here, so the policy is unit-testable under Node without
+ * Bun.serve): true when a client's write queue has grown past the cap and the
+ * connection must be dropped. Mirrors the legacy manager's strict `>`
+ * comparison (`buffered > MAX_WS_OUTBOUND_BACKLOG`, websocket.ts): AT the cap
+ * is still tolerated, only beyond it drops. Non-positive/NaN readings (no
+ * queued bytes, or a runtime without `getBufferedAmount`) never evict.
+ */
+export function overBuffered(bufferedBytes: number, cap: number): boolean {
+  if (!(bufferedBytes > 0)) return false;
+  return bufferedBytes > cap;
+}
+
+/**
+ * Structural view of the socket the backpressure path touches. Both methods
+ * exist on modern Bun's `ServerWebSocket`, but the hub degrades gracefully
+ * (keeps the client, never throws) when an older runtime lacks them — hence
+ * optional-method probing instead of direct calls.
+ */
+interface BackpressureProbe {
+  getBufferedAmount?(): number;
+  terminate?(): void;
+}
+
+/** Socket type stored in `clients`, named once for the teardown helper below. */
+type ClientSocket = ServerWebSocket<Record<string, unknown>>;
+
 export class BunRealtimeHub {
   private server: Server<Record<string, unknown>> | null = null;
   private clients = new Set<ServerWebSocket<Record<string, unknown>>>();
@@ -224,7 +263,15 @@ export class BunRealtimeHub {
     });
   }
 
-  /** Broadcast a frame to every connected client (honoring their filter). */
+  /**
+   * Broadcast a frame to every connected client (honoring their filter).
+   *
+   * Outbound bound (parity with the legacy manager's writeFrame, websocket.ts,
+   * which destroys a socket once > MAX_WS_OUTBOUND_BACKLOG bytes sit in its
+   * write queue): after each send the socket's queued bytes are measured and
+   * the client terminated past MAX_BUFFERED_BYTES — otherwise one stalled
+   * consumer grows Bun's per-socket send queue without bound.
+   */
   broadcast(type: string, payload: unknown): void {
     if (!this.started) return;
     const frame = JSON.stringify({
@@ -236,10 +283,52 @@ export class BunRealtimeHub {
       const filter = client.data?.filter as Set<string> | undefined;
       if (filter && !filter.has(type)) continue;
       try {
-        client.send(frame);
+        const status = client.send(frame);
+        // Pinned bun-types docs (websockets.mdx, "Backpressure"): -1 means
+        // enqueued-but-backpressured (KEEP — exactly the slow reader the byte
+        // bound below exists for), 0 means dropped due to a connection issue,
+        // 1+ bytes written. Only 0 is fatal.
+        if (status === 0) {
+          this.dropClient(client, 'send dropped (connection issue)');
+          continue;
+        }
+        // Byte bound: getBufferedAmount() is the real per-socket queue depth.
+        // A runtime without the method reads 0 → client kept (graceful
+        // degradation; the bound silently offloads to the runtime's own queue).
+        const probe: BackpressureProbe = client;
+        const buffered = probe.getBufferedAmount?.() ?? 0;
+        if (overBuffered(buffered, MAX_BUFFERED_BYTES)) {
+          this.dropClient(client, `outbound backlog ${buffered}B`);
+        }
       } catch {
-        /* drop dead client */
+        // Dead socket: evict now. The old comment claimed "drop dead client"
+        // but only waited for a close event that may never fire, leaving the
+        // hub to re-touch it on every broadcast.
+        this.dropClient(client, 'send threw');
       }
+    }
+  }
+
+  /**
+   * Evict + tear down one client. The log line carries only the socket-level
+   * reason (byte count / status) — never frame contents — so a drop burst
+   * cannot leak live engine payloads into logs. The set removal happens
+   * before the teardown so nothing more is ever queued for this client, even
+   * if the close callback is late.
+   */
+  private dropClient(client: ClientSocket, reason: string): void {
+    this.clients.delete(client);
+    console.warn(`[RealtimeHub] dropped client (${reason})`);
+    const probe: BackpressureProbe = client;
+    try {
+      // terminate() is the abrupt teardown — a close handshake would queue
+      // behind the very window that stalled the peer. Fallbacks: 1011
+      // (server-error close), then nothing if the runtime exposes neither;
+      // the set removal alone already bounds the hub.
+      if (typeof probe.terminate === 'function') probe.terminate();
+      else client.close(1011);
+    } catch {
+      /* socket already fully gone */
     }
   }
 

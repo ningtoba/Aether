@@ -54,5 +54,13 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
   CMD curl --fail --silent http://127.0.0.1:3001/health || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
-# Bun runtime (required by the embedded @oh-my-pi omp SDK).
-CMD ["bun", "run", "packages/aether-backend/src/main.ts"]
+# Run the COMPILED, type-checked artifact: `npm run build` (tsc -b --force) ran
+# in the build stage and CI type-checks the same emit, so what ships is what
+# was verified. Running src/main.ts under Bun made build and runtime silently
+# drift (Bun would happily execute TS that tsc rejected). dist/ is already in
+# the image (COPY -from=build /app/packages copies the built tree) and every
+# module-relative path resolves identically from dist/: static-server.ts's
+# resolveFrontendDist() candidate 1 hits packages/aether-frontend/dist from
+# either src/static/ or dist/static/ (same dir depth), and main.ts reads
+# ../package.json for its version.
+CMD ["bun", "run", "packages/aether-backend/dist/main.js"]

@@ -320,11 +320,6 @@ export class OmpFacade {
     };
   }
 
-  /** True when a specific omp export the GUI needs is present. */
-  hasCapability(name: string): boolean {
-    return this.sdk !== null && this.#has(name);
-  }
-
   /* ─── Settings ──────────────────────────────────────────────────────── */
 
   /** Schema-driven settings surface, normalized from omp's own SETTINGS_SCHEMA. */

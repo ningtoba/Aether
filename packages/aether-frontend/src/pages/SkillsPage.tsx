@@ -303,7 +303,11 @@ export function SkillsPage() {
                         </ConfirmButton>
                       </div>
                       {d.description && (
-                        <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+                        <div
+                          className="muted clamp-2"
+                          style={{ fontSize: 11, marginTop: 4 }}
+                          title={d.description}
+                        >
                           {d.description}
                         </div>
                       )}
@@ -378,18 +382,22 @@ export function SkillsPage() {
                         >
                           <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
                           <span className="list-row-main">
-                            <span className="row" style={{ gap: 'var(--s-2)', flexWrap: 'nowrap' }}>
-                              <span
-                                className="mono"
-                                style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}
-                              >
-                                {s.name}
-                              </span>
+                            <span
+                              className="mono"
+                              style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}
+                            >
+                              {s.name}
+                            </span>
+                            <span style={{ display: 'block', marginTop: 2 }}>
                               <StatusPill tone={sourceTone(s.source)}>
                                 {s.source.replace(':', ' · ')}
                               </StatusPill>
                             </span>
-                            <span className="muted clamp-2" style={{ fontSize: 'var(--fs-xs)' }}>
+                            <span
+                              className="muted clamp-2"
+                              style={{ fontSize: 'var(--fs-xs)' }}
+                              title={s.description}
+                            >
                               {s.description}
                             </span>
                           </span>

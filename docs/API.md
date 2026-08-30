@@ -280,17 +280,22 @@ discoverable runtime servers (ollama / llama.cpp / vLLM) — as engine-derived
 truth from the live `ModelRegistry` + `AuthStorage`:
 
 ```jsonc
-{ "providers": [{
-  "id": "local-server", "name": "local-server",
-  "baseUrl": "http://192.168.1.10:8000/v1", // when the catalog/entry carries one
-  "modelCount": 3,
-  "models": ["…up to 20 sample ids…"],
-  "authenticated": true,       // authStorage.hasAuth — live truth, never guessed
-  "discoverable": false,       // runtime-discovery provider class
-  "custom": true,              // models.yml owns the entry → deletable
-  "authOrigin": "api_key",     // getCredentialOrigin kind (older SDKs: absent)
-  "discoveryStatus": "ok"      // per-provider discovery state (when available)
-}] }
+{
+  "providers": [
+    {
+      "id": "local-server",
+      "name": "local-server",
+      "baseUrl": "http://192.168.1.10:8000/v1", // when the catalog/entry carries one
+      "modelCount": 3,
+      "models": ["…up to 20 sample ids…"],
+      "authenticated": true, // authStorage.hasAuth — live truth, never guessed
+      "discoverable": false, // runtime-discovery provider class
+      "custom": true, // models.yml owns the entry → deletable
+      "authOrigin": "api_key", // getCredentialOrigin kind (older SDKs: absent)
+      "discoveryStatus": "ok", // per-provider discovery state (when available)
+    },
+  ],
+}
 ```
 
 See [Providers](#providers-1) for the mutation verbs and security notes.
@@ -322,10 +327,10 @@ sources), with full bodies — a superset of `GET /api/skills`.
 
 ## Agents
 
-### `GET|POST /api/agents`, `GET|PUT|DELETE /api/agents/:id`
-
-Agent-registry CRUD (records + config). Body for create: `{ "name": "…", "config"?: {…} }`
-(name must be a non-empty string ≤ 200 chars; the in-memory registry is capped at 500 records → 503).
+The legacy simulated `/api/agents` CRUD (in-memory Map, 500-record cap) is
+REMOVED; those paths answer the uniform `404 { "error": "Not found" }`. The
+real agent plane is `GET /api/omp/agents` — the engine's live omp catalog
+(see [Omp facade](#omp-facade-engine-capabilities)).
 
 Wrong-method requests to a registered path answer `405` with an `Allow` header; unknown API paths answer the uniform `404 { "error": "Not found" }`.
 

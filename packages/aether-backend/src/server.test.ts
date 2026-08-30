@@ -4,7 +4,6 @@ import type { EngineWiring } from './server.js';
 import { LoopManager } from './engine/loop-manager.js';
 import { WorkspacesService } from './engine/workspaces.js';
 import type { EngineService, SkillsService, OmpFacade } from './engine/index.js';
-import * as store from './store.js';
 
 describe('AetherServer', () => {
   let server: AetherServer;
@@ -82,7 +81,7 @@ describe('AetherServer', () => {
     it('emits NO Access-Control-Allow-Origin for a foreign Origin preflight by default', async () => {
       await server.start();
       const port = server.getPort()!;
-      const res = await fetch(`http://127.0.0.1:${port}/api/agents`, {
+      const res = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
         method: 'OPTIONS',
         headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'POST' },
       });
@@ -158,13 +157,21 @@ describe('AetherServer', () => {
   });
 
   describe('API routes', () => {
-    it('should register all agent routes', () => {
-      const router = (server as any).router;
-      expect(router.match('GET', '/api/agents')).not.toBeNull();
-      expect(router.match('POST', '/api/agents')).not.toBeNull();
-      expect(router.match('GET', '/api/agents/test-id')).not.toBeNull();
-      expect(router.match('PUT', '/api/agents/test-id')).not.toBeNull();
-      expect(router.match('DELETE', '/api/agents/test-id')).not.toBeNull();
+    it('no longer registers the simulated /api/agents CRUD (clean cutover)', () => {
+      // Internal peek: private router, no runtime accessor (same convention
+      // as the `corsOrigins` peek in the CORS block).
+      const { router } = server as unknown as {
+        router: { match: (method: string, url: string) => unknown };
+      };
+      // Clean cutover: the in-memory agent Map is deleted — its verbs must no
+      // longer match the router table at all (they hit the uniform 404 branch).
+      expect(router.match('GET', '/api/agents')).toBeNull();
+      expect(router.match('POST', '/api/agents')).toBeNull();
+      expect(router.match('GET', '/api/agents/test-id')).toBeNull();
+      expect(router.match('PUT', '/api/agents/test-id')).toBeNull();
+      expect(router.match('DELETE', '/api/agents/test-id')).toBeNull();
+      // The replacement is the engine-backed real agent plane:
+      expect(router.match('GET', '/api/omp/agents')).not.toBeNull();
     });
 
     it('should register the omp provider control plane (legacy CRUD gone)', () => {
@@ -220,7 +227,7 @@ describe('RBAC route table totality (D1)', () => {
     const router = (server as any).router;
     const registered: Array<{ method: string; pattern: RegExp }> = router.routes;
     // RegExp built from a STRING pattern escapes forward slashes in .source
-    // ('^/api/agents$' comes back as '^\\/api\\/agents$') — normalize before
+    // ('^/api/sessions$' comes back as '^\\/api\\/sessions$') — normalize before
     // matching, or the enumeration silently sees zero routes.
     const api = registered
       .map((r) => ({ method: r.method, source: r.pattern.source.replace(/\\\//g, '/') }))
@@ -229,7 +236,7 @@ describe('RBAC route table totality (D1)', () => {
     // must never let this guard pass by checking nothing.
     expect(api.length).toBeGreaterThanOrEqual(30);
     for (const entry of api) {
-      // Reconstruct a concrete path: ^/api/agents/([^/]+)$ → /api/agents/test-id
+      // Reconstruct a concrete path: ^/api/sessions/([^/]+)$ → /api/sessions/test-id
       const path = entry.source.slice(1, -1).replace(/\(\[\^\/\]\+\)/g, 'test-id');
       for (const method of [entry.method, 'HEAD']) {
         const perm = permissionFor(method, path);
@@ -273,9 +280,11 @@ describe('RBAC route table totality (D1)', () => {
     for (const p of ['/api/omp/sessions', '/api/omp/sessions/read']) {
       expect(permissionFor('GET', p)).toEqual({ resource: 'sessions:*', action: 'read' });
     }
-    // The pre-existing mappings stay byte-identical:
-    expect(permissionFor('GET', '/api/agents')).toEqual({ resource: 'agents:*', action: 'read' });
-    expect(permissionFor('POST', '/api/agents')).toEqual({ resource: 'agents:*', action: 'write' });
+    // The removed /api/agents CRUD must NOT keep its old agents:* mapping —
+    // with the routes gone the path falls through to the total fallback
+    // (re-adding the deleted agents:* branch would flip these to agents:*):
+    expect(permissionFor('GET', '/api/agents')).toEqual({ resource: 'system:*', action: 'read' });
+    expect(permissionFor('POST', '/api/agents')).toEqual({ resource: 'system:*', action: 'write' });
     // The provider control-plane mutations keep the SAME providers:config
     // write mapping the legacy /api/providers POST used (now on /api/omp/*):
     for (const [method, path] of [
@@ -351,8 +360,8 @@ describe('method mismatch (405) and not-found (404) shape', () => {
 
   it('answers 405 with an Allow header listing the registered methods', async () => {
     await server.start();
-    // /api/agents is registered GET+POST only — DELETE must 405, never 404.
-    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/agents`, {
+    // /api/sessions is registered GET+POST only — DELETE must 405, never 404.
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/sessions`, {
       method: 'DELETE',
     });
     expect(res.status).toBe(405);
@@ -367,13 +376,13 @@ describe('method mismatch (405) and not-found (404) shape', () => {
     expect(body.error).toBe('Method not allowed');
   });
 
-  it('param routes 405 too: POST /api/agents/:id is not registered', async () => {
+  it('param routes 405 too: POST /api/sessions/:id is not registered', async () => {
     await server.start();
-    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/agents/x1`, {
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/sessions/x1`, {
       method: 'POST',
     });
     expect(res.status).toBe(405);
-    expect(res.headers.get('allow')).toContain('PUT');
+    expect(res.headers.get('allow')).toContain('GET');
   });
 
   it('unknown path keeps the uniform 404 body with no path/method echo', async () => {
@@ -431,69 +440,6 @@ describe('method mismatch (405) and not-found (404) shape', () => {
     // The query string (possible credential) must never be logged.
     expect(line).not.toContain('token');
     expect(line).not.toContain('secret123');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// POST /api/agents hardening: body shape, name validation, registry cap
-// ---------------------------------------------------------------------------
-describe('POST /api/agents validation', () => {
-  let server: AetherServer;
-  beforeEach(() => {
-    server = new AetherServer({ port: 0, host: '127.0.0.1' });
-  });
-  afterEach(async () => {
-    await server.stop();
-  });
-
-  async function postAgent(body: string): Promise<Response> {
-    return fetch(`http://127.0.0.1:${server.getPort()}/api/agents`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    });
-  }
-
-  it('rejects non-object JSON bodies with 400 (was a 500 path)', async () => {
-    await server.start();
-    for (const body of ['null', '[1,2]', '"just-a-string"', '42']) {
-      const res = await postAgent(body);
-      expect(res.status, body).toBe(400);
-    }
-  });
-
-  it('rejects non-string, empty and oversized names with 400', async () => {
-    await server.start();
-    for (const body of ['{"name":{"nested":true}}', '{"name":42}', '{"name":""}']) {
-      const res = await postAgent(body);
-      expect(res.status, body).toBe(400);
-    }
-    const long = await postAgent(JSON.stringify({ name: 'x'.repeat(201) }));
-    expect(long.status).toBe(400);
-    const err = (await long.json()) as { error: string };
-    expect(err.error).toBe('Agent name is required');
-  });
-
-  it('caps the registry at 500: overflow answers 503 without mutating', async () => {
-    await server.start();
-    // Seed close to the cap in-process (same module the route reads).
-    const seeded: store.AgentId[] = [];
-    for (let i = store.listAgents().length; i < 499; i++) {
-      seeded.push(store.createAgent({ name: `seed-${i}` }).id);
-    }
-    try {
-      const ok = await postAgent(JSON.stringify({ name: 'fills-to-cap' }));
-      expect(ok.status).toBe(201);
-      const overflow = await postAgent(JSON.stringify({ name: 'one-too-many' }));
-      expect(overflow.status).toBe(503);
-      const err = (await overflow.json()) as { error: string };
-      expect(err.error).toMatch(/registry full \(500\)/);
-      // The rejected POST left the registry untouched at exactly the cap.
-      expect(store.listAgents()).toHaveLength(500);
-    } finally {
-      for (const id of seeded) store.deleteAgent(id);
-      for (const a of store.listAgents()) store.deleteAgent(a.id);
-    }
   });
 });
 

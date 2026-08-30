@@ -60,43 +60,24 @@ describe('AetherServer HTTP integration', () => {
     expect(body.providers).toHaveProperty('healthy');
   });
 
-  it('creates an agent and lists agents', async () => {
+  it('no longer registers the legacy /api/agents CRUD (uniform 404)', async () => {
     await server.start();
-    const port = server.getPort()!;
-    const base = `http://127.0.0.1:${port}`;
-
-    // Initially empty
-    const list1 = await fetch(`${base}/api/agents`);
-    expect(list1.status).toBe(200);
-    const body1: any = await list1.json();
-    expect(body1.agents).toEqual([]);
-
-    // Create an agent
-    const createRes = await fetch(`${base}/api/agents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'test-agent-1' }),
-    });
-    expect(createRes.status).toBe(201);
-    const createBody: any = await createRes.json();
-    expect(createBody.agent).toHaveProperty('id');
-    expect(createBody.agent.name).toBe('test-agent-1');
-    expect(createBody.agent.status).toBe('idle');
-
-    const agentId = createBody.agent.id;
-
-    // List should now include the agent
-    const list2 = await fetch(`${base}/api/agents`);
-    const body2: any = await list2.json();
-    expect(body2.agents).toHaveLength(1);
-    expect(body2.agents[0].id).toBe(agentId);
-
-    // Get by id
-    const getRes = await fetch(`${base}/api/agents/${agentId}`);
-    expect(getRes.status).toBe(200);
-    const getBody: any = await getRes.json();
-    expect(getBody.agent.name).toBe('test-agent-1');
-    expect(getBody.agent.id).toBe(agentId);
+    const base = `http://127.0.0.1:${server.getPort()}`;
+    // The simulated in-memory agent Map is deleted; its verbs must NOT answer
+    // anything but the uniform 404 shape anymore (mirrors /api/providers).
+    // The real agent plane is /api/omp/agents (engine-backed omp catalog).
+    for (const [method, path] of [
+      ['GET', '/api/agents'],
+      ['POST', '/api/agents'],
+      ['GET', '/api/agents/whatever'],
+      ['PUT', '/api/agents/whatever'],
+      ['DELETE', '/api/agents/whatever'],
+    ] as const) {
+      const res = await fetch(`${base}${path}`, { method });
+      expect(res.status).toBe(404);
+      const body = (await res.json()) as { error?: string }; // uniform-shape pin
+      expect(body.error).toBe('Not found');
+    }
   });
 
   it('returns 404 for unknown routes', async () => {
@@ -193,7 +174,9 @@ describe('CORS integration', () => {
     server.setCorsOrigins(['http://example.com']);
     await server.start();
     const port = server.getPort()!;
-    const res = await fetch(`http://127.0.0.1:${port}/api/agents`, {
+    // Preflight is handled server-wide (before routing), so the path is just
+    // a vehicle — /api/agents is gone; use a live registered path.
+    const res = await fetch(`http://127.0.0.1:${port}/api/workspaces`, {
       method: 'OPTIONS',
       headers: {
         Origin: 'http://example.com',
@@ -225,7 +208,10 @@ describe('request body size limits', () => {
     const small = new AetherServer({ port: 0, host: '127.0.0.1', maxBodySize: 64 });
     await small.start();
     try {
-      const res = await fetch(`http://127.0.0.1:${small.getPort()}/api/agents`, {
+      // Vehicle: POST /api/realtime-ticket — a registered POST that answers
+      // 200 untouched. The Content-Length guard runs BEFORE routing, so a
+      // regressed guard lets this reach the handler as a 200 instead.
+      const res = await fetch(`http://127.0.0.1:${small.getPort()}/api/realtime-ticket`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'x'.repeat(200) }),
@@ -240,28 +226,53 @@ describe('request body size limits', () => {
     const small = new AetherServer({ port: 0, host: '127.0.0.1', maxBodySize: 1024 });
     await small.start();
     try {
-      const res = await fetch(`http://127.0.0.1:${small.getPort()}/api/agents`, {
+      // Same guard, opposite side: a body under the cap must reach the
+      // handler — /api/realtime-ticket answers 200 (ticket null, auth off).
+      const res = await fetch(`http://127.0.0.1:${small.getPort()}/api/realtime-ticket`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ name: 'ok' }),
       });
-      expect(res.status).toBe(201);
+      expect(res.status).toBe(200);
     } finally {
       await small.stop();
     }
   });
   it('caps chunked request bodies (no Content-Length) at the configured limit', async () => {
-    const small = new AetherServer({ port: 0, host: '127.0.0.1', maxBodySize: 64 });
+    // The legacy 413 vehicle (POST /api/agents) was the only route answering
+    // too_large straight from parseBody; it is deleted. The cap itself still
+    // guards EVERY body-parsing route via req.maxBodySize — here engine-bound
+    // POST /api/sessions, whose jsonBody answers an oversized stream with 400
+    // BEFORE the engine runs (routes/engine.ts). The fake engine THROWS, so a
+    // regressed cap would reach it and surface a 500 — the 400 is discriminating.
+    const fakeEngine = {
+      async createSession() {
+        throw new Error('the body cap must reject before the engine runs');
+      },
+    } as unknown as EngineService; // structural test double
+    const skills = { get: async () => null } as unknown as SkillsService; // test seam
+    const small = new AetherServer({
+      port: 0,
+      host: '127.0.0.1',
+      maxBodySize: 64,
+      engine: {
+        engine: fakeEngine,
+        loops: new LoopManager(fakeEngine, skills),
+        skills,
+        facade: new OmpFacade(),
+      },
+    });
     await small.start();
     const port = small.getPort()!;
-    const body = JSON.stringify({ name: 'x'.repeat(200) });
+    // Valid create-session shape, oversized past the 64-byte cap.
+    const body = JSON.stringify({ model: { provider: 'p', modelId: 'm'.repeat(200) } });
     const chunks: string[] = [];
     for (let i = 0; i < body.length; i += 16) {
       const piece = body.slice(i, i + 16);
       chunks.push(piece.length.toString(16) + '\r\n' + piece + '\r\n');
     }
     const payload =
-      'POST /api/agents HTTP/1.1\r\n' +
+      'POST /api/sessions HTTP/1.1\r\n' +
       'Host: 127.0.0.1\r\n' +
       'Content-Type: application/json\r\n' +
       'Transfer-Encoding: chunked\r\n\r\n' +
@@ -281,7 +292,9 @@ describe('request body size limits', () => {
       });
       socket.connect(port, '127.0.0.1', () => socket.write(payload));
     });
-    expect(response).toContain('413');
+    // Cap fired inside parseBody → jsonBody's fixed 400 (engine routes fold
+    // too_large into 400), proving the body never reached the throwing fake.
+    expect(response).toContain('400');
     await small.stop();
   });
 });
@@ -432,9 +445,10 @@ describe('API authentication & RBAC', () => {
     const base = `http://127.0.0.1:${srv.getPort()}`;
     try {
       expect((await fetch(`${base}/health`)).status).toBe(200);
-      expect((await fetch(`${base}/api/agents`)).status).toBe(401);
+      expect((await fetch(`${base}/api/workspaces`)).status).toBe(401);
       expect(
-        (await fetch(`${base}/api/agents`, { headers: { Authorization: 'Bearer wrong' } })).status,
+        (await fetch(`${base}/api/workspaces`, { headers: { Authorization: 'Bearer wrong' } }))
+          .status,
       ).toBe(401);
     } finally {
       await srv.stop();
@@ -446,43 +460,62 @@ describe('API authentication & RBAC', () => {
     await srv.start();
     const base = `http://127.0.0.1:${srv.getPort()}`;
     try {
-      const bearer = await fetch(`${base}/api/agents`, {
+      // GET /api/workspaces answers 200 on a plain Node server (engine-free
+      // read) — proof the request passed the auth gate, not just reached it.
+      const bearer = await fetch(`${base}/api/workspaces`, {
         headers: { Authorization: 'Bearer secret-key' },
       });
       expect(bearer.status).toBe(200);
-      const header = await fetch(`${base}/api/agents`, { headers: { 'X-API-Key': 'secret-key' } });
+      const header = await fetch(`${base}/api/workspaces`, {
+        headers: { 'X-API-Key': 'secret-key' },
+      });
       expect(header.status).toBe(200);
     } finally {
       await srv.stop();
     }
   });
 
-  it('enforces roles: view-only key cannot mutate agents', async () => {
+  it('enforces roles: view-only key cannot mutate, real-plane reads stay open', async () => {
+    // Successor of the legacy view-only-vs-admin CRUD check: reads ride the
+    // REAL agent plane (/api/omp/agents, agents:* read — viewer holds it),
+    // mutations ride the total fallback (POST → system:* write — viewer does
+    // NOT). The facade is a structural double so the read answers 200 under
+    // plain Node; stripping viewer's agents:* read would flip it to 403.
+    const engine = {
+      async createSession() {
+        throw new Error('not used by these routes');
+      },
+    } as unknown as EngineService; // structural test double
+    const skills = { get: async () => null } as unknown as SkillsService; // test seam
+    const facade = {
+      async listAgents() {
+        return { ok: true as const, agents: [] };
+      },
+    } as unknown as OmpFacade; // structural test double
     const srv = new AetherServer({
       port: 0,
       host: '127.0.0.1',
-      auth: {
-        apiKey: { 'ro-key': 'viewer' as RoleId, 'admin-key': 'admin' as RoleId },
-      },
+      auth: { apiKey: { 'ro-key': 'viewer' as RoleId, 'admin-key': 'admin' as RoleId } },
+      engine: { engine, loops: new LoopManager(engine, skills), skills, facade },
     });
     await srv.start();
     const base = `http://127.0.0.1:${srv.getPort()}`;
     try {
-      const read = await fetch(`${base}/api/agents`, { headers: { 'X-API-Key': 'ro-key' } });
+      const read = await fetch(`${base}/api/omp/agents`, { headers: { 'X-API-Key': 'ro-key' } });
       expect(read.status).toBe(200);
-      const write = await fetch(`${base}/api/agents`, {
+      const readBody = (await read.json()) as { agents: unknown[] }; // wire-shape pin
+      expect(readBody.agents).toEqual([]);
+      const write = await fetch(`${base}/api/realtime-ticket`, {
         method: 'POST',
-        headers: { 'X-API-Key': 'ro-key', 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'nope' }),
+        headers: { 'X-API-Key': 'ro-key' },
       });
       expect(write.status).toBe(403);
       // Admin can write.
-      const adminWrite = await fetch(`${base}/api/agents`, {
+      const adminWrite = await fetch(`${base}/api/realtime-ticket`, {
         method: 'POST',
-        headers: { 'X-API-Key': 'admin-key', 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'ok' }),
+        headers: { 'X-API-Key': 'admin-key' },
       });
-      expect(adminWrite.status).toBe(201);
+      expect(adminWrite.status).toBe(200);
     } finally {
       await srv.stop();
     }
@@ -531,7 +564,7 @@ describe('API authentication & RBAC', () => {
     await srv.start();
     const base = `http://127.0.0.1:${srv.getPort()}`;
     try {
-      const res = await fetch(`${base}/api/agents`, {
+      const res = await fetch(`${base}/api/workspaces`, {
         headers: { Authorization: 'bearer secret-key' },
       });
       expect(res.status).toBe(200);
@@ -553,10 +586,13 @@ describe('API authentication & RBAC', () => {
     await srv.start();
     const base = `http://127.0.0.1:${srv.getPort()}`;
     try {
-      // Sanity: viewer still has its normal read grants.
+      // Sanity: viewer still has its normal read grants — on the REAL agent
+      // plane (/api/omp/agents, agents:* read; the simulated /api/agents CRUD
+      // is gone). Plain Node has no engine, so the handler degrades to 501:
+      // reaching 501 (NOT 403) is the proof the RBAC gate let viewer pass.
       expect(
-        (await fetch(`${base}/api/agents`, { headers: { 'X-API-Key': 'ro-key' } })).status,
-      ).toBe(200);
+        (await fetch(`${base}/api/omp/agents`, { headers: { 'X-API-Key': 'ro-key' } })).status,
+      ).toBe(501);
       // Filesystem browser + raw disk transcripts are denied to viewer…
       expect(
         (await fetch(`${base}/api/workspaces/browse`, { headers: { 'X-API-Key': 'ro-key' } }))
@@ -683,45 +719,8 @@ describe('AetherServer resilience', () => {
 
   it('returns 400 for malformed percent-encoding in a path param', async () => {
     await server.start();
-    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/agents/%zz`);
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/sessions/%zz`);
     expect(res.status).toBe(400);
-  });
-
-  it('ignores a forged status and rejects non-object config / non-string name', async () => {
-    await server.start();
-    const base = `http://127.0.0.1:${server.getPort()}`;
-
-    const create = await fetch(`${base}/api/agents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 'guard' }),
-    });
-    const agentId = ((await create.json()) as any).agent.id;
-
-    // Forging a status must not stick — status stays server-managed.
-    const forged = await fetch(`${base}/api/agents/${agentId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'running', name: 'guarded' }),
-    });
-    expect(forged.status).toBe(200);
-    const updated = ((await forged.json()) as any).agent;
-    expect(updated.name).toBe('guarded');
-    expect(updated.status).toBe('idle');
-
-    const badConfig = await fetch(`${base}/api/agents/${agentId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ config: 'oops' }),
-    });
-    expect(badConfig.status).toBe(400);
-
-    const badName = await fetch(`${base}/api/agents/${agentId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: 42 }),
-    });
-    expect(badName.status).toBe(400);
   });
 });
 

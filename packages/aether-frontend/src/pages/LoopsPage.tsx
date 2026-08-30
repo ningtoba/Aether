@@ -257,6 +257,10 @@ export function LoopsPage({
   };
 
   const modelOptions = models.flatMap((g) => g.models.map((m) => ({ g: g.provider, m })));
+  // The row the editor is bound to. editingId IS the selection state: it
+  // drives the row's is-selected styling and the editor card's title, so
+  // "new vs. edit" is readable without comparing the form against the list.
+  const selectedLoop = editingId ? loops.find((l) => l.id === editingId) : undefined;
   const previewArgs = form.transition?.kind === 'skill' ? (form.transition.args ?? '') : '';
   const previewRounds = [1, 2, 3].map((n) => ({
     prompt: (form.prompt ?? '').replace(/\{round\}/g, String(n)),
@@ -318,8 +322,11 @@ export function LoopsPage({
     try {
       const { loop } = await saveLoop({ ...form, cwd, model: { provider, modelId } });
       setLoops((l) => [loop, ...l.filter((x) => x.id !== loop.id)]);
-      setEditingId(loop.id);
-      setForm({ ...EMPTY });
+      // Hydrate from the SAVED loop instead of clearing to EMPTY: clearing
+      // here left the row flagged as the editing one while the form showed
+      // the "My loop" template — the exact new-vs-edit ambiguity this fix
+      // removes. Same pure hydration as a row click.
+      loadIntoForm(loop);
       setError(null);
     } catch (e) {
       setError((e as Error).message);
@@ -416,8 +423,15 @@ export function LoopsPage({
             {filteredLoops.map((loop) => (
               <div key={loop.id} className="row" style={{ alignItems: 'center' }}>
                 <button
-                  className="selectable-row"
-                  style={{ flex: 1, minWidth: 0, flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}
+                  className={editingId === loop.id ? 'list-row is-selected' : 'list-row'}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 2,
+                    cursor: 'pointer',
+                  }}
                   aria-pressed={editingId === loop.id}
                   onClick={() => loadIntoForm(loop)}
                   title={loop.prompt}
@@ -457,7 +471,9 @@ export function LoopsPage({
                     onConfirm={() => del(loop.id)}
                     title={`Delete “${loop.name}”`}
                     ariaLabel={`Delete loop ${loop.name}`}
-                  />
+                  >
+                    Delete
+                  </ConfirmButton>
                 </div>
               </div>
             ))}
@@ -487,207 +503,254 @@ export function LoopsPage({
         <div className="stack">
           {/* Define/edit form: measure-capped via .form-narrow; run cards stay wide. */}
           <div className="stack form-narrow">
-          {/* Identity */}
-          <Card
-            title={editingId ? 'Edit loop · Identity' : 'Define loop · Identity'}
-            actions={
-              editingId ? (
-                <span className="mono muted" style={{ fontSize: 11 }} title={editingId}>
-                  editing {editingId}
-                </span>
-              ) : undefined
-            }
-          >
-            <div className="field">
-              <label htmlFor="loop-name">
-                Name <span style={{ color: 'var(--error)' }}>*</span>
-              </label>
-              <input
-                id="loop-name"
-                className="input"
-                value={form.name ?? ''}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="loop-desc">Description</label>
-              <input
-                id="loop-desc"
-                className="input"
-                value={form.description ?? ''}
-                onChange={(e) => setForm({ ...form, description: e.target.value })}
-              />
-            </div>
-            <div className="field">
-              <label htmlFor="loop-model">Model</label>
-              <select
-                id="loop-model"
-                className="select"
-                value={selectedModel}
-                onChange={(e) => setSelectedModel(e.target.value)}
-              >
-                {modelOptions.map(({ g, m }) => (
-                  <option key={`${g}/${m.id}`} value={`${g}/${m.id}`}>
-                    {g}/{m.id}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <CwdPicker value={cwd} onSelect={setCwd} placeholder="workspace root (host)" />
-          </Card>
-
-          {/* Prompt */}
-          <Card title="Prompt">
-            <div className="field">
-              <label htmlFor="loop-prompt">
-                Prompt <span style={{ color: 'var(--error)' }}>*</span>
-              </label>
-              <div className="help">
-                Runs every round; <code>{'{round}'}</code> is replaced with the round number.
-              </div>
-              <textarea
-                id="loop-prompt"
-                className="textarea"
-                rows={5}
-                value={form.prompt ?? ''}
-                onChange={(e) => setForm({ ...form, prompt: e.target.value })}
-              />
-              <div className="code-preview" style={{ marginTop: 'var(--s-2)' }}>
-                <div className="muted" style={{ marginBottom: 4 }}>
-                  Preview rounds 1-3:
-                </div>
-                {previewRounds.map((p, i) => (
-                  <div key={i} style={{ marginTop: 2 }}>
-                    Round {i + 1}:{' '}
-                    {p.prompt.length > 90 ? `${p.prompt.slice(0, 90)}…` : p.prompt || '(empty)'}
-                    {previewArgs && (
-                      <>
-                        {' · args: '}
-                        {p.args.length > 90 ? `${p.args.slice(0, 90)}…` : p.args}
-                      </>
-                    )}
+            {/* Identity */}
+            <Card
+              title={
+                editingId
+                  ? `Editing · ${selectedLoop?.name ?? form.name ?? editingId}`
+                  : '+ New loop'
+              }
+              actions={
+                editingId ? (
+                  <div className="row" style={{ gap: 'var(--s-2)' }}>
+                    <span className="mono muted" style={{ fontSize: 11 }} title={editingId}>
+                      editing {editingId}
+                    </span>
+                    {/* Ghost escape hatch back to a clean editor: deselects. */}
+                    <button
+                      className="btn ghost sm"
+                      onClick={reset}
+                      title="Clear the editor and start a new loop"
+                    >
+                      <Icon name="plus" size={13} /> New / clear
+                    </button>
                   </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-
-          {/* Schedule & limits */}
-          <Card title="Schedule & limits">
-            <div className="field">
-              <label htmlFor="loop-transition">Transition between rounds</label>
-              <select
-                id="loop-transition"
-                className="select"
-                value={form.transition?.kind ?? 'none'}
-                onChange={(e) =>
-                  setForm({
-                    ...form,
-                    transition: { kind: e.target.value as LoopTransition['kind'] },
-                  })
-                }
-              >
-                <option value="none">None (straight to next round)</option>
-                <option value="compact">Compact</option>
-                <option value="skill">Invoke a skill</option>
-                <option value="gate">Gate (wait for me to decide)</option>
-              </select>
-            </div>
-            {form.transition?.kind === 'skill' && (
-              <>
+                ) : undefined
+              }
+            >
               <div className="field">
-                <label htmlFor="loop-skill">Skill</label>
+                <label htmlFor="loop-name">
+                  Name <span style={{ color: 'var(--error)' }}>*</span>
+                </label>
+                <input
+                  id="loop-name"
+                  className="input"
+                  value={form.name ?? ''}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="loop-desc">Description</label>
+                <input
+                  id="loop-desc"
+                  className="input"
+                  value={form.description ?? ''}
+                  onChange={(e) => setForm({ ...form, description: e.target.value })}
+                />
+              </div>
+              <div className="field">
+                <label htmlFor="loop-model">Model</label>
                 <select
-                  id="loop-skill"
+                  id="loop-model"
                   className="select"
-                  value={form.transition?.skillName ?? ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      // Spread first: re-picking the skill must not wipe the
-                      // already-entered args.
-                      transition: { ...form.transition, kind: 'skill', skillName: e.target.value },
-                    })
-                  }
+                  value={selectedModel}
+                  onChange={(e) => setSelectedModel(e.target.value)}
                 >
-                  <option value="">Select…</option>
-                  {skillOptions.map((s) => (
-                    <option key={s.name} value={s.name}>
-                      {s.name}
+                  {modelOptions.map(({ g, m }) => (
+                    <option key={`${g}/${m.id}`} value={`${g}/${m.id}`}>
+                      {g}/{m.id}
                     </option>
                   ))}
                 </select>
               </div>
+              <CwdPicker value={cwd} onSelect={setCwd} placeholder="workspace root (host)" />
+            </Card>
+
+            {/* Prompt */}
+            <Card title="Prompt">
               <div className="field">
-                <label htmlFor="loop-skill-args">Round arguments (optional)</label>
-                <input
-                  id="loop-skill-args"
-                  className="input"
-                  value={form.transition?.args ?? ''}
-                  placeholder="e.g. Audit round {round} — focus on gaps found last time"
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      transition: { ...form.transition, kind: 'skill', args: e.target.value },
-                    })
-                  }
-                />
+                <label htmlFor="loop-prompt">
+                  Prompt <span style={{ color: 'var(--error)' }}>*</span>
+                </label>
                 <div className="help">
-                  Sent with the skill every round; <code>{'{round}'}</code> is replaced with the
-                  round number.
+                  Runs every round; <code>{'{round}'}</code> is replaced with the round number.
+                </div>
+                <textarea
+                  id="loop-prompt"
+                  className="textarea"
+                  rows={5}
+                  value={form.prompt ?? ''}
+                  onChange={(e) => setForm({ ...form, prompt: e.target.value })}
+                />
+                <div
+                  className="code-preview"
+                  style={{ marginTop: 'var(--s-2)', maxHeight: '40vh' }}
+                >
+                  <div className="muted" style={{ marginBottom: 4 }}>
+                    Preview rounds 1-3:
+                  </div>
+                  {previewRounds.map((p, i) => (
+                    <div key={i} style={{ marginTop: 2 }}>
+                      Round {i + 1}:{' '}
+                      {p.prompt.length > 90 ? `${p.prompt.slice(0, 90)}…` : p.prompt || '(empty)'}
+                      {previewArgs && (
+                        <>
+                          {' · args: '}
+                          {p.args.length > 90 ? `${p.args.slice(0, 90)}…` : p.args}
+                        </>
+                      )}
+                    </div>
+                  ))}
                 </div>
               </div>
-              </>
-            )}
-            <div className="grid cols-2">
+            </Card>
+
+            {/* Schedule & limits */}
+            <Card title="Schedule & limits">
               <div className="field">
-                <label htmlFor="loop-max-rounds">Max rounds (blank = indefinite)</label>
-                <input
-                  id="loop-max-rounds"
-                  className="input"
-                  type="number"
-                  min={1}
-                  value={form.maxRounds ?? ''}
+                <label htmlFor="loop-transition">Transition between rounds</label>
+                <select
+                  id="loop-transition"
+                  className="select"
+                  value={form.transition?.kind ?? 'none'}
                   onChange={(e) =>
                     setForm({
                       ...form,
-                      maxRounds: e.target.value ? Number(e.target.value) : undefined,
+                      transition: { kind: e.target.value as LoopTransition['kind'] },
                     })
                   }
-                />
+                >
+                  <option value="none">None (straight to next round)</option>
+                  <option value="compact">Compact</option>
+                  <option value="skill">Invoke a skill</option>
+                  <option value="gate">Gate (wait for me to decide)</option>
+                </select>
               </div>
-              <div className="field">
-                <label htmlFor="loop-max-time">Max time ms (blank = indefinite)</label>
-                <input
-                  id="loop-max-time"
-                  className="input"
-                  type="number"
-                  min={1}
-                  step={1000}
-                  value={form.maxTimeMs ?? ''}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      maxTimeMs: e.target.value ? Number(e.target.value) : undefined,
-                    })
-                  }
-                />
+              {form.transition?.kind === 'skill' && (
+                <>
+                  <div className="field">
+                    <label htmlFor="loop-skill">Skill</label>
+                    <select
+                      id="loop-skill"
+                      className="select"
+                      value={form.transition?.skillName ?? ''}
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          // Spread first: re-picking the skill must not wipe the
+                          // already-entered args.
+                          transition: {
+                            ...form.transition,
+                            kind: 'skill',
+                            skillName: e.target.value,
+                          },
+                        })
+                      }
+                    >
+                      <option value="">Select…</option>
+                      {skillOptions.map((s) => (
+                        <option key={s.name} value={s.name}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field">
+                    <label htmlFor="loop-skill-args">Round arguments (optional)</label>
+                    <input
+                      id="loop-skill-args"
+                      className="input"
+                      value={form.transition?.args ?? ''}
+                      placeholder="e.g. Audit round {round} — focus on gaps found last time"
+                      onChange={(e) =>
+                        setForm({
+                          ...form,
+                          transition: { ...form.transition, kind: 'skill', args: e.target.value },
+                        })
+                      }
+                    />
+                    <div className="help">
+                      Sent with the skill every round; <code>{'{round}'}</code> is replaced with the
+                      round number.
+                    </div>
+                  </div>
+                </>
+              )}
+              <div className="grid cols-2">
+                <div className="field">
+                  <label htmlFor="loop-max-rounds">Max rounds (blank = indefinite)</label>
+                  <input
+                    id="loop-max-rounds"
+                    className="input"
+                    type="number"
+                    min={1}
+                    value={form.maxRounds ?? ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        maxRounds: e.target.value ? Number(e.target.value) : undefined,
+                      })
+                    }
+                  />
+                </div>
+                <div className="field">
+                  <label htmlFor="loop-max-time">Max time ms (blank = indefinite)</label>
+                  <input
+                    id="loop-max-time"
+                    className="input"
+                    type="number"
+                    min={1}
+                    step={1000}
+                    value={form.maxTimeMs ?? ''}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        maxTimeMs: e.target.value ? Number(e.target.value) : undefined,
+                      })
+                    }
+                  />
+                </div>
               </div>
-            </div>
-            {/* Actions pinned at the bottom of the form */}
-            <div className="row" style={{ marginTop: 'var(--s-4)' }}>
+              <div className="code-preview" style={{ marginTop: 'var(--s-3)' }}>
+                Loop model: [round N] → [{form.transition?.kind ?? 'none'}] → [round N+1] …
+              </div>
+            </Card>
+
+            {/* Sticky submit footer: the primary CTA stays in view anywhere in
+              the tall editor (the screenshot showed Save/Run below the fold
+              with nothing to click). Owns the same handlers as before — only
+              the position changed. */}
+            <div
+              style={{
+                position: 'sticky',
+                bottom: 0,
+                zIndex: 10,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 'var(--s-2)',
+                padding: 'var(--s-2) var(--s-1)',
+                background: 'var(--surface)',
+                borderTop: '1px solid var(--border)',
+              }}
+            >
               <button className="btn primary" onClick={save}>
                 {editingId ? 'Update loop' : 'Save loop'}
               </button>
+              {editingId &&
+                (progress[editingId]?.status === 'running' ? (
+                  <button className="btn danger" onClick={() => stop(editingId)}>
+                    <Icon name="stop" size={13} /> Stop
+                  </button>
+                ) : (
+                  <button className="btn primary" onClick={() => run(editingId)}>
+                    <Icon name="play" size={13} /> Run
+                  </button>
+                ))}
+              <div className="spacer" />
               <button className="btn ghost" onClick={reset}>
                 Reset
               </button>
             </div>
-            <div className="code-preview" style={{ marginTop: 'var(--s-3)' }}>
-              Loop model: [round N] → [{form.transition?.kind ?? 'none'}] → [round N+1] …
-            </div>
-          </Card>
-
           </div>
 
           <div>
@@ -703,7 +766,10 @@ export function LoopsPage({
                     key={loop.id}
                     title={<span style={{ fontSize: 14 }}>{loop.name}</span>}
                     actions={
-                      <StatusPill tone={LOOP_TONE[p?.status ?? 'idle'] ?? 'idle'} dot={p?.status === 'running'}>
+                      <StatusPill
+                        tone={LOOP_TONE[p?.status ?? 'idle'] ?? 'idle'}
+                        dot={p?.status === 'running'}
+                      >
                         {p?.status ?? 'idle'}
                       </StatusPill>
                     }

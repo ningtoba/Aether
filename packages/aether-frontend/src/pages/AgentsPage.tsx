@@ -1,9 +1,10 @@
 /**
- * Agents — omp agent catalog (bundled + ~/.omp/agent/agents + .omp/agents) with
- * a legacy control-plane fallback when the embedded engine (Bun) is unavailable.
+ * Agents — the omp agent catalog (bundled + ~/.omp/agent/agents + .omp/agents).
+ * This is the ONLY agent plane: the simulated /api/agents registry was deleted,
+ * so a failed catalog load surfaces as an explicit error, never as fake data.
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { listOmpAgents, listAgents, type AgentDef, type AgentRecord } from '../lib/api';
+import { listOmpAgents, type AgentDef } from '../lib/api';
 import {
   Card,
   CopyButton,
@@ -14,7 +15,6 @@ import {
   SegmentedControl,
   Skeleton,
   StatusPill,
-  fmtRelative,
   type StatusTone,
 } from '../components/ui';
 
@@ -46,16 +46,11 @@ function inspectText(a: AgentDef): string {
   return out.trim();
 }
 
-function legacyTone(status: string): StatusTone {
-  if (status === 'running') return 'running';
-  if (status === 'error') return 'error';
-  return 'idle';
-}
-
 export function AgentsPage() {
   const [agents, setAgents] = useState<AgentDef[]>([]);
-  const [legacy, setLegacy] = useState<AgentRecord[]>([]);
-  const [mode, setMode] = useState<'loading' | 'omp' | 'legacy'>('loading');
+  // The simulated registry is gone — the only modes are loading, a loaded
+  // catalog, and an honest error.
+  const [mode, setMode] = useState<'loading' | 'omp' | 'error'>('loading');
   const [source, setSource] = useState<SourceFilter>('all');
   const [query, setQuery] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
@@ -71,19 +66,13 @@ export function AgentsPage() {
         if (cancelled) return;
         setAgents(r.agents);
         setMode('omp');
-      } catch {
+      } catch (e) {
         if (cancelled) return;
-        // Engine unavailable (e.g. plain-Node backend) → degrade to the legacy
-        // control-plane registry with a neutral hint.
-        try {
-          const legacyRes = await listAgents();
-          if (cancelled) return;
-          setLegacy(legacyRes.agents);
-        } catch (e2) {
-          if (cancelled) return;
-          setError((e2 as Error).message);
-        }
-        setMode('legacy');
+        // No legacy fallback: the simulated /api/agents registry was deleted.
+        // Surface the failure honestly — an unreachable catalog must never
+        // silently render fake data.
+        setError((e as Error).message);
+        setMode('error');
       }
     })();
     return () => {
@@ -117,7 +106,7 @@ export function AgentsPage() {
             ? 'Loading the agent catalog…'
             : mode === 'omp'
               ? `${filtered.length} of ${agents.length} agents in the omp catalog (bundled, user, project)`
-              : 'Legacy control-plane agent registry — the omp engine catalog is unavailable.'
+              : 'The omp agent catalog is unreachable.'
         }
         actions={
           mode === 'omp' ? (
@@ -179,10 +168,7 @@ export function AgentsPage() {
               {filtered.map((a) => {
                 const isSel = selected === a.name;
                 return (
-                  <div
-                    key={a.name}
-                    className={`card card-ghost${isSel ? ' is-selected' : ''}`}
-                  >
+                  <div key={a.name} className={`card card-ghost${isSel ? ' is-selected' : ''}`}>
                     <div className="card-header">
                       <span
                         className="truncate"
@@ -269,66 +255,6 @@ export function AgentsPage() {
               )}
             </Card>
           )}
-        </div>
-      )}
-
-      {mode === 'legacy' && (
-        <div className="stack">
-          <Card>
-            <div className="stack" style={{ gap: 6 }}>
-              <span className="muted" style={{ fontSize: 12 }}>
-                The omp agent catalog (bundled + <code>~/.omp/agent/agents/*.md</code> +{' '}
-                <code>.omp/agents/*.md</code>) is served by the embedded engine, which is not
-                configured on this server (plain-Node backend — the engine needs the Bun runtime).
-              </span>
-              <span className="muted" style={{ fontSize: 12 }}>
-                Showing the legacy control-plane agent registry instead.
-              </span>
-            </div>
-          </Card>
-          <Card title={`Registered agents (${legacy.length})`}>
-            {legacy.length === 0 ? (
-              <EmptyState
-                icon="agents"
-                title="No agents registered"
-                message="Start the backend under Bun to unlock the real omp agent catalog."
-              />
-            ) : (
-              <div style={{ overflow: 'auto', maxHeight: 440 }}>
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>ID</th>
-                      <th>Name</th>
-                      <th>Status</th>
-                      <th>Created</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {legacy.map((a) => (
-                      <tr key={a.id}>
-                        <td>
-                          <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
-                            <span className="mono">{a.id}</span>
-                            <CopyButton text={a.id} title="Copy agent id" />
-                          </div>
-                        </td>
-                        <td style={{ fontWeight: 600 }}>{a.name}</td>
-                        <td>
-                          <StatusPill tone={legacyTone(a.status)} dot={a.status === 'running'}>
-                            {a.status}
-                          </StatusPill>
-                        </td>
-                        <td className="mono muted" title={new Date(a.createdAt).toLocaleString()}>
-                          {fmtRelative(a.createdAt) || '—'}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Card>
         </div>
       )}
     </>

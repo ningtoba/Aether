@@ -6,6 +6,58 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.4.0 — the image ships what CI type-checks; bounded realtime; last simulated
+plane gone (2026-08-30)
+
+- **The Docker runtime now executes the compiled artifact.** CMD was
+  `bun run …/src/main.ts` — the image built `dist/` but never ran it, so the
+  type-checked build and the shipped runtime could drift silently. CMD is now
+  `bun run packages/aether-backend/dist/main.js`; `resolveFrontendDist` was
+  verified to resolve the GUI dir identically from `dist/` (same module depth).
+  Live container PID-1 cmdline confirmed post-rebuild.
+- **The last simulated control plane is gone.** The in-memory `/api/agents*`
+  registry was deleted (same clean cutover as `/api/providers` in v0.3.7):
+  uniform 404, no shim, GUI fallback removed — the Agents page shows omp's
+  real agent definitions or an explicit error. `GET /api/agents` against the
+  redeployed container answers 404. Generic-machinery tests that used the
+  route as a vehicle (CORS preflight, RBAC 401/403, body-size guards, 405
+  policy, malformed-URL 400) were retargeted to live routes, none dropped.
+- **The Bun realtime hub got the outbound bound it shipped without.**
+  `broadcast()` fanned frames out with no backlog limit — one stalled client
+  could grow its socket buffer unboundedly. Per-client cap now mirrors the
+  legacy manager's `MAX_WS_OUTBOUND_BACKLOG` (1 MB; at-cap keeps, above-cap
+  terminates; Bun send-status 0 or a throwing send evicts), degrading
+  gracefully when the runtime lacks the backpressure APIs. 9 new tests,
+  mutation-proven.
+- **The static GUI server's guards are finally pinned.** 18 new tests for the
+  previously untested `static-server.ts`: raw `../` traversal → 403
+  `Forbidden`, encoded/backslash variants never decoded (current no-decode
+  semantics pinned so a future decoder fails loudly), html `no-cache` vs
+  immutable asset caching, SPA fallback, GET/HEAD-only (others fall through
+  to the router), JSON 404 when the dist has no index. Three guard-mutation
+  runs confirmed the tests discriminate.
+- **Dead weight removed:** unused `@langchain/langgraph` dependency (lockfile
+  shrank by 343 lines), zero-caller exports `OmpFacade.hasCapability()` and
+  `SkillsService.invalidate()`, ARCHITECTURE.md's hardcoded test count and
+  two already-shipped roadmap bullets.
+- **GUI design pass — 14 deltas from a designer vision review of all eight
+  views, each re-verified in the browser against the redeployed container:**
+  the loops editor is now visibly bound to the selected row
+  (`Editing · <name>` vs `+ New loop`, `is-selected` styling, sticky
+  Create/Run CTA, two-step delete); session rows lead with a bright basename
+  over a dim dirname, ids show a 12-char prefix with the full value on hover,
+  the model pill shows its basename, and the persisted section cap carries
+  its count (`PERSISTED (OMP ON DISK · 116)`); the dashboard sessions card
+  can no longer contradict itself (`0 live · 116 on disk`) and not-exported
+  SDK chips collapse behind `+ N internal`; all-caps labels raised to
+  `--text-dim`; search placeholders shortened with a 240px floor; the active
+  segmented filter gets a real fill; skill descriptions clamp uniformly with
+  full text on hover; model table numeric headers align with their values.
+- 625 tests green (27 new; the simulated-registry suite deleted with the
+  registry); `tsc -b --force`, lint, and `format:check` clean.
+
+---
+
 ## v0.3.9 — provider rows you can actually read (2026-08-30)
 
 GUI-enhancement pass (design scout + vision-verified screenshots of the

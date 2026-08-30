@@ -31,8 +31,8 @@ const LEGACY_BEHAVIORS: Array<{ name: string; note: string }> = [
   { name: 'Models & sessions', note: 'ModelsPage / SessionsPage — /api/models, /api/sessions*' },
   { name: 'Loop definitions', note: 'LoopsPage — /api/loops* (engine-backed runs included)' },
   {
-    name: 'Agents & providers',
-    note: 'AgentsPage / ProvidersPage — /api/agents*, /api/omp/providers* (providers:config read/write)',
+    name: 'Providers',
+    note: 'ProvidersPage — /api/omp/providers* (providers:config read/write)',
   },
   { name: 'Skills', note: 'SkillsPage — /api/skills' },
 ];
@@ -554,8 +554,8 @@ export function SettingsPage() {
             <p className="muted" style={{ fontSize: 'var(--fs-sm)', margin: 0 }}>
               The agent engine is not running under Bun (or the backend is unreachable):{' '}
               <span className="mono">{hint || 'engine not configured'}</span>. Omp reads its config
-              from <span className="mono">~/.omp/agent/config.yml</span> on disk, so nothing here
-              is required to keep running — editing is disabled on this page.
+              from <span className="mono">~/.omp/agent/config.yml</span> on disk, so nothing here is
+              required to keep running — editing is disabled on this page.
             </p>
           </Card>
           <Card title="Legacy behaviors (still served)">
@@ -594,7 +594,7 @@ export function SettingsPage() {
             <input
               className="input"
               aria-label="Search settings by path, label, or description"
-              placeholder="Search settings by path, label, or description…"
+              placeholder="Search settings…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -629,7 +629,9 @@ export function SettingsPage() {
             <EmptyState
               icon="search"
               title="No settings match"
-              message={<>Nothing matches “{query.trim()}” — try a different path, label, or keyword.</>}
+              message={
+                <>Nothing matches “{query.trim()}” — try a different path, label, or keyword.</>
+              }
               action={
                 <button className="btn" onClick={() => setQuery('')}>
                   Clear search
