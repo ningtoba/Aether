@@ -8,12 +8,14 @@ import {
   listModels,
   listDiskSessions,
   readDiskSession,
+  getSession,
   type SessionSummary,
   type ModelGroup,
   type DiskSessionInfo,
 } from '../lib/api';
 import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
 import { ChatConsole } from '../components/ChatConsole';
+import type { ChatStats } from '../components/ChatConsole';
 import { CwdPicker } from '../components/CwdPicker';
 import { reduceChatFrame, appendUser, fromMessages, type ChatItem } from '../lib/chat';
 
@@ -36,6 +38,8 @@ export function SessionsPage() {
   const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed'>('connecting');
   const [viewingDisk, setViewingDisk] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [activeStats, setActiveStats] = useState<ChatStats | null>(null);
+  const [activeModel, setActiveModel] = useState<string>('');
 
   const refresh = useCallback(() => {
     listSessions()
@@ -46,6 +50,16 @@ export function SessionsPage() {
       .catch(() => {
         /* disk-session browsing is optional (non-Bun mode) */
       });
+  }, []);
+  // Load the active session's stats + model for the status line.
+  const loadActive = useCallback((id: string) => {
+    getSession(id)
+      .then((r) => {
+        const s = r.session;
+        setActiveStats(s.stats ?? null);
+        setActiveModel(`${s.model.provider}/${s.model.modelId}`);
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -80,10 +94,12 @@ export function SessionsPage() {
     const unsub = rt.subscribe((frame: RealtimeFrame) => {
       const sid = frame.payload?.sessionId;
       if (sid && sid !== current) return;
+      const ev = frame.payload?.event as Record<string, unknown> & { kind?: string };
+      if (ev?.kind === 'agent_end') loadActive(current);
       setItems((it) => reduceChatFrame(it, frame));
     });
     return unsub;
-  }, [rt, current]);
+  }, [rt, current, loadActive]);
 
   const openSession = async () => {
     const slash = model.indexOf('/');
@@ -92,6 +108,7 @@ export function SessionsPage() {
     try {
       const { session } = await createSession({ provider, modelId }, cwd);
       setCurrent(session.id);
+      loadActive(session.id);
       setViewingDisk(null);
       setItems([]);
       refresh();
@@ -104,6 +121,7 @@ export function SessionsPage() {
     setCurrent(s.id);
     setViewingDisk(null);
     setItems([]);
+    loadActive(s.id);
   };
 
   const openDiskSession = async (info: DiskSessionInfo) => {
@@ -217,6 +235,8 @@ export function SessionsPage() {
         <ChatConsole
           items={items}
           onSend={send}
+          stats={activeStats}
+          model={activeModel}
           header={
             <>
               <span style={{ fontWeight: 600 }}>

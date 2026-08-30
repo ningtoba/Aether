@@ -203,6 +203,73 @@ export class EngineSession {
     return this.count;
   }
 
+  /**
+   * Session totals (message/token counts, context usage) surfaced to the GUI
+   * status line, mirroring what omp prints at the bottom of its TUI. Returns
+   * null when the engine session isn't attached or stats aren't available.
+   */
+  stats(): null | {
+    messages: number;
+    toolCalls: number;
+    tokens: {
+      input: number;
+      output: number;
+      reasoning: number;
+      cacheRead: number;
+      cacheWrite: number;
+      total: number;
+    };
+    cost: number;
+    context?: { tokens: number; contextWindow: number; percent: number };
+  } {
+    const omp = this.omp;
+    if (!omp) return null;
+    try {
+      const s = omp.getSessionStats?.() as
+        | {
+            userMessages?: number;
+            assistantMessages?: number;
+            toolCalls?: number;
+            totalMessages?: number;
+            tokens?: {
+              input?: number;
+              output?: number;
+              reasoning?: number;
+              cacheRead?: number;
+              cacheWrite?: number;
+              total?: number;
+            };
+            cost?: number;
+            contextUsage?: { tokens?: number; contextWindow?: number; percent?: number };
+          }
+        | undefined;
+      if (!s) return null;
+      const tok = s.tokens ?? {};
+      return {
+        messages: s.totalMessages ?? 0,
+        toolCalls: s.toolCalls ?? 0,
+        tokens: {
+          input: tok.input ?? 0,
+          output: tok.output ?? 0,
+          reasoning: tok.reasoning ?? 0,
+          cacheRead: tok.cacheRead ?? 0,
+          cacheWrite: tok.cacheWrite ?? 0,
+          total: tok.total ?? 0,
+        },
+        cost: s.cost ?? 0,
+        context: s.contextUsage
+          ? {
+              tokens: s.contextUsage.tokens ?? 0,
+              contextWindow: s.contextUsage.contextWindow ?? 0,
+              percent: s.contextUsage.percent ?? 0,
+            }
+          : undefined,
+      };
+    } catch {
+      return null;
+    }
+  }
+
   #require(): OmpSessionLike {
     if (!this.omp) throw new EngineUnavailableError('Session is not attached');
     return this.omp;

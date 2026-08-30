@@ -75,6 +75,20 @@ export interface SessionSummary {
   status: string;
   messageCount: number;
   createdAt: string;
+  stats?: {
+    messages: number;
+    toolCalls: number;
+    tokens: {
+      input: number;
+      output: number;
+      reasoning: number;
+      cacheRead: number;
+      cacheWrite: number;
+      total: number;
+    };
+    cost: number;
+    context?: { tokens: number; contextWindow: number; percent: number };
+  };
 }
 
 export const listSessions = () => request<{ sessions: SessionSummary[] }>('/api/sessions');

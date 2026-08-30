@@ -10,6 +10,7 @@ import {
   listModels,
   listSkills,
   listOmpSkills,
+  getSession,
   getSessionTranscript,
   type LoopDefinition,
   type LoopProgress,
@@ -19,6 +20,7 @@ import {
 } from '../lib/api';
 import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
 import { ChatConsole } from '../components/ChatConsole';
+import type { ChatStats } from '../components/ChatConsole';
 import { CwdPicker } from '../components/CwdPicker';
 import { reduceChatFrame, appendMeta, fromTranscriptEntries, type ChatItem } from '../lib/chat';
 import type { PageId } from '../App';
@@ -54,6 +56,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   /** Loop live-chat inspector: { loopId, sessionId } to stream. */
   const [inspect, setInspect] = useState<{ loopId: string; sessionId?: string } | null>(null);
   const [inspectItems, setInspectItems] = useState<ChatItem[]>([]);
+  const [inspectStats, setInspectStats] = useState<ChatStats | null>(null);
 
   const refresh = useCallback(() => {
     listLoops()
@@ -163,6 +166,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
 
   const openInspect = (loopId: string, sessionId?: string) => {
     setInspect({ loopId, sessionId });
+    setInspectStats(null);
     setInspectItems([]);
     // Replay the loop's session transcript — works even for already-completed
     // loops on a fresh page where the progress map isn't loaded yet.
@@ -176,6 +180,9 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
       }
       getSessionTranscript(sid)
         .then((d) => setInspectItems(fromTranscriptEntries(d.transcript.entries)))
+        .catch(() => {});
+      getSession(sid)
+        .then((r) => setInspectStats(r.session.stats ?? null))
         .catch(() => {});
     };
     if (sessionId) {
@@ -649,6 +656,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
           <div className="chat" style={{ minHeight: 0 }}>
             <ChatConsole
               items={inspectItems}
+              stats={inspectStats}
               header={
                 <>
                   <span style={{ fontWeight: 600 }}>Loop: {inspect.loopId}</span>

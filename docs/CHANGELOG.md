@@ -6,6 +6,31 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.2 — omp-fidelity chat rendering (2026-08-30)
+
+Chat windows (Sessions + loop inspection) now render like the omp terminal
+instead of a flat text/JSON console.
+
+- Assistant + user messages render as real markdown (headings, bold, lists,
+  tables, links) with syntax-highlighted code blocks (react-markdown +
+  remark-gfm + rehype-highlight) — no hand-rolled text formatting.
+- Thinking is a collapsible dimmed block (click ▶ to expand) like omp.
+- Tool calls are rich panels: tool name, args (inline for bash/python), a
+  plain mono result (not markdown-mangled), and an error/ok status.
+- A status line under the chat mirrors omp's status bar: model, message count,
+  token totals (in/out), tool-call count, and context usage %.
+- Backend: EngineSession.stats() exposes omp's per-session totals (tokens,
+  cost, contextUsage); each session summary now carries `stats` so the GUI
+  status line updates after every turn (agent_end).
+
+Verified in-container: a markdown+table+code+bash-tool prompt renders real
+
+<h3>/<strong>/hljs-highlighted code/<table>/tool blocks, and the status line
+shows e.g. "tokens 47,035 · in 46,900 · out 135 · 1 tool calls · ctx 2%".
+582 tests, tsc -b, lint 0 errors, prettier clean.
+
+---
+
 ## v0.3.1 — Working directories per session/loop (2026-08-30)
 
 Pick a real host working directory per session or loop, so the agent edits a

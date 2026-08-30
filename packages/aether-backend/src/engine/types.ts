@@ -37,6 +37,21 @@ export interface SessionSummary {
   messageCount: number;
   createdAt: string;
   lastActivityAt?: string;
+  /** Session totals for the GUI status line (messages/tokens/context). */
+  stats?: {
+    messages: number;
+    toolCalls: number;
+    tokens: {
+      input: number;
+      output: number;
+      reasoning: number;
+      cacheRead: number;
+      cacheWrite: number;
+      total: number;
+    };
+    cost: number;
+    context?: { tokens: number; contextWindow: number; percent: number };
+  };
 }
 
 /** A single conversation turn event normalized for the GUI. */

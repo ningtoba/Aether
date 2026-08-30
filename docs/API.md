@@ -114,10 +114,28 @@ A session is one persistent agent conversation bound to a model. Created session
       "status": "idle",
       "messageCount": 0,
       "createdAt": "2026-08-29T14:53:44.621Z",
+      "stats": {
+        "messages": 4,
+        "toolCalls": 1,
+        "tokens": {
+          "input": 46900,
+          "output": 135,
+          "reasoning": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 47035,
+        },
+        "cost": 0,
+        "context": { "tokens": 24000, "contextWindow": 1049000, "percent": 2.2 },
+      },
     },
   ],
 }
 ```
+
+Each summary includes a `stats` field (message/token totals + context usage) for the GUI status line — mirroring omp's status bar in the terminal.
+
+````
 
 ### `POST /api/sessions`
 
@@ -144,7 +162,7 @@ Replay a live session's journal as rich entries — thinking, tool calls with ar
     ],
   },
 }
-```
+````
 
 ### `POST /api/sessions/:id/prompt`
 

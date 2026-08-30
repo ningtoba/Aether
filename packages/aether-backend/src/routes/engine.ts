@@ -84,6 +84,7 @@ function sessionToSummary(session: EngineSession): Record<string, unknown> {
     status: session.status,
     messageCount: session.messageCount,
     createdAt: new Date().toISOString(),
+    stats: session.stats(),
   };
 }
 
