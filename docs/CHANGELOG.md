@@ -6,6 +6,85 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.9 — provider rows you can actually read; honest verify (2026-08-30)
+
+GUI-enhancement pass (design scout + vision-verified screenshots of the deployed
+build), plus a live-behavior audit of the verify path.
+
+- **Verify is honest end-to-end.** `POST /api/omp/providers/:id/verify` now
+  distinguishes *credentials fail* (`reachable:false` + reason, e.g. HTTP 401)
+  from *cannot tell* (server unreachable / no model endpoint →
+  `reachable:true, verified:false`): a working provider with a bad key is never
+  reported as healthy. Reachability checks are deduplicated and cached 15 s, and
+  a verify against a never-configured provider no longer passes on ambient
+  env-var credentials. The Providers row surfaces the pill in the **Auth**
+  column (it describes the credential, not an action) with the reason on hover.
+- **The provider table stopped clipping.** Action labels were being cut
+  mid-word at the card edge (`chan…`, `remo…`) with no scroll affordance —
+  verified from screenshots. Labels are now short, complete words (`key`,
+  `revoke`, `verify`, `delete`, `models`), pills are compact
+  (`configured` / `via config` / `models.yml` / `keyless`), the action cluster
+  keeps its natural width inside the scrollable table, and a search box +
+  jump-to-provider select front the 70-row catalog.
+- **Dashboard health copy is true**: `providers: 2 configured · 67 in catalog`
+  replaces `2 of 67 configured`, which implied the other 65 were half-configured
+  when 67 is simply the catalog size.
+- Live verification: key rotate → `configured` stays, verify → `reachable`;
+  filtered and unfiltered table screenshots re-inspected after each change.
+  611 tests green.
+
+## v0.3.8 — provider control plane: real auth truth, key provisioning, custom providers (2026-08-30)
+
+Sixth audit iteration: provider-surface, secret-hygiene and GUI-polish scouts,
+all CRITICAL/MAJOR claims reproduced against SDK source before contracting, then
+four parallel implementers (backend cutover, bind-guard, Providers-page rework,
+four-page design pass).
+
+- **The auth column became true.** `OmpFacade.listProviders` derived
+  `authenticated` from a `Model.authenticated` field the SDK has never set — every
+  one of the ~70 catalog rows was structurally pinned to "not configured" and
+  `/health` `providers.healthy` was permanently 0. Provider auth truth now comes
+  from the live `authStorage.hasAuth(id)` via EngineService's warm instances, with
+  `authOrigin` (`via config / api_key / oauth / env …`), `custom` (models.yml
+  ownership) and `discoveryStatus` added to the DTO. Live check: 70 rows, exactly
+  the 2 genuinely keyed providers report configured.
+- **Key provisioning is real.** `PUT /api/omp/providers/:id/key` persists through
+  `AuthStorage.set` (SQLite credential store), `DELETE` revokes via `remove`, and
+  `POST /:id/verify` probes `baseUrl/models` with the resolved key (4 s timeout,
+  reason-coded, model lists never returned). Keys are write-only: no response,
+  error or log line can echo them (discriminated by tests and by the live probe).
+- **Custom providers: GUI → `models.yml`.** The dead in-memory registry, its four
+  legacy verbs, the "Save & verify" name-matching fiction and its 400-redirect to
+  a settings path that never existed are deleted. `POST/DELETE
+  /api/omp/providers` now validate, merge and atomically rewrite `models.yml`
+  (0600 live file, 0600-or-absent `.bak`, unrelated keys preserved byte-for-byte),
+  hot-reload the engine (`registry.refresh` + targeted `refreshProvider`), and the
+  session-usable model set no longer diverges from the catalog after a write.
+- **Startup bind guard (audited MAJOR):** the backend defaulted to `0.0.0.0` with
+  auth opt-in — a LAN-reachable unauthenticated API that can create sessions and
+  run agent tools. `HOST` now defaults to `127.0.0.1`; non-loopback binds refuse
+  startup unless `AETHER_API_KEY` or an explicit `AETHER_ALLOW_UNAUTHENTICATED=1`
+  opt-in is present (the Docker image sets the flag deliberately; compose keeps
+  publishing 127.0.0.1-only). Loopback dev flow unchanged.
+- **Secret-hygiene fixes:** the credential mask now honors the SDK's `ui.secret`
+  spelling (was: latent raw-value leak on future schema entries);
+  record-typed credentials (`images.urls.credentials`) no longer report
+  "configured" from an empty default; invalid loop-store rows log id/name instead
+  of the raw record.
+- **GUI design pass (17 findings → closed):** Providers rebuilt around the new
+  truth (per-row key set/rotate/revoke + verify, `models.yml` pill + delete,
+  honest copy); Models surfaces per-group "not configured" against the live
+  flag; dead shared-style bypasses closed repo-wide (`.truncate` URL cells,
+  `.list-row` skill rows with real source-tone mapping, `.field .req`,
+  `.card-ghost.is-selected`, `.form-narrow` on Settings, unified search widths);
+  the Settings RBAC note points at `/api/omp/providers*`.
+- Tests 562 → **611** (34 files): +engine-level provider discriminators
+  (cast-injected warm engine proves bundled-name 409 leaves `models.yml`
+  byte-identical, and create→delete preserves unrelated providers/keys and
+  0600 perms), store backup/perms invariants, verb-level contract tests with
+  key-echo oracles, bind-guard table, settings-mask coverage; legacy provider
+  suites deleted with their routes.
+
 ## v0.3.7 — durable sessions + resume, executions surface cut, hardening pass (2026-08-30)
 
 Fifth audit iteration: three fresh-lens scouts (session-persistence feasibility,

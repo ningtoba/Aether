@@ -45,6 +45,8 @@ ENV NODE_ENV=production
 ENV PORT=3001
 ENV REALTIME_PORT=3002
 ENV HOST=0.0.0.0
+# Container must bind all interfaces for -p publishing; compose publishes 127.0.0.1-only (see docker-compose.yml ports).
+ENV AETHER_ALLOW_UNAUTHENTICATED=1
 
 EXPOSE 3001 3002
 

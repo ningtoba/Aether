@@ -336,8 +336,8 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
                   {health.realtime?.port
                     ? `realtime ws://${location.hostname}:${health.realtime.port}`
                     : 'realtime endpoint unknown'}{' '}
-                  · legacy registry: {health.providers?.configured} configured /{' '}
-                  {health.providers?.healthy} healthy
+                  · providers: {health.providers?.healthy} configured ·{' '}
+                  {health.providers?.configured} in catalog
                 </span>
               </div>
             </div>

@@ -66,8 +66,15 @@ export class LoopManager {
       } else {
         // One corrupt entry (hand-edited, or written by an older build) must
         // not silently take the healthy majority with it: skip ONLY this one,
-        // loudly.
-        console.error(`[LoopManager] skipping invalid loop store entry: ${JSON.stringify(raw)}`);
+        // loudly — yet identify it by id/name FIELDS ONLY. A corrupt entry is
+        // arbitrary hand-edit data (prompts, paths); never log it wholesale.
+        let ident = `<${typeof raw}>`;
+        if (raw !== null && typeof raw === 'object') {
+          const id = 'id' in raw ? String(raw.id) : '?';
+          const name = 'name' in raw ? String(raw.name) : '?';
+          ident = `id=${id} name=${name}`;
+        }
+        console.error(`[LoopManager] skipping invalid loop store entry: ${ident}`);
       }
     }
   }

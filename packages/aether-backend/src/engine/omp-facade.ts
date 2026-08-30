@@ -28,7 +28,13 @@ import { join, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 
-import { confineSessionPath, defaultSessionRoots, isBunRuntime } from './engine-service.js';
+import {
+  confineSessionPath,
+  defaultSessionRoots,
+  isBunRuntime,
+  type ProviderAuthOrigin,
+} from './engine-service.js';
+import { providerNamesIn } from './providers-store.js';
 
 /* ─── Wire DTOs (stable GUI contracts) ───────────────────────────────── */
 export interface FacadeCapability {
@@ -71,8 +77,16 @@ export interface ProviderDto {
   modelCount: number;
   /** Sample model ids from this provider (for the GUI picker). */
   models: string[];
+  /** Truth = AuthStorage.hasAuth(id). Model rows have NO auth field — the
+   *  old per-model boolean was the lie this replaces. */
   authenticated: boolean;
   discoverable: boolean;
+  /** models.yml owns this provider (deletable custom entry). */
+  custom: boolean;
+  /** Where the stored credential came from (omp getCredentialOrigin kind). */
+  authOrigin?: ProviderAuthOrigin;
+  /** String form of the provider discovery state object (.status). */
+  discoveryStatus?: string;
 }
 
 export interface AgentDefDto {
@@ -123,6 +137,8 @@ interface OmpSettingUi {
   label?: string;
   description?: string;
   options?: Array<{ value: string; label: string; description?: string }>;
+  /** Some omp defs carry the secret marker on the UI block, not the root. */
+  secret?: boolean;
 }
 interface OmpSettingDef {
   type?: string;
@@ -145,7 +161,12 @@ interface OmpModelLike {
   provider?: string;
   name?: string;
   baseUrl?: string;
-  authenticated?: boolean;
+}
+
+/** Feature-detected slice of omp AuthStorage the provider catalog reads. */
+interface OmpAuthStorageLike {
+  hasAuth?(provider: string): boolean;
+  getCredentialOrigin?(provider: string): { kind?: string } | undefined;
 }
 interface OmpProviderInfo {
   provider?: string;
@@ -156,7 +177,18 @@ interface OmpModelRegistry {
   getAll?(): OmpModelLike[];
   find?(provider: string, id: string): unknown;
   getDiscoverableProviders?(): string[];
+  getProviderDiscoveryState?(id: string): unknown;
 }
+
+/** Static lookup: the credential origins a DTO may report. */
+const AUTH_ORIGIN_KINDS: Record<ProviderAuthOrigin, true> = {
+  runtime: true,
+  config: true,
+  oauth: true,
+  api_key: true,
+  env: true,
+  fallback: true,
+};
 interface OmpSessionManager {
   list?(dir: string): Promise<unknown>;
   listAllSessions?(): Promise<unknown>;
@@ -329,7 +361,7 @@ export class OmpFacade {
         if (Array.isArray(def?.values)) {
           entry.enumValues = def.values.map((v) => String(v));
         }
-        entry.credential = def?.credential === true;
+        entry.credential = def?.credential === true || def?.ui?.secret === true;
         if ('default' in (def ?? {})) entry.defaultValue = def.default;
         settings.push(entry);
       }
@@ -418,7 +450,15 @@ export class OmpFacade {
 
   /* ─── Providers / models ────────────────────────────────────────────── */
 
-  /** Full provider catalog: every provider omp knows (bundled + custom). */
+  /**
+   * Full provider catalog: every provider omp knows (bundled + custom).
+   * This is the STANDALONE facade path (its own per-call registry+storage);
+   * the route layer prefers EngineService's LIVE instances when the engine
+   * has started — same DTO shape either way. Auth truth comes from the
+   * storage's hasAuth (model rows carry no auth field), authOrigin from
+   * getCredentialOrigin, custom from the models.yml providers map, and
+   * discoveryStatus from the registry's per-provider state object.
+   */
   async listProviders(): Promise<{ ok: boolean; providers?: ProviderDto[]; error?: string }> {
     if (!(await this.ensure())) return { ok: false, error: 'engine unavailable' };
     try {
@@ -434,6 +474,48 @@ export class OmpFacade {
         else registry.refreshInBackground?.();
       }
       const all = registry?.getAll?.() ?? [];
+      const authStore = auth as OmpAuthStorageLike;
+      const customNames = await this.#customProviderNames();
+
+      const row = (pid: string, baseUrl?: string): ProviderDto => {
+        const dto: ProviderDto = {
+          id: pid,
+          name: pid,
+          baseUrl,
+          modelCount: 0,
+          models: [],
+          authenticated: false,
+          discoverable: false,
+          custom: customNames.has(pid),
+        };
+        try {
+          dto.authenticated = authStore.hasAuth?.(pid) === true;
+        } catch {
+          /* auth-store quirk on one row never sinks the catalog */
+        }
+        try {
+          const kind = authStore.getCredentialOrigin?.(pid)?.kind;
+          if (kind !== undefined && kind in AUTH_ORIGIN_KINDS)
+            dto.authOrigin = kind as ProviderAuthOrigin;
+        } catch {
+          /* older SDK: no origin info */
+        }
+        try {
+          // getProviderDiscoveryState returns a STATE OBJECT; the string
+          // form the GUI renders lives on its .status.
+          const state = registry?.getProviderDiscoveryState?.(pid);
+          if (
+            state !== null &&
+            typeof state === 'object' &&
+            'status' in state &&
+            typeof state.status === 'string'
+          )
+            dto.discoveryStatus = state.status;
+        } catch {
+          /* older SDK: no discovery state */
+        }
+        return dto;
+      };
 
       const byProvider = new Map<string, ProviderDto>();
       for (const m of all) {
@@ -441,20 +523,11 @@ export class OmpFacade {
         if (!pid) continue;
         let rec = byProvider.get(pid);
         if (!rec) {
-          rec = {
-            id: pid,
-            name: pid,
-            baseUrl: m?.baseUrl,
-            modelCount: 0,
-            models: [],
-            authenticated: Boolean(m?.authenticated),
-            discoverable: false,
-          };
+          rec = row(pid, m?.baseUrl);
           byProvider.set(pid, rec);
         }
         rec.modelCount++;
         if (rec.models.length < 20 && m?.id) rec.models.push(m.id);
-        if (m?.authenticated) rec.authenticated = true;
       }
       // Mark discoverable runtime providers (Ollama/llama.cpp/vLLM/...) even
       // when they carry no static models yet.
@@ -463,15 +536,11 @@ export class OmpFacade {
         for (const pid of disc) {
           const rec = byProvider.get(pid);
           if (rec) rec.discoverable = true;
-          else
-            byProvider.set(pid, {
-              id: pid,
-              name: pid,
-              modelCount: 0,
-              models: [],
-              authenticated: false,
-              discoverable: true,
-            });
+          else {
+            const created = row(pid);
+            created.discoverable = true;
+            byProvider.set(pid, created);
+          }
         }
       } catch {
         /* discovery is best-effort */
@@ -479,6 +548,22 @@ export class OmpFacade {
       return { ok: true, providers: Array.from(byProvider.values()) };
     } catch (err) {
       return { ok: false, error: `providers: ${msg(err)}` };
+    }
+  }
+
+  /** Provider names owned by models.yml — the `custom` truth. Best-effort by
+   *  design: an unreadable/absent config degrades to an empty set (every row
+   *  renders custom:false) instead of failing the catalog. The bun-YAML read
+   *  is dynamic because the module does not exist off-Bun (this class runs
+   *  its Node life without ever touching it). */
+  async #customProviderNames(): Promise<Set<string>> {
+    try {
+      const text = fs.readFileSync(join(homedir(), '.omp', 'agent', 'models.yml'), 'utf8');
+      const bunMod: unknown = await import('bun');
+      const bun = bunMod as { YAML: { parse(text: string): unknown } };
+      return new Set(providerNamesIn(bun.YAML.parse(text)));
+    } catch {
+      return new Set();
     }
   }
 

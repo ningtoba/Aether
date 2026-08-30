@@ -292,7 +292,7 @@ export interface SkillRecord {
 
 export const listSkills = () => request<{ skills: SkillRecord[] }>('/api/skills');
 
-/* ── Legacy control-plane (agents / providers) ──────────────────────── */
+/* ── Legacy control-plane (agents) ──────────────────────────────────── */
 
 export interface AgentRecord {
   id: string;
@@ -304,24 +304,6 @@ export interface AgentRecord {
 }
 
 export const listAgents = () => request<{ agents: AgentRecord[] }>('/api/agents');
-
-export interface ProviderRecord {
-  id: string;
-  name: string;
-  type: string;
-  endpoint?: string;
-  apiKeyConfigured: boolean;
-  createdAt: string;
-}
-
-export const listProviders = () => request<{ providers: ProviderRecord[] }>('/api/providers');
-export const addProvider = (data: Record<string, unknown>) =>
-  request<{ provider: ProviderRecord }>('/api/providers', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-export const removeProvider = (id: string) =>
-  request<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' });
 
 /* ── Omp facade (settings / providers / agents / skills / disk sessions) ── */
 
@@ -394,12 +376,71 @@ export interface FacadeProvider {
   baseUrl?: string;
   modelCount: number;
   models: string[];
+  /** Server-side credential truth (authStorage.hasAuth) — never a client guess. */
   authenticated: boolean;
   discoverable: boolean;
+  /** Where the live credential came from (omp AuthStorage.getCredentialOrigin). */
+  authOrigin?: 'runtime' | 'config' | 'oauth' | 'api_key' | 'env' | 'fallback';
+  /** Owned by ~/.omp/agent/models.yml — the only providers the GUI may delete. */
+  custom?: boolean;
+  /** Last discovery outcome (registry.getProviderDiscoveryState). */
+  discoveryStatus?: string;
 }
 
 export const listFacadeProviders = () =>
   request<{ providers: FacadeProvider[] }>('/api/omp/providers');
+
+/** One optional model row of the create-provider form (models.yml entry). */
+export interface FacadeProviderModelSpec {
+  id: string;
+  contextWindow?: number;
+  maxTokens?: number;
+}
+
+/** Body for POST /api/omp/providers — writes a custom provider into models.yml. */
+export interface CreateFacadeProviderBody {
+  name: string;
+  baseUrl: string;
+  apiKey?: string;
+  api?: string;
+  /** 'none' marks a keyless local server; replaces the apiKey requirement. */
+  auth?: 'none';
+  models?: FacadeProviderModelSpec[];
+}
+
+export interface VerifyProviderResult {
+  ok: boolean;
+  provider: string;
+  reachable: boolean;
+  modelCount: number | null;
+  reason?: string;
+}
+
+export const createFacadeProvider = (body: CreateFacadeProviderBody) =>
+  request<{ ok: boolean; provider: string }>('/api/omp/providers', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const deleteFacadeProvider = (id: string) =>
+  request<{ ok: boolean }>(`/api/omp/providers/${id}`, { method: 'DELETE' });
+
+/** Store/replace a provider key server-side (omp AuthStorage); never echoed back. */
+export const setProviderKey = (id: string, apiKey: string) =>
+  request<{ ok: boolean; provider: string; authenticated: boolean }>(
+    `/api/omp/providers/${id}/key`,
+    { method: 'PUT', body: JSON.stringify({ apiKey }) },
+  );
+
+export const removeProviderKey = (id: string) =>
+  request<{ ok: boolean; provider: string; authenticated: boolean }>(
+    `/api/omp/providers/${id}/key`,
+    { method: 'DELETE' },
+  );
+
+/** Probe the provider's base URL server-side; model list is never returned. */
+export const verifyProvider = (id: string) =>
+  request<VerifyProviderResult>(`/api/omp/providers/${id}/verify`, { method: 'POST' });
 
 export interface AgentDef {
   name: string;

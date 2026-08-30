@@ -40,7 +40,7 @@ Requires **Bun ≥ 1.3.14** at runtime (the agent engine only runs under Bun) an
 | **Loops**               | Indefinite, workflow-controlled runs: `[round N] → [transition] → [round N+1]`. Transitions — `none`, `compact`, `skill` (with per-round `{round}`-templated arguments), or an interactive `gate` where _you_ decide — plus `maxRounds`/`maxTimeMs`/manual stop. Loop definitions persist across restarts (atomically; a corrupt store is quarantined, never silently dropped). |
 | **Skills**              | Every `SKILL.md` pack omp discovers — user, project, and managed-skills sources — browsable with full bodies on demand; wire any one in as a loop transition.                                                                                               |
 | **Models**              | Live catalog from the omp registry (60+ providers + custom `models.yml`), used by every model picker.                                                                                                                                                       |
-| **Providers**           | Searchable catalog of every provider omp knows (70+, with model counts and base URLs), plus custom provider registration.                                                                                                                                   |
+| **Providers**           | Searchable catalog of every provider omp knows with **real per-provider auth state** — provision, replace or revoke an API key from the row, verify reachability live, and register/delete custom providers (written to `models.yml`, 0600, with `.bak`).     |
 | **Agents**              | omp's real agent definitions (bundled `task`/`scout`/`reviewer`/… + user/project agent markdown) with source, description, and inspectable bodies.                                                                                                          |
 | **Settings**            | Schema-driven editor generated from omp's own `SETTINGS_SCHEMA` — every config knob across all 10 tabs, written back to your user config.                                                                                                                   |
 | **Working directories** | Pick a real host directory per session or loop (browse the filesystem in the GUI) — so one session can edit repo A while another edits repo B at the same time. The agent's tools run in that directory.                                                    |
@@ -73,8 +73,8 @@ Requires **Bun ≥ 1.3.14** at runtime (the agent engine only runs under Bun) an
 
 ## Roadmap
 
-- API-key/role provisioning UX in the GUI (roles are already honored end-to-end across REST and the realtime ticket flow; keys are provisioned via env today).
-- Provider CRUD wired to the engine registry (add a provider from the GUI).
+- API-key/role provisioning UX for **Aether's own** API (roles are honored end-to-end;
+  provider keys now live in the GUI since v0.3.8 — `AETHER_API_KEY` itself is still env-provisioned).
 - Skill create/import flow writing `SKILL.md` into user/project skill dirs.
 
 ---

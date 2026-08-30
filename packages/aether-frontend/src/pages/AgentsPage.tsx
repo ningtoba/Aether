@@ -149,10 +149,6 @@ export function AgentsPage() {
               onChange={setSource}
               options={SOURCES.map((s) => ({ value: s.id, label: s.label }))}
             />
-            <span className="spacer" />
-            <span className="muted" style={{ fontSize: 12 }}>
-              {agents.length} agent{agents.length === 1 ? '' : 's'} loaded
-            </span>
           </div>
 
           {filtered.length === 0 ? (
@@ -185,15 +181,7 @@ export function AgentsPage() {
                 return (
                   <div
                     key={a.name}
-                    className="card card-ghost"
-                    style={
-                      isSel
-                        ? {
-                            borderColor: 'var(--accent)',
-                            boxShadow: 'inset 2px 0 0 var(--accent-strong), var(--shadow-1)',
-                          }
-                        : undefined
-                    }
+                    className={`card card-ghost${isSel ? ' is-selected' : ''}`}
                   >
                     <div className="card-header">
                       <span

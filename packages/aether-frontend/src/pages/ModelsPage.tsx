@@ -3,7 +3,7 @@
  * One Card per provider; token/context numbers are compacted (full value in title).
  */
 import React, { useCallback, useEffect, useState } from 'react';
-import { listModels, type ModelGroup } from '../lib/api';
+import { listFacadeProviders, listModels, type ModelGroup } from '../lib/api';
 import {
   Card,
   CopyButton,
@@ -18,6 +18,8 @@ import {
 
 export function ModelsPage() {
   const [groups, setGroups] = useState<ModelGroup[]>([]);
+  /** provider id → server-side key truth; empty until the provider catalog answers. */
+  const [providerAuth, setProviderAuth] = useState<Record<string, boolean>>({});
   const [provider, setProvider] = useState<string>('all');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
@@ -32,6 +34,16 @@ export function ModelsPage() {
       })
       .catch((e: Error) => setError(e.message))
       .finally(() => setLoading(false));
+
+    // Auth truth is best-effort and never blocks the catalog: a group only shows
+    // the "not configured" pill once this call has answered for its provider.
+    listFacadeProviders()
+      .then((r) =>
+        setProviderAuth(
+          Object.fromEntries(r.providers.map((p) => [p.id, p.authenticated] as const)),
+        ),
+      )
+      .catch(() => setProviderAuth({}));
   }, []);
 
   useEffect(refresh, [refresh]);
@@ -64,7 +76,7 @@ export function ModelsPage() {
         }
         actions={
           <>
-            <span className="search" style={{ width: 220 }}>
+            <span className="search" style={{ width: 260 }}>
               <span className="search-icon">
                 <Icon name="search" size={14} />
               </span>
@@ -129,7 +141,16 @@ export function ModelsPage() {
           <Card
             key={group.provider}
             title={group.provider}
-            actions={<StatusPill tone="idle">{group.models.length} models</StatusPill>}
+            actions={
+              <>
+                {providerAuth[group.provider] === false && (
+                  <span title="No server-side API key configured">
+                    <StatusPill tone="idle">not configured</StatusPill>
+                  </span>
+                )}
+                <StatusPill tone="idle">{group.models.length} models</StatusPill>
+              </>
+            }
           >
             <div style={{ maxHeight: 440, overflowY: 'auto' }}>
               <table className="table">

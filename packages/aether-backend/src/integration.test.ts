@@ -18,6 +18,9 @@ import {
 } from './server.js';
 import { WebSocketManager } from './websocket.js';
 import type { RoleId } from '@aether/core';
+import { LoopManager } from './engine/loop-manager.js';
+import { OmpFacade } from './engine/omp-facade.js';
+import type { EngineService, SkillsService } from './engine/index.js';
 
 // ---------------------------------------------------------------------------
 // Full HTTP server integration
@@ -107,7 +110,7 @@ describe('AetherServer HTTP integration', () => {
   });
 });
 
-describe('provider routes & health wiring', () => {
+describe('provider control-plane cutover & health wiring', () => {
   let server: AetherServer;
   beforeEach(() => {
     server = new AetherServer({ port: 0, host: '127.0.0.1' });
@@ -116,67 +119,59 @@ describe('provider routes & health wiring', () => {
     await server.stop();
   });
 
-  it('rejects a null provider body with 400 instead of 500', async () => {
+  it('no longer registers the legacy /api/providers CRUD (uniform 404)', async () => {
     await server.start();
     const base = `http://127.0.0.1:${server.getPort()}`;
-    try {
-      const res = await fetch(`${base}/api/providers`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: 'null',
-      });
-      expect(res.status).toBe(400);
-    } finally {
-      await server.stop();
+    // The simulated in-memory provider Map is deleted; its verbs must NOT
+    // answer anything but the uniform 404 shape anymore.
+    for (const [method, path] of [
+      ['GET', '/api/providers'],
+      ['POST', '/api/providers'],
+      ['GET', '/api/providers/whatever/health'],
+      ['DELETE', '/api/providers/whatever'],
+    ] as const) {
+      const res = await fetch(`${base}${path}`, { method });
+      expect(res.status).toBe(404);
+      expect(((await res.json()) as { error?: string }).error).toBe('Not found');
     }
   });
 
-  it('rejects duplicate client-supplied provider ids with 409', async () => {
-    await server.start();
-    const base = `http://127.0.0.1:${server.getPort()}`;
+  it('serves /health provider stats from the engine wiring itself', async () => {
+    // Discriminator vs the deleted defaultCatalogProbe: the numbers must come
+    // from THIS EngineService instance (providerHealthStats over its warm
+    // registry+authStorage) — the server never constructs a second
+    // ModelRegistry for /health anymore.
+    const fakeEngine = {
+      providerHealthStats: () => ({ configured: 3, healthy: 2 }),
+    } as unknown as EngineService; // structural test double
+    const skills = { get: async () => null } as unknown as SkillsService; // test seam
+    const wired = new AetherServer({
+      port: 0,
+      host: '127.0.0.1',
+      engine: {
+        engine: fakeEngine,
+        loops: new LoopManager(fakeEngine, skills),
+        skills,
+        facade: new OmpFacade(),
+      },
+    });
+    await wired.start();
     try {
-      const body = JSON.stringify({ id: 'dup-provider', name: 'OpenAI', type: 'openai' });
-      const first = await fetch(`${base}/api/providers`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body,
-      });
-      expect(first.status).toBe(201);
-      const second = await fetch(`${base}/api/providers`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body,
-      });
-      expect(second.status).toBe(409);
+      const body = (await (await fetch(`http://127.0.0.1:${wired.getPort()}/health`)).json()) as {
+        providers: { configured: number; healthy: number };
+      };
+      expect(body.providers).toEqual({ configured: 3, healthy: 2 });
     } finally {
-      await server.stop();
+      await wired.stop();
     }
   });
 
-  it('reports real provider counts on /health', async () => {
+  it('reports honest zero provider stats when no engine is wired', async () => {
     await server.start();
-    const base = `http://127.0.0.1:${server.getPort()}`;
-    try {
-      const before = (
-        (await (await fetch(`${base}/health`)).json()) as {
-          providers: { configured: number };
-        }
-      ).providers.configured;
-      await fetch(`${base}/api/providers`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: 'OpenAI', type: 'openai' }),
-      });
-      const after = (
-        (await (await fetch(`${base}/health`)).json()) as {
-          providers: { configured: number };
-        }
-      ).providers.configured;
-      // Before the fix these were hardcoded to 0 regardless of registrations.
-      expect(after).toBe(before + 1);
-    } finally {
-      await server.stop();
-    }
+    const body = (await (await fetch(`http://127.0.0.1:${server.getPort()}/health`)).json()) as {
+      providers: { configured: number; healthy: number };
+    };
+    expect(body.providers).toEqual({ configured: 0, healthy: 0 });
   });
 });
 
@@ -750,6 +745,11 @@ describe('omp facade routes in node mode', () => {
       ['GET', '/api/omp/settings'],
       ['GET', '/api/omp/settings/values'],
       ['GET', '/api/omp/providers'],
+      ['PUT', '/api/omp/providers/openai/key'],
+      ['DELETE', '/api/omp/providers/openai/key'],
+      ['POST', '/api/omp/providers'],
+      ['DELETE', '/api/omp/providers/openai'],
+      ['POST', '/api/omp/providers/openai/verify'],
       ['GET', '/api/omp/agents'],
       ['GET', '/api/omp/skills'],
       ['GET', '/api/omp/sessions'],

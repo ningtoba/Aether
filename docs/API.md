@@ -275,8 +275,25 @@ Engine capability report: runtime, omp version, and per-feature availability.
 
 ### `GET /api/omp/providers`
 
-Every AI provider omp knows (bundled + custom in `models.yml` + discoverable),
-with model counts, base URLs, auth status, and sample model ids.
+Every AI provider omp knows — bundled, custom (`~/.omp/agent/models.yml`), and
+discoverable runtime servers (ollama / llama.cpp / vLLM) — as engine-derived
+truth from the live `ModelRegistry` + `AuthStorage`:
+
+```jsonc
+{ "providers": [{
+  "id": "local-server", "name": "local-server",
+  "baseUrl": "http://192.168.1.10:8000/v1", // when the catalog/entry carries one
+  "modelCount": 3,
+  "models": ["…up to 20 sample ids…"],
+  "authenticated": true,       // authStorage.hasAuth — live truth, never guessed
+  "discoverable": false,       // runtime-discovery provider class
+  "custom": true,              // models.yml owns the entry → deletable
+  "authOrigin": "api_key",     // getCredentialOrigin kind (older SDKs: absent)
+  "discoveryStatus": "ok"      // per-provider discovery state (when available)
+}] }
+```
+
+See [Providers](#providers-1) for the mutation verbs and security notes.
 
 ### `GET /api/omp/agents`
 
@@ -316,14 +333,100 @@ Wrong-method requests to a registered path answer `405` with an `Allow` header; 
 
 ## Providers
 
-### `GET|POST /api/providers`, `DELETE /api/providers/:id`, `GET /api/providers/:id/health`
+The provider control plane lives under `/api/omp/providers*` and is backed by
+the engine's LIVE instances: catalog from the warm `ModelRegistry`,
+credentials from omp's `AuthStorage` (SQLite at `~/.omp/agent/data/agent.db`),
+custom providers from `~/.omp/agent/models.yml`. All verbs map to the
+`providers:config` RBAC permission (`read` for the catalog, `write` for the
+rest — see [Authentication & RBAC](#authentication--rbac)). With the engine
+not running under Bun every mutation answers `501`.
 
-Provider-configuration CRUD (in-memory, capped at 500 records → 503). Note:
-the embedded engine's model catalog comes from the omp registry
-(`~/.omp/agent/models.yml` + bundled providers), not this list — see
-`GET /api/models`. `POST` rejects a non-empty `apiKey` with 400 pointing at
-`PUT /api/omp/settings` (where keys actually live). `GET /api/providers/:id/health`
-is honest, not probed: `{ "status": "unknown", "latency": null, "simulated": true }`.
+### `PUT /api/omp/providers/:id/key`
+
+Body `{ "apiKey": "…" }` (1–4096 chars after trim) stores the key in omp's
+`AuthStorage` for ANY known provider (bundled or `models.yml`-custom).
+→ `200 { "ok": true, "provider": "…", "authenticated": true }`. Unknown ids
+answer `400 { "error": "unknown provider" }`. **The submitted key never
+appears in any response, error text, or log line** — a failed write answers
+the fixed `500 { "error": "provider key write failed" }` for exactly that
+reason.
+
+### `DELETE /api/omp/providers/:id/key`
+
+Drops the stored key. `authenticated` in
+`200 { "ok": true, "provider": "…", "authenticated": false }` is the
+POST-removal `hasAuth` truth — oauth/env-sourced credentials can legitimately
+keep it `true`; it is never a guess.
+
+### `POST /api/omp/providers`
+
+Adds a custom provider to `~/.omp/agent/models.yml` (atomic tmp+rename write;
+unrelated config keys and every other provider entry are preserved):
+
+```jsonc
+{
+  "name": "mylocal",                     // ^[a-z0-9][a-z0-9_-]{0,63}$
+  "baseUrl": "http://10.0.0.2:8000/v1",  // must parse as an http(s) URL
+  "apiKey": "sk-…",                      // optional; REQUIRED when models[] is non-empty
+  "auth": "none",                        // only accepted value: keyless local server
+  "api": "openai-completions",           // optional wire format (this is the default)
+  "models": [                            // optional, ≤ 500 entries
+    { "id": "m1", "contextWindow"?: 8192, "maxTokens"?: 1024 }
+  ]
+}
+```
+
+→ `201 { "ok": true, "provider": "mylocal" }` — the NAME only; an inline
+`apiKey` is never echoed. `409` when the name is already a bundled provider or
+already present in `models.yml` (cap: 500 custom entries). `400` on any
+validation failure (bad name, non-URL baseUrl, `models[]` without a key and
+without `auth: "none"`, non-integer/non-positive `contextWindow`/`maxTokens`,
+over-cap models). `500` with fixed text when `models.yml` cannot be read or
+written. Registry semantics stay omp's: a bundled `config` block with the same
+name still wins over the custom entry.
+
+### `DELETE /api/omp/providers/:id`
+
+Removes a `models.yml`-owned provider AND its stored key → `200 { "ok": true }`.
+Anything `models.yml` does not own is bundled:
+`400 { "error": "built-in providers cannot be deleted; remove their key instead" }`.
+
+### `POST /api/omp/providers/:id/verify`
+
+Honest 4-second reachability probe of `<baseUrl>/models` (baseUrl from the
+live registry, falling back to the `models.yml` entry; the key comes from
+`AuthStorage.peekApiKey` — no OAuth refresh). The model LIST is never
+returned, only its count:
+
+```jsonc
+{ "ok": true, "provider": "ollama", "reachable": true, "modelCount": 12 }
+{ "ok": true, "provider": "x", "reachable": false, "modelCount": null, "reason": "timeout" }
+// reason: "no-base-url" | "timeout" | "network" | "http-<status>"
+```
+
+The probe reports; it never throws — engine-side failures degrade to reason
+codes, so the GUI can render truth without error handling.
+
+### Security notes
+
+- **Keys are never serialized.** No provider response, error body, or server
+  log line ever contains a submitted or stored key; every failure path on the
+  credential routes uses a fixed message.
+- Credential-flagged settings paths are excluded from
+  `GET /api/omp/settings/values` (presence markers only — see Settings above);
+  keys held in `AuthStorage` are invisible to `GET /api/models` and
+  `GET /api/omp/providers` (auth STATE only).
+- An inline `apiKey` in `POST /api/omp/providers` is persisted to
+  `~/.omp/agent/models.yml` — that is omp's own storage semantics for custom
+  providers. Prefer `PUT /api/omp/providers/:id/key` to keep keys in
+  `AuthStorage` and out of the YAML file.
+
+The legacy simulated `/api/providers` CRUD (in-memory Map, `simulated: true`
+health stubs) is REMOVED; those paths answer the uniform
+`404 { "error": "Not found" }`. `/health` `providers` counts are now
+engine-derived too (`configured` = distinct catalog provider ids, `healthy` =
+`hasAuth` truth), TTL-memoized server-side and honestly `{0, 0}` before the
+engine warms.
 
 ---
 

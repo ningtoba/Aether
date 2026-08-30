@@ -167,12 +167,21 @@ describe('AetherServer', () => {
       expect(router.match('DELETE', '/api/agents/test-id')).not.toBeNull();
     });
 
-    it('should register all provider routes', () => {
+    it('should register the omp provider control plane (legacy CRUD gone)', () => {
       const router = (server as any).router;
-      expect(router.match('GET', '/api/providers')).not.toBeNull();
-      expect(router.match('POST', '/api/providers')).not.toBeNull();
-      expect(router.match('GET', '/api/providers/test/health')).not.toBeNull();
-      expect(router.match('DELETE', '/api/providers/test')).not.toBeNull();
+      // Clean cutover: the simulated /api/providers in-memory CRUD is deleted
+      // — its verbs must no longer match the router table at all.
+      expect(router.match('GET', '/api/providers')).toBeNull();
+      expect(router.match('POST', '/api/providers')).toBeNull();
+      expect(router.match('GET', '/api/providers/test/health')).toBeNull();
+      expect(router.match('DELETE', '/api/providers/test')).toBeNull();
+      // The replacement family (engine-backed, RBAC providers:config):
+      expect(router.match('GET', '/api/omp/providers')).not.toBeNull();
+      expect(router.match('PUT', '/api/omp/providers/test/key')).not.toBeNull();
+      expect(router.match('DELETE', '/api/omp/providers/test/key')).not.toBeNull();
+      expect(router.match('POST', '/api/omp/providers')).not.toBeNull();
+      expect(router.match('DELETE', '/api/omp/providers/test')).not.toBeNull();
+      expect(router.match('POST', '/api/omp/providers/test/verify')).not.toBeNull();
     });
 
     it('should return 404 for unknown routes', async () => {
@@ -251,9 +260,14 @@ describe('RBAC route table totality (D1)', () => {
       resource: 'system:*',
       action: 'read',
     });
-    for (const p of ['/api/omp/providers', '/api/omp/agents', '/api/omp/skills']) {
+    for (const p of ['/api/omp/agents', '/api/omp/skills']) {
       expect(permissionFor('GET', p)).toEqual({ resource: 'agents:*', action: 'read' });
     }
+    // Provider catalog read moved to the omp family but keeps providers:config.
+    expect(permissionFor('GET', '/api/omp/providers')).toEqual({
+      resource: 'providers:config',
+      action: 'read',
+    });
     // Disk-reading session routes get their OWN resource (viewer holds
     // agents:*/system:* read and must NOT slurp raw transcripts):
     for (const p of ['/api/omp/sessions', '/api/omp/sessions/read']) {
@@ -262,14 +276,20 @@ describe('RBAC route table totality (D1)', () => {
     // The pre-existing mappings stay byte-identical:
     expect(permissionFor('GET', '/api/agents')).toEqual({ resource: 'agents:*', action: 'read' });
     expect(permissionFor('POST', '/api/agents')).toEqual({ resource: 'agents:*', action: 'write' });
-    expect(permissionFor('GET', '/api/providers')).toEqual({
-      resource: 'providers:config',
-      action: 'read',
-    });
-    expect(permissionFor('POST', '/api/providers')).toEqual({
-      resource: 'providers:config',
-      action: 'write',
-    });
+    // The provider control-plane mutations keep the SAME providers:config
+    // write mapping the legacy /api/providers POST used (now on /api/omp/*):
+    for (const [method, path] of [
+      ['PUT', '/api/omp/providers/openai/key'],
+      ['DELETE', '/api/omp/providers/openai/key'],
+      ['POST', '/api/omp/providers'],
+      ['DELETE', '/api/omp/providers/openai'],
+      ['POST', '/api/omp/providers/openai/verify'],
+    ] as const) {
+      expect(permissionFor(method, path)).toEqual({
+        resource: 'providers:config',
+        action: 'write',
+      });
+    }
     expect(permissionFor('GET', '/api/sessions')).toEqual({ resource: 'agents:*', action: 'read' });
     expect(permissionFor('POST', '/api/sessions/s1/prompt')).toEqual({
       resource: 'agents:*',

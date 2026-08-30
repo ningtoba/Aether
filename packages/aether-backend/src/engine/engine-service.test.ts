@@ -1,5 +1,15 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  statSync,
+  symlinkSync,
+  rmSync,
+  realpathSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
@@ -16,6 +26,7 @@ import {
   startLoop as startLoopRoute,
 } from '../routes/engine.js';
 import type { EngineRouteContext } from '../routes/engine.js';
+import { ModelsYamlStore } from './providers-store.js';
 import type { SessionTurnEvent } from './types.js';
 
 /**
@@ -775,6 +786,108 @@ describe('EngineService — durable sessions (disk-backed create, confined resum
       expect(unavailBody.error).toContain('unavailable');
     } finally {
       errSpy.mockRestore();
+    }
+  });
+});
+
+describe('EngineService — provider control plane (cast-injected warm engine)', () => {
+  /**
+   * engine-service.ts keeps modelsStore/registry/authStorage PLAIN private
+   * fields precisely so the Node suite can inject a warm-state engine and
+   * exercise the REAL provider ops without the Bun-only SDK: started=true
+   * short-circuits start(), a tmp ModelsYamlStore stands in for the
+   * production codecs, and a small fake satisfies OmpRegistryLike /
+   * OmpAuthStorageLike surface used by these methods.
+   */
+  function warmEngine(registryExtra: Record<string, unknown> = {}) {
+    const dir = mkdtempSync(join(tmpdir(), 'aether-prov-'));
+    const store = new ModelsYamlStore(join(dir, 'models.yml'), {
+      parse: (t: string) => JSON.parse(t),
+      stringify: (v: unknown) => JSON.stringify(v, null, 2),
+    });
+    const engine = new EngineService();
+    const injected = engine as unknown as {
+      started: boolean;
+      registry: unknown;
+      authStorage: unknown;
+      modelsStore: unknown;
+    };
+    injected.started = true;
+    injected.registry = { refreshProvider: async () => {}, ...registryExtra };
+    injected.authStorage = {
+      set: async () => {},
+      remove: async () => {},
+      hasAuth: () => false,
+      peekApiKey: async () => undefined,
+    };
+    injected.modelsStore = store;
+    return { engine, store, dir };
+  }
+
+  it('409s a bundled provider name BEFORE any write — file bytes identical, no .bak', async () => {
+    const { engine, store, dir } = warmEngine({ hasProvider: (n: string) => n === 'anthropic' });
+    try {
+      await store.save({
+        providers: { mine: { baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'sk-KEEPME' } },
+        theme: 'dark',
+      });
+      const before = readFileSync(store.filePath);
+      const op = engine
+        .createCustomProvider({
+          name: 'anthropic',
+          baseUrl: 'https://api.anthropic.com',
+          apiKey: 'sk-must-never-land',
+        })
+        .then(() => null)
+        .catch((e: Error & { status?: number }) => e);
+      const err = await op;
+      expect(err).not.toBeNull();
+      expect(err?.status).toBe(409);
+      expect(readFileSync(store.filePath)).toEqual(before);
+      expect(existsSync(`${store.filePath}.bak`)).toBe(false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('create then delete preserves unrelated providers and top-level keys byte-round-trip', async () => {
+    const { engine, store, dir } = warmEngine({ hasProvider: () => false });
+    try {
+      await store.save({
+        providers: { mine: { baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'sk-KEEPME' } },
+        theme: 'dark',
+      });
+      const name = await engine.createCustomProvider({
+        name: 'probe-gpu',
+        baseUrl: 'http://127.0.0.1:9/v1',
+        auth: 'none',
+        models: [{ id: 'm/x' }],
+      });
+      expect(name).toBe('probe-gpu');
+      const mid = await store.load();
+      if (!mid.ok) throw new Error('store unreadable after create');
+      const midProviders = (mid.value.providers ?? {}) as Record<string, unknown>;
+      expect(Object.keys(midProviders)).toEqual(['mine', 'probe-gpu']);
+      expect(mid.value.theme).toBe('dark');
+      expect(midProviders.mine).toEqual({ baseUrl: 'http://127.0.0.1:1/v1', apiKey: 'sk-KEEPME' });
+      // key-less server entry carries no apiKey at all
+      expect(midProviders['probe-gpu']).toEqual({
+        baseUrl: 'http://127.0.0.1:9/v1',
+        api: 'openai-completions',
+        auth: 'none',
+        models: [{ id: 'm/x' }],
+      });
+      await engine.deleteCustomProvider('probe-gpu');
+      const after = await store.load();
+      if (!after.ok) throw new Error('store unreadable after delete');
+      expect(Object.keys((after.value.providers ?? {}) as Record<string, unknown>)).toEqual([
+        'mine',
+      ]);
+      expect(after.value.theme).toBe('dark');
+      expect(statSync(store.filePath).mode & 0o777).toBe(0o600);
+      expect(readFileSync(`${store.filePath}.bak`, 'utf8')).toContain('sk-KEEPME');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });

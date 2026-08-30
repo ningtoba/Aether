@@ -32,7 +32,7 @@ const LEGACY_BEHAVIORS: Array<{ name: string; note: string }> = [
   { name: 'Loop definitions', note: 'LoopsPage — /api/loops* (engine-backed runs included)' },
   {
     name: 'Agents & providers',
-    note: 'AgentsPage / ProvidersPage — /api/agents*, /api/providers*',
+    note: 'AgentsPage / ProvidersPage — /api/agents*, /api/omp/providers* (providers:config read/write)',
   },
   { name: 'Skills', note: 'SkillsPage — /api/skills' },
 ];
@@ -245,7 +245,9 @@ function SettingRow({
     <div className="field" style={{ marginBottom: 0 }}>
       <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
         <div className="row" style={{ flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>{name}</span>
+          <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text)' }}>
+            {name}
+          </span>
           <span className="key mono">{def.path}</span>
           {tabLabel && <StatusPill tone="idle">{tabLabel}</StatusPill>}
           {credential && (
@@ -323,7 +325,7 @@ function ApiKeyCard() {
       <div className="field" style={{ marginBottom: 0 }}>
         <div className="row" style={{ justifyContent: 'space-between', flexWrap: 'wrap' }}>
           <div className="row" style={{ flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)' }}>
+            <span style={{ fontSize: 'var(--fs-sm)', fontWeight: 600, color: 'var(--text)' }}>
               Backend API key
             </span>
             <span className="key mono">aether.apiKey</span>
@@ -549,7 +551,7 @@ export function SettingsPage() {
         <PageHeader title="Settings" subtitle="live engine settings unavailable" />
         <div className="stack">
           <Card title="Live settings unavailable">
-            <p className="muted" style={{ fontSize: 13, margin: 0 }}>
+            <p className="muted" style={{ fontSize: 'var(--fs-sm)', margin: 0 }}>
               The agent engine is not running under Bun (or the backend is unreachable):{' '}
               <span className="mono">{hint || 'engine not configured'}</span>. Omp reads its config
               from <span className="mono">~/.omp/agent/config.yml</span> on disk, so nothing here
@@ -584,11 +586,8 @@ export function SettingsPage() {
             change
           </>
         }
-      />
-
-      <div className="stack">
-        <Card>
-          <span className="search">
+        actions={
+          <span className="search" style={{ width: 260 }}>
             <span className="search-icon">
               <Icon name="search" size={14} />
             </span>
@@ -600,8 +599,10 @@ export function SettingsPage() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </span>
-        </Card>
+        }
+      />
 
+      <div className="stack">
         {schema && schema.tabs.length > 0 && !queryLower && (
           <div
             className="seg-row"
@@ -637,7 +638,9 @@ export function SettingsPage() {
             />
           ) : (
             <Card title={`Search results (${searchResults.length})`}>
-              <div className="stack">{searchResults.map((d) => renderRow(d, tabLabelOf(schema, d.tab)))}</div>
+              <div className="stack form-narrow">
+                {searchResults.map((d) => renderRow(d, tabLabelOf(schema, d.tab)))}
+              </div>
             </Card>
           )
         ) : (
@@ -656,12 +659,12 @@ export function SettingsPage() {
             )}
             {ungrouped.length > 0 && (
               <Card>
-                <div className="stack">{ungrouped.map((d) => renderRow(d))}</div>
+                <div className="stack form-narrow">{ungrouped.map((d) => renderRow(d))}</div>
               </Card>
             )}
             {sections.map((sec) => (
               <Card key={sec.title} title={sec.title}>
-                <div className="stack">{sec.items.map((d) => renderRow(d))}</div>
+                <div className="stack form-narrow">{sec.items.map((d) => renderRow(d))}</div>
               </Card>
             ))}
           </>

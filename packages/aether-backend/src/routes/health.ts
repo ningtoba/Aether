@@ -1,7 +1,6 @@
 /**
  * Health check endpoint
  */
-import { providerStats } from './providers.js';
 
 export interface HealthStatus {
   status: 'ok' | 'degraded' | 'error';
@@ -22,14 +21,18 @@ export interface HealthStatus {
 
 const startTime = Date.now();
 
-export function getHealthStatus(): HealthStatus {
+/**
+ * Build the /health payload. `providers` is engine-derived truth passed in
+ * by the server (EngineService.providerHealthStats() over the WARM registry
+ * + AuthStorage, TTL-memoized): `configured` counts distinct catalog
+ * providers and `healthy` counts those with authStorage.hasAuth — honest
+ * zeros when no engine is wired, NEVER a copy of `configured`, never a
+ * guess.
+ */
+export function getHealthStatus(
+  providers: { configured: number; healthy: number } = { configured: 0, healthy: 0 },
+): HealthStatus {
   const mem = process.memoryUsage();
-  // One snapshot per health payload: providerStats() drives the REAL
-  // engine-catalog observation (stale-while-revalidate), so `configured`
-  // counts legacy /api/providers records while `healthy` is the last
-  // observed count of engine providers with working credentials — 0 when
-  // the engine is unavailable. Never a copy of `configured`.
-  const providers = providerStats();
   return {
     status: 'ok',
     version: '0.1.0',

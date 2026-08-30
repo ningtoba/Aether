@@ -17,6 +17,16 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 import type { ModelRecord, ProviderModelGroup, SessionSummary, SessionTurnEvent } from './types.js';
 import type { SessionTranscriptEntry } from './types.js';
+import {
+  ModelsYamlStore,
+  PROVIDER_NAME_PATTERN,
+  mergeNewProvider,
+  mergeRemovedProvider,
+  providerEntryIn,
+  providerNamesIn,
+  type CreateProviderInput,
+  type YamlCodecs,
+} from './providers-store.js';
 
 /** Thrown when an engine operation is attempted but the omp SDK cannot run
  *  (e.g. backend running under plain Node, or install incomplete). */
@@ -48,6 +58,19 @@ export class SessionResumeRejectedError extends Error {
   constructor(message = 'session not found') {
     super(message);
     this.name = 'SessionResumeRejectedError';
+  }
+}
+
+/** Provider control-plane error carrying the HTTP status the route answers
+ *  verbatim (400 validation, 409 conflict, 500 config write failure). The
+ *  message is ALWAYS engine-composed and NEVER contains a submitted key or
+ *  file content, so routes may pass it through unchanged. */
+export class ProviderOpError extends Error {
+  readonly status: 400 | 409 | 500;
+  constructor(status: 400 | 409 | 500, message: string) {
+    super(message);
+    this.name = 'ProviderOpError';
+    this.status = status;
   }
 }
 
@@ -136,6 +159,79 @@ interface OmpModelLike {
   maxTokens?: number;
   baseUrl?: string;
   isEmbedded?: boolean;
+}
+
+/** Structural slice of omp ModelRegistry the provider control plane uses.
+ *  Every member optional: the SDK surface is feature-detected, never assumed. */
+interface OmpRegistryLike {
+  getAll?(): OmpModelLike[];
+  hasProvider?(id: string): boolean;
+  getProviderBaseUrl?(id: string): unknown;
+  getProviderDiscoveryState?(id: string): unknown;
+  getDiscoverableProviders?(): string[];
+  refresh?(strategy?: string): unknown;
+  refreshProvider?(id: string, strategy?: string): unknown;
+}
+
+/** Structural slice of omp AuthStorage (source-verified: hasAuth and
+ *  getCredentialOrigin are sync; set/remove/peekApiKey are async). */
+interface OmpAuthStorageLike {
+  hasAuth(provider: string): boolean;
+  getCredentialOrigin?(provider: string): { kind?: string } | undefined;
+  set(provider: string, credential: { type: 'api_key'; key: string }): Promise<unknown>;
+  remove(provider: string): Promise<unknown>;
+  peekApiKey?(provider: string): Promise<string | undefined>;
+}
+
+/** Where omp's AuthStorage found the credential (getCredentialOrigin kinds). */
+export type ProviderAuthOrigin = 'runtime' | 'config' | 'oauth' | 'api_key' | 'env' | 'fallback';
+
+const AUTH_ORIGINS: readonly string[] = [
+  'runtime',
+  'config',
+  'oauth',
+  'api_key',
+  'env',
+  'fallback',
+];
+
+/** Row of GET /api/omp/providers. Structurally identical to the facade's
+ *  ProviderDto (stable GUI contract) — engine-service must not import
+ *  omp-facade (the reverse edge already exists; definitions here would form
+ *  the cycle madge gates), so this mirror sits on the engine side of the
+ *  boundary exactly like OmpModelLike does. */
+export interface EngineProviderDto {
+  id: string;
+  name: string;
+  baseUrl?: string;
+  modelCount: number;
+  models: string[];
+  /** Truth = authStorage.hasAuth(id) — the catalog has NO authenticated
+   *  field; anything derived from model rows was the old lie. */
+  authenticated: boolean;
+  discoverable: boolean;
+  /** models.yml owns the provider (deletable custom entry). */
+  custom: boolean;
+  authOrigin?: ProviderAuthOrigin;
+  discoveryStatus?: string;
+}
+
+/** Result of POST /api/omp/providers/:id/verify — the model LIST itself is
+ *  never returned, only its count. */
+export interface ProviderVerifyResult {
+  reachable: boolean;
+  modelCount: number | null;
+  reason?: 'no-base-url' | 'timeout' | 'network' | `http-${number}`;
+}
+
+/** Count of served models in an OpenAI-style /models payload (data[] array
+ *  or a bare array). Unknown shape → null: an honest "don't know". */
+function countServedModels(body: unknown): number | null {
+  if (Array.isArray(body)) return body.length;
+  // `in` narrowing: parsed JSON is untrusted shape, no cast-fabricated access.
+  if (body !== null && typeof body === 'object' && 'data' in body && Array.isArray(body.data))
+    return body.data.length;
+  return null;
 }
 
 interface OmpSessionLike {
@@ -582,6 +678,16 @@ export class EngineService {
   private maxLiveSessions: number;
   /** One-shot latch: warn only the first time the cap meets an all-busy set. */
   private capWarnedAllBusy = false;
+  /** Lazily built models.yml store (production codecs, Bun-gated call sites).
+   *  PLAIN private fields (not #private) on purpose: the Node test suite
+   *  injects a tmp-path store / fake fetch through a cast to exercise these
+   *  paths without the Bun runtime. */
+  private modelsStore: ModelsYamlStore | null = null;
+  /** SDK ModelsConfigFile handle (invalidate() after writes) when reachable. */
+  private modelsConfigFile: unknown = null;
+  /** HTTP probe seam for verifyProvider (tests inject a deterministic fetch). */
+  private fetchImpl: typeof fetch = ((...args: Parameters<typeof fetch>) =>
+    globalThis.fetch(...args)) as typeof fetch;
 
   constructor(opts: EngineServiceOptions = {}) {
     this.opts = opts;
@@ -964,6 +1070,379 @@ export class EngineService {
     const session = this.sessions.get(id);
     if (!session) return null;
     return session.listTranscript();
+  }
+
+  /* ─── Provider control plane (keys, models.yml, verification) ──────── */
+
+  /** Warm registry + authStorage or EngineUnavailableError (routes → 501). */
+  async #requireProviderWarm(): Promise<{
+    registry: OmpRegistryLike;
+    auth: OmpAuthStorageLike;
+  }> {
+    await this.start();
+    if (!this.registry || !this.authStorage) throw new EngineUnavailableError();
+    return {
+      registry: this.registry as OmpRegistryLike,
+      auth: this.authStorage as OmpAuthStorageLike,
+    };
+  }
+
+  /** Provider catalog from the LIVE instances: auth truth is
+   *  authStorage.hasAuth(id), custom truth is the models.yml providers map,
+   *  discoveryStatus comes from the registry's per-provider state. */
+  async listProviderDtos(): Promise<EngineProviderDto[]> {
+    const { registry, auth } = await this.#requireProviderWarm();
+    try {
+      const customNames = new Set(await this.#customProviderNames());
+      let discoverable: string[] = [];
+      try {
+        discoverable = registry.getDiscoverableProviders?.() ?? [];
+      } catch {
+        /* discovery is best-effort */
+      }
+      const discoverableSet = new Set(discoverable);
+      const row = (pid: string, baseUrl?: string): EngineProviderDto => {
+        const dto: EngineProviderDto = {
+          id: pid,
+          name: pid,
+          baseUrl: baseUrl || undefined,
+          modelCount: 0,
+          models: [],
+          authenticated: false,
+          discoverable: discoverableSet.has(pid),
+          custom: customNames.has(pid),
+        };
+        try {
+          dto.authenticated = auth.hasAuth(pid) === true;
+        } catch {
+          /* auth-store quirk on one row never sinks the catalog */
+        }
+        try {
+          const origin = auth.getCredentialOrigin?.(pid)?.kind;
+          if (origin !== undefined && AUTH_ORIGINS.includes(origin))
+            dto.authOrigin = origin as ProviderAuthOrigin;
+        } catch {
+          /* older SDK: no origin info */
+        }
+        try {
+          // getProviderDiscoveryState returns a STATE OBJECT ({provider,
+          // status, ...}), not a string — the string form lives on .status.
+          const state = registry.getProviderDiscoveryState?.(pid);
+          if (
+            state !== null &&
+            typeof state === 'object' &&
+            'status' in state &&
+            typeof state.status === 'string'
+          )
+            dto.discoveryStatus = state.status;
+        } catch {
+          /* older SDK: no discovery state */
+        }
+        return dto;
+      };
+      const byProvider = new Map<string, EngineProviderDto>();
+      for (const m of registry.getAll?.() ?? []) {
+        const pid = m?.provider;
+        if (!pid) continue;
+        let rec = byProvider.get(pid);
+        if (!rec) {
+          rec = row(pid, m?.baseUrl);
+          byProvider.set(pid, rec);
+        }
+        rec.modelCount++;
+        if (rec.models.length < 20 && m.id) rec.models.push(m.id);
+      }
+      // Discoverable runtime providers with no static models yet still get a
+      // row (same shape as the facade's per-call path).
+      for (const pid of discoverableSet) {
+        if (!byProvider.has(pid)) byProvider.set(pid, row(pid));
+      }
+      return Array.from(byProvider.values());
+    } catch (err) {
+      if (err instanceof EngineUnavailableError) throw err;
+      throw new EngineUnavailableError(
+        `Failed to list providers: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** Store a provider API key in the LIVE omp AuthStorage (in-memory
+   *  credential cache stays correct — never a fresh discoverAuthStorage()). */
+  async setProviderApiKey(provider: string, apiKey: string): Promise<void> {
+    const { registry, auth } = await this.#requireProviderWarm();
+    if (!(await this.#isKnownProvider(provider)))
+      throw new ProviderOpError(400, 'unknown provider');
+    try {
+      await auth.set(provider, { type: 'api_key', key: apiKey });
+    } catch {
+      // Fixed text ONLY: SDK error strings are not trusted to be free of the
+      // submitted key, and the key must never reach console output either.
+      console.error(`[EngineService] authStorage.set failed for provider ${provider}`);
+      throw new ProviderOpError(500, 'provider key write failed');
+    }
+    this.#refreshProviderQuietly(registry, provider);
+  }
+
+  /** Drop a stored key. Returns the POST-removal auth truth (hasAuth). */
+  async removeProviderApiKey(provider: string): Promise<boolean> {
+    const { registry, auth } = await this.#requireProviderWarm();
+    try {
+      await auth.remove(provider);
+    } catch {
+      console.error(`[EngineService] authStorage.remove failed for provider ${provider}`);
+      throw new ProviderOpError(500, 'provider key removal failed');
+    }
+    this.#refreshProviderQuietly(registry, provider);
+    try {
+      return auth.hasAuth(provider) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Add a custom provider to models.yml. Registry-known (bundled) names
+   *  409 BEFORE touching the file; shape validation and the ≤500 cap are the
+   *  pure merge. Returns the written name (never the inline key). */
+  async createCustomProvider(input: CreateProviderInput): Promise<string> {
+    const { registry } = await this.#requireProviderWarm();
+    const name = typeof input?.name === 'string' ? input.name.trim() : '';
+    if (!PROVIDER_NAME_PATTERN.test(name))
+      throw new ProviderOpError(400, 'provider.name must match ^[a-z0-9][a-z0-9_-]{0,63}$');
+    let known = false;
+    try {
+      known = registry.hasProvider?.(name) === true;
+    } catch {
+      /* feature-detected: the models.yml duplicate check still guards */
+    }
+    if (known) throw new ProviderOpError(409, 'provider already exists');
+    const store = await this.#requireModelsStore();
+    const loaded = await store.load();
+    if (!loaded.ok) throw new ProviderOpError(loaded.status, loaded.error);
+    const merged = mergeNewProvider(loaded.value, { ...input, name });
+    if (!merged.ok) throw new ProviderOpError(merged.status, merged.error);
+    await this.#writeModelsConfig(store, merged.value.config);
+    await this.#refreshAfterConfigWrite(registry, merged.value.name);
+    return merged.value.name;
+  }
+
+  /** Remove a models.yml-owned provider: entry + stored key + refresh.
+   *  Anything NOT owned by models.yml is a bundled provider → 400 with the
+   *  fixed 'built-in providers…' message. */
+  async deleteCustomProvider(provider: string): Promise<void> {
+    const { registry, auth } = await this.#requireProviderWarm();
+    const store = await this.#requireModelsStore();
+    const loaded = await store.load();
+    if (!loaded.ok) throw new ProviderOpError(loaded.status, loaded.error);
+    const merged = mergeRemovedProvider(loaded.value, provider);
+    if (!merged.ok) throw new ProviderOpError(merged.status, merged.error);
+    await this.#writeModelsConfig(store, merged.value);
+    try {
+      await auth.remove(provider);
+    } catch {
+      console.error(`[EngineService] authStorage.remove failed for provider ${provider}`);
+    }
+    await this.#refreshAfterConfigWrite(registry, provider);
+  }
+
+  /** Aggregate counts for /health: distinct catalog provider count vs the
+   *  authStorage.hasAuth truth. SYNC and NEVER throws — it runs on every
+   *  /health poll and must degrade to honest zeros (never take the endpoint
+   *  down, never spin up a second ModelRegistry). */
+  providerHealthStats(): { configured: number; healthy: number } {
+    if (!this.registry || !this.authStorage) return { configured: 0, healthy: 0 };
+    try {
+      const registry = this.registry as OmpRegistryLike;
+      const auth = this.authStorage as OmpAuthStorageLike;
+      const ids = new Set<string>();
+      for (const m of registry.getAll?.() ?? []) {
+        if (m?.provider) ids.add(m.provider);
+      }
+      let healthy = 0;
+      for (const id of ids) {
+        try {
+          if (auth.hasAuth(id) === true) healthy++;
+        } catch {
+          /* per-provider auth quirk counts as not configured */
+        }
+      }
+      return { configured: ids.size, healthy };
+    } catch {
+      return { configured: 0, healthy: 0 };
+    }
+  }
+
+  /** Honest reachability probe of the provider's model endpoint. baseUrl
+   *  resolves from the live registry first, then the models.yml entry; the
+   *  key comes from peekApiKey (no OAuth refresh). Reports, never throws:
+   *  timeout/network/HTTP failures become reason codes. The model LIST is
+   *  never returned — only its count. */
+  async verifyProvider(provider: string): Promise<ProviderVerifyResult> {
+    const { registry, auth } = await this.#requireProviderWarm();
+    let baseUrl: string | undefined;
+    try {
+      const b = registry.getProviderBaseUrl?.(provider);
+      if (typeof b === 'string' && b) baseUrl = b;
+    } catch {
+      /* feature-detected */
+    }
+    if (!baseUrl) {
+      try {
+        const store = await this.#requireModelsStore();
+        const loaded = await store.load();
+        if (loaded.ok) {
+          const b = providerEntryIn(loaded.value, provider)?.baseUrl;
+          if (typeof b === 'string' && b) baseUrl = b;
+        }
+      } catch {
+        /* models.yml unreadable → no-base-url when the registry missed too */
+      }
+    }
+    if (!baseUrl) return { reachable: false, modelCount: null, reason: 'no-base-url' };
+    let key: string | undefined;
+    try {
+      key = await auth.peekApiKey?.(provider);
+    } catch {
+      /* probe unauthenticated rather than fail */
+    }
+    try {
+      const res = await this.fetchImpl(`${baseUrl.replace(/\/+$/, '')}/models`, {
+        headers: {
+          accept: 'application/json',
+          ...(key ? { authorization: `Bearer ${key}` } : {}),
+        },
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!res.ok) return { reachable: false, modelCount: null, reason: `http-${res.status}` };
+      let modelCount: number | null = null;
+      try {
+        modelCount = countServedModels(await res.json());
+      } catch {
+        /* unparseable body: reachable, count unknown */
+      }
+      return { reachable: true, modelCount };
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      return {
+        reachable: false,
+        modelCount: null,
+        reason: name === 'TimeoutError' || name === 'AbortError' ? 'timeout' : 'network',
+      };
+    }
+  }
+
+  /** Provider name known to the registry (hasProvider, falling back to a
+   *  getAll scan) or present in the models.yml providers map. */
+  async #isKnownProvider(provider: string): Promise<boolean> {
+    const registry = this.registry as OmpRegistryLike | null;
+    if (!registry) return false;
+    try {
+      if (registry.hasProvider?.(provider) === true) return true;
+    } catch {
+      /* fall through to the scan */
+    }
+    try {
+      for (const m of registry.getAll?.() ?? []) {
+        if (m?.provider === provider) return true;
+      }
+    } catch {
+      /* fall through to models.yml */
+    }
+    try {
+      const store = await this.#requireModelsStore();
+      const loaded = await store.load();
+      return loaded.ok && providerEntryIn(loaded.value, provider) !== undefined;
+    } catch {
+      return false;
+    }
+  }
+
+  /** models.yml provider names (the custom truth). Best-effort: an unreadable
+   *  config degrades to an empty set (rows render custom:false) instead of
+   *  failing the whole catalog read. */
+  async #customProviderNames(): Promise<string[]> {
+    try {
+      const store = await this.#requireModelsStore();
+      const loaded = await store.load();
+      return loaded.ok ? providerNamesIn(loaded.value) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /** Build the models.yml store with PRODUCTION codecs on first use: bun's
+   *  YAML parse + the SDK's own stringifyYamlConfig (omp writes its configs
+   *  the same way, settings.ts precedent) at ModelsConfigFile.path(). All
+   *  dynamic: the Bun-only module graph never loads under Node, and only
+   *  Bun-gated provider ops ever reach here. */
+  async #requireModelsStore(): Promise<ModelsYamlStore> {
+    if (this.modelsStore) return this.modelsStore;
+    try {
+      const bunMod: unknown = await import('bun');
+      const cfgMod: unknown = await import('@oh-my-pi/pi-coding-agent/config/config-file');
+      const modelsMod: unknown = await import('@oh-my-pi/pi-coding-agent/config/models-config');
+      const bun = bunMod as { YAML: { parse(text: string): unknown } };
+      const cfg = cfgMod as { stringifyYamlConfig(value: unknown): string };
+      const modelsFile = modelsMod as {
+        ModelsConfigFile?: { path?(): string; invalidate?(): void };
+      };
+      this.modelsConfigFile = modelsFile.ModelsConfigFile ?? null;
+      const path =
+        modelsFile.ModelsConfigFile?.path?.() ?? join(homedir(), '.omp', 'agent', 'models.yml');
+      const codecs: YamlCodecs = {
+        parse: (text) => bun.YAML.parse(text),
+        stringify: (value) => cfg.stringifyYamlConfig(value),
+      };
+      this.modelsStore = new ModelsYamlStore(path, codecs);
+      return this.modelsStore;
+    } catch (err) {
+      throw new EngineUnavailableError(
+        `models.yml store unavailable: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+
+  /** Atomic models.yml write + invalidate the SDK's own file cache so its
+   *  next read sees our write (refresh is mtime-gated). Failure is a fixed
+   *  500 and a FIXED log line: fs errors carry absolute paths and YAML errors
+   *  can carry values — neither is echoed, neither is logged on these
+   *  credential-bearing paths. */
+  async #writeModelsConfig(store: ModelsYamlStore, config: Record<string, unknown>): Promise<void> {
+    try {
+      await store.save(config);
+    } catch {
+      console.error('[EngineService] models.yml write failed');
+      throw new ProviderOpError(500, 'provider config write failed');
+    }
+    try {
+      // Held as `unknown` by design (dynamic SDK handle) — named cast, not inline.
+      const configFile = this.modelsConfigFile as { invalidate?(): void } | null;
+      configFile?.invalidate?.();
+    } catch {
+      /* best-effort: refresh() re-reads by mtime regardless */
+    }
+  }
+
+  /** Re-read the catalog after a config write (registry.refresh is
+   *  mtime-gated), then kick the targeted per-provider refresh. */
+  async #refreshAfterConfigWrite(registry: OmpRegistryLike, provider: string): Promise<void> {
+    try {
+      await registry.refresh?.();
+    } catch {
+      console.error('[EngineService] registry refresh after provider write failed');
+    }
+    this.#refreshProviderQuietly(registry, provider);
+  }
+
+  /** Fire-and-forget targeted provider refresh: keeps the just-touched
+   *  provider hot without blocking the response on network discovery. */
+  #refreshProviderQuietly(registry: OmpRegistryLike, provider: string): void {
+    try {
+      void Promise.resolve(registry.refreshProvider?.(provider)).catch(() => {
+        console.error(`[EngineService] provider refresh failed for ${provider}`);
+      });
+    } catch {
+      console.error(`[EngineService] provider refresh failed for ${provider}`);
+    }
   }
 }
 

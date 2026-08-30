@@ -11,7 +11,6 @@ import { WebSocketManager } from './websocket.js';
 import { badRequest, jsonResponse, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
 import { getHealthStatus } from './routes/health.js';
 import * as agentRoutes from './routes/agents.js';
-import * as providerRoutes from './routes/providers.js';
 import { RBACGuard, type RoleId } from '@aether/core';
 import * as workspaceRoutes from './routes/workspaces.js';
 import { WorkspacesService } from './engine/index.js';
@@ -137,6 +136,17 @@ export class AetherServer {
 
   /** Extra realtime target injected by main.ts (the Bun-native hub). */
   broadcastRealtime: ((type: string, payload: unknown) => void) | null = null;
+  /** TTL memo for the /health provider stats: engine counts are sync and
+   *  cheap, but /health is polled hard — one snapshot per TTL keeps the
+   *  getAll() walk off the hot path. NO ModelRegistry is ever constructed
+   *  here: the numbers come from the engine's WARM instances only (honest
+   *  zeros when no engine is wired). */
+  private static readonly PROVIDER_STATS_TTL_MS = 30_000;
+  private providerStatsMemo: { configured: number; healthy: number } = {
+    configured: 0,
+    healthy: 0,
+  };
+  private providerStatsAt = 0;
 
   constructor(options: AetherServerOptions = {}) {
     this.port = options.port ?? 3001;
@@ -253,7 +263,9 @@ export class AetherServer {
     if (pathname.startsWith('/api/agents')) {
       return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'write' };
     }
-    if (pathname.startsWith('/api/providers')) {
+    // Provider control plane (omp): catalog reads, key/config mutations —
+    // same providers:config mapping the legacy /api/providers CRUD used.
+    if (pathname.startsWith('/api/omp/providers')) {
       return { resource: 'providers:config', action: method === 'GET' ? 'read' : 'write' };
     }
     if (pathname.startsWith('/api/sessions')) {
@@ -282,17 +294,26 @@ export class AetherServer {
     ) {
       return { resource: 'system:*', action: 'read' };
     }
-    if (
-      pathname === '/api/omp/providers' ||
-      pathname === '/api/omp/agents' ||
-      pathname === '/api/omp/skills'
-    ) {
+    if (pathname === '/api/omp/agents' || pathname === '/api/omp/skills') {
       return { resource: 'agents:*', action: 'read' };
     }
     // Total fallback: never null, never fail-open.
     return method === 'GET' || method === 'HEAD'
       ? { resource: 'system:*', action: 'read' }
       : { resource: 'system:*', action: 'write' };
+  }
+
+  /** Provider aggregates for /health via the engine's warm registry +
+   *  authStorage (EngineService.providerHealthStats), TTL-memoized. */
+  private providerHealthStats(): { configured: number; healthy: number } {
+    const now = Date.now();
+    if (now - this.providerStatsAt < AetherServer.PROVIDER_STATS_TTL_MS)
+      return this.providerStatsMemo;
+    this.providerStatsMemo = this.engineWiring
+      ? this.engineWiring.engine.providerHealthStats()
+      : { configured: 0, healthy: 0 };
+    this.providerStatsAt = now;
+    return this.providerStatsMemo;
   }
 
   /** Bridge engine session/loop events to every realtime surface. */
@@ -315,7 +336,10 @@ export class AetherServer {
   private registerRoutes(): void {
     // Health
     this.router.get('/health', (_req, res) => {
-      jsonResponse(res, 200, { ...getHealthStatus(), ...this.healthExtras });
+      jsonResponse(res, 200, {
+        ...getHealthStatus(this.providerHealthStats()),
+        ...this.healthExtras,
+      });
     });
 
     // Agents
@@ -325,11 +349,9 @@ export class AetherServer {
     this.router.put('/api/agents/:id', agentRoutes.updateAgent);
     this.router.delete('/api/agents/:id', agentRoutes.deleteAgent);
 
-    // Providers
-    this.router.get('/api/providers', providerRoutes.listProviders);
-    this.router.post('/api/providers', providerRoutes.addProvider);
-    this.router.get('/api/providers/:id/health', providerRoutes.checkProviderHealth);
-    this.router.delete('/api/providers/:id', providerRoutes.removeProvider);
+    // Providers: the simulated /api/providers in-memory CRUD is GONE (clean
+    // cutover). The provider control plane lives under /api/omp/providers*
+    // below, backed by the engine's live registry + AuthStorage.
 
     // Workspaces (working-directory browser; engine-independent)
     const wsp = this.workspaces;
@@ -392,7 +414,9 @@ export class AetherServer {
 
     // Omp facade control-plane (engine-wired: status, settings, providers,
     // agents, skills, persisted sessions — else 501 like the rest).
-    const fakerCtx = ctx ? { facade: ctx.facade, workspaces: this.workspaces } : null;
+    const fakerCtx = ctx
+      ? { facade: ctx.facade, engine: ctx.engine, workspaces: this.workspaces }
+      : null;
     const bindF =
       <P extends RouteParams>(
         fn: (
@@ -410,6 +434,11 @@ export class AetherServer {
     this.router.get('/api/omp/settings/values', bindF(facadeRoutes.settingsGet));
     this.router.put('/api/omp/settings', bindF(facadeRoutes.settingsSet));
     this.router.get('/api/omp/providers', bindF(facadeRoutes.listFacadeProviders));
+    this.router.put('/api/omp/providers/:id/key', bindF(facadeRoutes.setProviderKey));
+    this.router.delete('/api/omp/providers/:id/key', bindF(facadeRoutes.removeProviderKey));
+    this.router.post('/api/omp/providers', bindF(facadeRoutes.createProvider));
+    this.router.delete('/api/omp/providers/:id', bindF(facadeRoutes.deleteProvider));
+    this.router.post('/api/omp/providers/:id/verify', bindF(facadeRoutes.verifyProvider));
     this.router.get('/api/omp/agents', bindF(facadeRoutes.listFacadeAgents));
     this.router.get('/api/omp/skills', bindF(facadeRoutes.listFacadeSkills));
     this.router.get('/api/omp/sessions', bindF(facadeRoutes.listDiskSessions));

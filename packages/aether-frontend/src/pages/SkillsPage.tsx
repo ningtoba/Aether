@@ -31,9 +31,10 @@ function loadDrafts(): Draft[] {
   }
 }
 
-/** Source → pill tone. omp-managed reads info, user-authored ok, the rest idle. */
+/** Source → pill tone. Namespaced sources (e.g. `omp:managed`) key off their last
+ *  segment: omp-managed reads info, user-authored ok, the rest idle. */
 function sourceTone(source: string): StatusTone {
-  switch (source) {
+  switch (source.split(':').pop()) {
     case 'user':
       return 'ok';
     case 'project':
@@ -368,40 +369,40 @@ export function SkillsPage() {
                       >
                         <button
                           type="button"
-                          className="btn ghost"
+                          className="list-row"
                           aria-expanded={open}
                           aria-controls={`skill-body-${i}`}
                           onClick={() =>
                             setExpanded(open ? null : expanded === s.name ? s.path : s.name)
                           }
-                          style={{
-                            display: 'flex',
-                            flexDirection: 'column',
-                            alignItems: 'stretch',
-                            gap: 4,
-                            width: '100%',
-                            borderRadius: 0,
-                            background: 'transparent',
-                            border: 'none',
-                            borderBottom: open ? '1px solid var(--hairline)' : 'none',
-                            padding: 'var(--s-3)',
-                            textAlign: 'left',
-                          }}
                         >
-                          <span className="row" style={{ gap: 'var(--s-2)' }}>
-                            <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
-                            <span className="mono" style={{ fontWeight: 600, fontSize: 13 }}>
-                              {s.name}
+                          <Icon name={open ? 'chevron-down' : 'chevron-right'} size={14} />
+                          <span className="list-row-main">
+                            <span className="row" style={{ gap: 'var(--s-2)', flexWrap: 'nowrap' }}>
+                              <span
+                                className="mono"
+                                style={{ fontWeight: 600, fontSize: 'var(--fs-sm)' }}
+                              >
+                                {s.name}
+                              </span>
+                              <StatusPill tone={sourceTone(s.source)}>
+                                {s.source.replace(':', ' · ')}
+                              </StatusPill>
                             </span>
-                            <StatusPill tone={sourceTone(s.source)}>{s.source}</StatusPill>
-                            <span className="spacer" />
-                          </span>
-                          <span className="muted clamp-2" style={{ fontSize: 12 }}>
-                            {s.description}
+                            <span className="muted clamp-2" style={{ fontSize: 'var(--fs-xs)' }}>
+                              {s.description}
+                            </span>
                           </span>
                         </button>
                         {open && (
-                          <div id={`skill-body-${i}`} className="stack" style={{ padding: 'var(--s-3)' }}>
+                          <div
+                            id={`skill-body-${i}`}
+                            className="stack"
+                            style={{
+                              padding: 'var(--s-3)',
+                              borderTop: '1px solid var(--hairline)',
+                            }}
+                          >
                             <div className="mono muted" style={{ fontSize: 11 }}>
                               {s.path}
                             </div>
