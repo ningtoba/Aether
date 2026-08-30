@@ -9,9 +9,6 @@
   "exclude": ["node_modules", "dist"],
   "references": [
     { "path": "./packages/aether-core" },
-    { "path": "./packages/aether-memory" },
-    { "path": "./packages/aether-orchestrator" },
-    { "path": "./packages/aether-tools" },
     { "path": "./packages/aether-backend" },
     { "path": "./packages/aether-frontend" }
   ]

@@ -15,9 +15,6 @@ WORKDIR /app
 # Root + workspace manifests for layer-cached dependency resolution.
 COPY package.json package-lock.json tsconfig.json tsconfig.base.json ./
 COPY packages/aether-core/package.json packages/aether-core/package.json
-COPY packages/aether-memory/package.json packages/aether-memory/package.json
-COPY packages/aether-orchestrator/package.json packages/aether-orchestrator/package.json
-COPY packages/aether-tools/package.json packages/aether-tools/package.json
 COPY packages/aether-backend/package.json packages/aether-backend/package.json
 COPY packages/aether-frontend/package.json packages/aether-frontend/package.json
 

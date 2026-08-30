@@ -7,7 +7,6 @@ export default defineConfig({
     include: [
       'packages/aether-backend/src/integration.test.ts',
       'packages/aether-core/src/utils/integration.test.ts',
-      'packages/aether-memory/src/integration.test.ts',
     ],
     testTimeout: 30_000,
     hookTimeout: 30_000,
