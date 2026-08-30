@@ -14,11 +14,13 @@ import { EngineUnavailableError } from '../engine/index.js';
 import type { LoopManager } from '../engine/index.js';
 import type { SkillsService } from '../engine/index.js';
 import type { LoopDefinition } from '../engine/index.js';
+import type { WorkspacesService } from '../engine/index.js';
 
 export interface EngineRouteContext {
   engine: EngineService;
   loops: LoopManager;
   skills: SkillsService;
+  workspaces: WorkspacesService;
 }
 
 /** Parse a JSON body guarding against non-object/array/empty payloads. */
@@ -110,8 +112,10 @@ export async function createSession(
     return badRequest(res, 'model.provider and model.modelId required');
   }
   try {
+    const cwd = ctx.workspaces.resolveCwd(body.cwd);
+    if ('error' in cwd) return badRequest(res, cwd.error);
     const session = await ctx.engine.createSession({
-      cwd: body.cwd || process.cwd(),
+      cwd: cwd.path,
       model: body.model,
     });
     jsonResponse(res, 201, { session: sessionToSummary(session) });
@@ -219,6 +223,8 @@ export async function saveLoop(
   if (!body.model || !body.model.provider || !body.model.modelId) {
     return badRequest(res, 'loop.model.provider and loop.model.modelId required');
   }
+  const cwd = ctx.workspaces.resolveCwd(body.cwd);
+  if ('error' in cwd) return badRequest(res, cwd.error);
   const definition: LoopDefinition = {
     id: body.id ?? crypto.randomUUID(),
     name: body.name ?? 'Untitled loop',

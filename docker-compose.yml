@@ -6,6 +6,10 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: aether
+    # Run as the host user so files the agent edits on the mounted host home
+    # keep the host's ownership (root would rewrite ~/.omp and host projects as
+    # root, breaking local dev). Override with AETHER_UID/AETHER_GID.
+    user: "${AETHER_UID:-1000}:${AETHER_GID:-1000}"
     ports:
       # Host 3001/3002 are commonly taken by local dev (Hermes MCP gateway on
       # 3001). The container stays on internal 3001 (API+GUI) and 3002
@@ -16,16 +20,25 @@ services:
       - "3082:3002"
     environment:
       - NODE_ENV=production
+      # Point omp's home at the host home (mounted below) so ~/.omp — the
+      # agent dir with models.yml + auth — is the host's own config, editable
+      # as the host user.
+      - HOME=${HOME}
       # Browser-facing realtime port (host remap of REALTIME_PORT) — /health
       # advertises this so the GUI connects to ws://localhost:3082, not the
       # container-internal 3002.
       - REALTIME_PUBLIC_PORT=3082
+      # Working-directory roots the GUI can browse for sessions/loops.
+      # Defaults to the host home. Colon-separated for multiple.
+      - AETHER_WORKSPACES=${HOME}
     volumes:
       - aether-data:/data
-      # Mount the host's omp agent config (models.yml + auth storage) into the
-      # container so the embedded engine sees your configured providers/models.
-      # Remove this line for a throwaway catalog instead.
-      - ${HOME}/.omp:/root/.omp
+      # Expose the host home at the SAME absolute path so picking a working
+      # directory in the GUI ("working directory on the host") maps to real
+      # host files the agent can edit, and omp's agent config (~/.omp) is the
+      # host's own. Restrict by changing the mount source (e.g. only
+      # ${HOME}/Projects) if you'd rather not expose the whole home.
+      - ${HOME}:${HOME}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "--fail", "--silent", "http://127.0.0.1:3001/health"]

@@ -6,6 +6,35 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.1 — Working directories per session/loop (2026-08-30)
+
+Pick a real host working directory per session or loop, so the agent edits a
+specific project (and different sessions/loops can target different projects
+at the same time).
+
+- New `WorkspacesService` + `GET /api/workspaces`, `GET /api/workspaces/browse`
+  (browse subdirectories within configured roots; `AETHER_WORKSPACES` env,
+  default host home). Sessions/loops accept an optional `cwd` that must exist
+  and be a directory (400 otherwise).
+- `CwdPicker` component wired into Sessions (new session) and Loops (editor):
+  browse roots → into subdirectories → "Use this directory".
+- Fixed cwd actually reaching omp's tools: the session's working directory is
+  now threaded into `SessionManager.inMemory(cwd)` — tools (bash/read/edit)
+  take their cwd from `sessionManager.getCwd()`, so without this the agent ran
+  in the process cwd regardless of the requested directory.
+- Docker now mounts the host home at the same path and runs the container as
+  the host user (`user: "${AETHER_UID:-1000}:${AETHER_GID:-1000}"`,
+  `HOME=${HOME}`), so a picked directory maps to real host files owned by the
+  host user (the earlier root-owned `~/.omp/config.yml` churn is gone), and
+  the `/root/.omp` mount is no longer needed.
+
+Verified in-container: VibeTrader session tools `pwd` = `/home/nekophobia/
+Projects/VibeTrader`; a simultaneous Aether session `pwd` = `/home/nekophobia/
+Projects/Aether`; the GUI picker navigated and selected a directory; host files
+remain host-user-owned after runs.
+
+---
+
 ## v0.3.0 — Full omp GUI: settings, providers, agents, skills & persisted sessions (2026-08-30)
 
 Made Aether a true GUI for the embedded omp engine — everything omp can do is

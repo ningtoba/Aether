@@ -14,6 +14,8 @@ import * as agentRoutes from './routes/agents.js';
 import * as providerRoutes from './routes/providers.js';
 import * as executionRoutes from './routes/executions.js';
 import { RBACGuard, type RoleId } from '@aether/core';
+import * as workspaceRoutes from './routes/workspaces.js';
+import { WorkspacesService } from './engine/index.js';
 
 import * as engineRoutes from './routes/engine.js';
 import type { EngineService, LoopManager, SkillsService } from './engine/index.js';
@@ -44,6 +46,8 @@ export interface AetherServerOptions {
   staticRoot?: string;
   /** Optional engine control-plane (sessions/loops/skills/models). */
   engine?: EngineWiring;
+  /** Working-directory roots browser (defaults to the user's home). */
+  workspaces?: WorkspacesService;
 }
 
 /** API auth for the HTTP/WebSocket server. */
@@ -70,6 +74,7 @@ export class AetherServer {
   private apiKeys = new Map<string, RoleId>();
   private engineWiring: EngineWiring | null = null;
   private staticServer: StaticFileServer | null = null;
+  private workspaces: WorkspacesService;
 
   /** Extra fields merged into /health (realtime port, engine state, ...). */
   healthExtras: Record<string, unknown> = {};
@@ -85,6 +90,7 @@ export class AetherServer {
     this.corsOrigins = ['*'];
     this.maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
     this.engineWiring = options.engine ?? null;
+    this.workspaces = options.workspaces ?? new WorkspacesService(process.env.AETHER_WORKSPACES);
     this.configureAuth(options.auth);
     this.initStatic(options.staticRoot);
     this.registerRoutes();
@@ -244,9 +250,18 @@ export class AetherServer {
     this.router.post('/api/executions', executionRoutes.startExecution);
     this.router.get('/api/executions/:id', executionRoutes.getExecution);
     this.router.post('/api/executions/:id/cancel', executionRoutes.cancelExecution);
+    // Workspaces (working-directory browser; engine-independent)
+    const wsp = this.workspaces;
+    this.router.get('/api/workspaces', (_req, res) =>
+      workspaceRoutes.listWorkspaces(_req, res, {} as RouteParams, { workspaces: wsp }),
+    );
+    this.router.get('/api/workspaces/browse', (req, res) =>
+      workspaceRoutes.browseWorkspace(req, res, {} as RouteParams, { workspaces: wsp }),
+    );
 
     // Engine control-plane (bound to the wiring when present, else 501)
     const ctx = this.engineWiring;
+    const engCtx = ctx ? { ...ctx, workspaces: this.workspaces } : null;
     const engineUnavailable = (_req: IncomingMessage, res: ServerResponse): void => {
       jsonResponse(res, 501, { error: 'Agent engine not configured (requires Bun runtime)' });
     };
@@ -257,11 +272,11 @@ export class AetherServer {
           req: IncomingMessage,
           res: ServerResponse,
           params: P,
-          c: NonNullable<typeof ctx>,
+          c: NonNullable<typeof engCtx>,
         ) => Promise<void>,
       ) =>
       (req: IncomingMessage, res: ServerResponse, params: P): Promise<void> =>
-        ctx ? fn(req, res, params, ctx) : Promise.resolve(engineUnavailable(req, res));
+        engCtx ? fn(req, res, params, engCtx) : Promise.resolve(engineUnavailable(req, res));
 
     this.router.get('/api/models', bind(engineRoutes.listModels));
     this.router.get('/api/sessions', bind(engineRoutes.listSessions));

@@ -27,13 +27,14 @@ bun run packages/aether-backend/src/main.ts
 
 Environment variables:
 
-| Variable         | Default   | Purpose                                              |
-| ---------------- | --------- | ---------------------------------------------------- |
-| `PORT`           | `3001`    | REST API + web GUI port                              |
-| `REALTIME_PORT`  | `3002`    | Bun-native WebSocket hub for live engine events      |
-| `HOST`           | `0.0.0.0` | Bind address                                         |
-| `MAX_BODY_SIZE`  | `1000000` | Request body cap (bytes)                             |
-| `AETHER_API_KEY` | —         | When set, requires this key (admin role) on `/api/*` |
+| Variable            | Default   | Purpose                                                                       |
+| ------------------- | --------- | ----------------------------------------------------------------------------- |
+| `PORT`              | `3001`    | REST API + web GUI port                                                       |
+| `REALTIME_PORT`     | `3002`    | Bun-native WebSocket hub for live engine events                               |
+| `HOST`              | `0.0.0.0` | Bind address                                                                  |
+| `MAX_BODY_SIZE`     | `1000000` | Request body cap (bytes)                                                      |
+| `AETHER_API_KEY`    | —         | When set, requires this key (admin role) on `/api/*`                          |
+| `AETHER_WORKSPACES` | `~`       | Colon-separated working-directory roots the GUI can browse for sessions/loops |
 
 > Local tip: if port `3001` is taken (e.g. by the Hermes MCP gateway), run
 > `PORT=3101 REALTIME_PORT=4101 bun run packages/aether-backend/src/main.ts`.

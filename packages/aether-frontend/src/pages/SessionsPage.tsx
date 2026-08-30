@@ -14,6 +14,7 @@ import {
 } from '../lib/api';
 import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
 import { ChatConsole } from '../components/ChatConsole';
+import { CwdPicker } from '../components/CwdPicker';
 import { reduceChatFrame, appendUser, fromMessages, type ChatItem } from '../lib/chat';
 
 const COLORS: Record<string, string> = {
@@ -29,6 +30,7 @@ export function SessionsPage() {
   const [groups, setGroups] = useState<ModelGroup[]>([]);
   const [model, setModel] = useState('local-server/deepseek-ai/DeepSeek-V4-Flash-0731');
   const [current, setCurrent] = useState<string | null>(null);
+  const [cwd, setCwd] = useState<string | undefined>(undefined);
   const [items, setItems] = useState<ChatItem[]>([]);
   const [rt, setRt] = useState<RealtimeClient | null>(null);
   const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed'>('connecting');
@@ -88,7 +90,7 @@ export function SessionsPage() {
     const provider = model.slice(0, slash);
     const modelId = model.slice(slash + 1);
     try {
-      const { session } = await createSession({ provider, modelId });
+      const { session } = await createSession({ provider, modelId }, cwd);
       setCurrent(session.id);
       setViewingDisk(null);
       setItems([]);
@@ -167,6 +169,9 @@ export function SessionsPage() {
           <button className="btn primary" style={{ width: '100%' }} onClick={openSession}>
             + New session
           </button>
+          <div style={{ marginTop: 10 }}>
+            <CwdPicker value={cwd} onSelect={setCwd} placeholder="workspace root (host)" />
+          </div>
 
           <h3 style={{ margin: '16px 0 8px', fontSize: 12 }}>Live</h3>
           <div className="stack">

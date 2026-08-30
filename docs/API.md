@@ -43,6 +43,29 @@ Container/liveness probe; stays open even when API auth is enabled.
 
 ---
 
+## Workspaces
+
+Pick a real working directory (on the host) for Sessions and Loops — each can
+target a different directory so the agent edits separate host projects at the
+same time. Paths are confined to configured roots (`AETHER_WORKSPACES`,
+colon-separated; defaults to the host home). In Docker the compose file mounts
+the host home (or projects) at the same absolute path and runs as the host
+user, so a chosen path maps to real, host-owned files.
+
+### `GET /api/workspaces`
+
+List the configured workspace roots → `200 { workspaces: [{ path, label }] }`.
+
+### `GET /api/workspaces/browse?path=/abs`
+
+List subdirectories of `path` (must be within a root) → `200 { path, entries: [{ name, path, isDir }], parent? }`. Omit `path` to start at the first root.
+
+Sessions and loops accept an optional `cwd`; when provided it must exist and be
+a directory (a chosen working directory outside the roots is rejected with
+`400`).
+
+---
+
 ## Models
 
 ### `GET /api/models`

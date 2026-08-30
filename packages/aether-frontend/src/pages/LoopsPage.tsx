@@ -19,6 +19,7 @@ import {
 } from '../lib/api';
 import { RealtimeClient, type RealtimeFrame } from '../lib/realtime';
 import { ChatConsole } from '../components/ChatConsole';
+import { CwdPicker } from '../components/CwdPicker';
 import { reduceChatFrame, appendMeta, fromTranscriptEntries, type ChatItem } from '../lib/chat';
 import type { PageId } from '../App';
 
@@ -48,6 +49,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
   const eventLogRef = useRef<HTMLDivElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState(DEFAULT_MODEL);
+  const [cwd, setCwd] = useState<string | undefined>(undefined);
   const [rt, setRt] = useState<RealtimeClient | null>(null);
   /** Loop live-chat inspector: { loopId, sessionId } to stream. */
   const [inspect, setInspect] = useState<{ loopId: string; sessionId?: string } | null>(null);
@@ -225,7 +227,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
     const provider = selectedModel.slice(0, slash);
     const modelId = selectedModel.slice(slash + 1);
     try {
-      const { loop } = await saveLoop({ ...form, model: { provider, modelId } });
+      const { loop } = await saveLoop({ ...form, cwd, model: { provider, modelId } });
       setLoops((l) => [loop, ...l.filter((x) => x.id !== loop.id)]);
       setEditingId(loop.id);
       setForm({ ...EMPTY });
@@ -381,6 +383,7 @@ export function LoopsPage({ onNavigate }: { onNavigate?: (p: PageId) => void }) 
                 ))}
               </select>
             </div>
+            <CwdPicker value={cwd} onSelect={setCwd} placeholder="workspace root (host)" />
             <div className="field">
               <label>Transition between rounds</label>
               <select

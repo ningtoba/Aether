@@ -445,7 +445,10 @@ export class EngineService {
     });
     const { createAgentSession, SessionManager } = sdk;
     const created = await createAgentSession({
-      sessionManager: SessionManager.inMemory(),
+      // Thread the session cwd into omp's SessionManager too — tools
+      // (bash/read/edit) take their working directory from
+      // sessionManager.getCwd(), so without it they run in the process cwd.
+      sessionManager: SessionManager.inMemory(opts.cwd),
       authStorage: this.authStorage,
       modelRegistry: this.registry,
       cwd: opts.cwd,

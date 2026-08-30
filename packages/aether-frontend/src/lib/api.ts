@@ -262,6 +262,25 @@ export interface FacadeStatus {
 }
 
 export const getFacadeStatus = () => request<{ status: FacadeStatus }>('/api/omp/status');
+/* ── Workspaces (working directories) ────────────────────────────────── */
+
+export interface WorkspaceRoot {
+  path: string;
+  label: string;
+}
+
+export interface WorkspaceDirEntry {
+  name: string;
+  path: string;
+  isDir: boolean;
+}
+
+export const listWorkspaces = () => request<{ workspaces: WorkspaceRoot[] }>('/api/workspaces');
+
+export const browseWorkspace = (path?: string) =>
+  request<{ path: string; entries: WorkspaceDirEntry[]; parent?: string }>(
+    `/api/workspaces/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+  );
 
 export interface SettingDef {
   path: string;
