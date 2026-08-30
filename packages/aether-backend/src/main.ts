@@ -42,6 +42,17 @@ const REALTIME_PUBLIC_PORT = parseIntEnv('REALTIME_PUBLIC_PORT', REALTIME_PORT);
 
 const API_KEY = process.env.AETHER_API_KEY;
 
+// Comma-separated CORS allow-list: exact origins like
+// "https://gui.example,http://localhost:5173" (or the literal "*" to allow
+// any browser). Empty/unset = same-origin only: the server then NEVER emits
+// Access-Control-Allow-Origin, so no web page can call this API
+// cross-origin. Requests without an Origin header (curl, server-to-server)
+// are unaffected. This list also restricts WebSocket upgrade Origins.
+const CORS_ORIGINS = (process.env.AETHER_CORS_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter((o) => o.length > 0);
+
 // ── Engine wiring (Bun runtime only) ────────────────────────────────────
 const engine = new EngineService();
 const skills = new SkillsService({ projectRoot: process.cwd() });
@@ -84,6 +95,9 @@ const server = new AetherServer({
   port: PORT,
   host: HOST,
   maxBodySize: MAX_BODY_SIZE,
+  // Empty list (default) = same-origin only; also populates the WebSocket
+  // upgrade origin allow-list via the server's setCorsOrigins wiring.
+  corsOrigins: CORS_ORIGINS,
   // When AETHER_API_KEY is set, the API requires it (Bearer or X-API-Key)
   // and authorizes via RBAC (admin role). Leave unset for open local dev.
   ...(API_KEY ? { auth: { apiKey: API_KEY } } : {}),
@@ -125,6 +139,24 @@ try {
   }
   await server.start();
   console.log(`[AetherServer] ready at http://${HOST}:${PORT} (health: /health)`);
+  // Loud (non-fatal) warning when the open API is reachable beyond loopback:
+  // any host that can reach the port could otherwise create sessions and run
+  // agent tools (bash/edit) as this user — browser CORS is NOT a defense.
+  if (!API_KEY && !['127.0.0.1', 'localhost', '::1'].includes(HOST)) {
+    console.warn(
+      [
+        '***********************************************************************',
+        `* WARNING: Aether API is UNAUTHENTICATED and bound to ${HOST}:${PORT},`,
+        '* i.e. reachable from every network interface of this machine.',
+        '* Anyone who can reach the port can create sessions and run agent',
+        '* tools (bash/edit) on this machine as this user.',
+        '* Fix: set AETHER_API_KEY (require an API key) and/or',
+        '* AETHER_CORS_ORIGINS (restrict browser origins), or bind locally',
+        '* with HOST=127.0.0.1. Docker users: keep the 127.0.0.1 port prefix.',
+        '***********************************************************************',
+      ].join('\n'),
+    );
+  }
 } catch (err) {
   console.error('[AetherServer] failed to start:', err);
   process.exit(1);

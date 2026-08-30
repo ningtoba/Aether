@@ -5,7 +5,7 @@
  * Structured for easy migration to Fastify/Express when needed.
  */
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { Router, type RouteParams } from './router.js';
 import { WebSocketManager } from './websocket.js';
 import { badRequest, jsonResponse, serverError, DEFAULT_MAX_BODY_SIZE } from './utils.js';
@@ -48,6 +48,11 @@ export interface AetherServerOptions {
   engine?: EngineWiring;
   /** Working-directory roots browser (defaults to the user's home). */
   workspaces?: WorkspacesService;
+  /** Allowed browser origins for CORS: exact `scheme://host[:port]` strings,
+   *  or the literal `'*'` to allow any. Default: same-origin only — with no
+   *  configured origin matching the request's `Origin`, no
+   *  `Access-Control-Allow-Origin` header is emitted at all. */
+  corsOrigins?: string[];
 }
 
 /** API auth for the HTTP/WebSocket server. */
@@ -87,10 +92,13 @@ export class AetherServer {
     this.host = options.host ?? '0.0.0.0';
     this.router = new Router();
     this.wsManager = new WebSocketManager();
-    this.corsOrigins = ['*'];
+    // Same-origin only by default: an empty allow-list never emits an
+    // Access-Control-Allow-Origin header (see handleCors).
+    this.corsOrigins = [];
     this.maxBodySize = options.maxBodySize ?? DEFAULT_MAX_BODY_SIZE;
     this.engineWiring = options.engine ?? null;
     this.workspaces = options.workspaces ?? new WorkspacesService(process.env.AETHER_WORKSPACES);
+    if (options.corsOrigins) this.setCorsOrigins(options.corsOrigins);
     this.configureAuth(options.auth);
     this.initStatic(options.staticRoot);
     this.registerRoutes();
@@ -146,7 +154,7 @@ export class AetherServer {
   private keysEqual(a: string, b: string): boolean {
     const ha = createHash('sha256').update(a).digest();
     const hb = createHash('sha256').update(b).digest();
-    return ha.equals(hb);
+    return timingSafeEqual(ha, hb);
   }
 
   /** Authenticate a request; returns the granted role or null. */
@@ -321,25 +329,37 @@ export class AetherServer {
     this.router.get('/api/omp/sessions/read', bindF(facadeRoutes.readDiskSession));
   }
 
-  /** Set CORS allowed origins */
+  /** Set CORS allowed origins. Also populates the WebSocket upgrade
+   *  origin allow-list (exact origins only; `'*'` stays HTTP-only). */
   setCorsOrigins(origins: string[]): void {
     this.corsOrigins = origins;
     this.wsManager.setAllowedOrigins(origins.filter((o) => o !== '*'));
   }
 
-  /** Handle CORS preflight and headers */
+  /** Handle CORS preflight and headers.
+   *
+   *  Same-origin by default: `Access-Control-Allow-*` headers are emitted
+   *  ONLY when the request's `Origin` matches a configured origin (or a
+   *  literal `'*'` origin is explicitly configured). The literal `null`
+   *  origin (sandboxed iframes, file://) is always denied. Requests with no
+   *  `Origin` header (curl, server-to-server) get no CORS headers — CORS is
+   *  browser-enforced, so they are unaffected. OPTIONS still answers 204;
+   *  the browser then blocks the cross-origin read because no ACAO is set. */
   private handleCors(req: IncomingMessage, res: ServerResponse): boolean {
-    const origin = req.headers.origin ?? '*';
-    const allowOrigin = this.corsOrigins.includes('*')
-      ? '*'
-      : this.corsOrigins.includes(origin)
-        ? origin
-        : 'null';
-
-    res.setHeader('Access-Control-Allow-Origin', allowOrigin);
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
-    res.setHeader('Access-Control-Max-Age', '86400');
+    const origin = typeof req.headers.origin === 'string' ? req.headers.origin : undefined;
+    const wildcard = this.corsOrigins.includes('*');
+    const allowed =
+      origin !== undefined && origin !== 'null' && (wildcard || this.corsOrigins.includes(origin));
+    if (allowed && origin !== undefined) {
+      res.setHeader('Access-Control-Allow-Origin', wildcard ? '*' : origin);
+      if (!wildcard) res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type, Authorization, X-Requested-With',
+      );
+      res.setHeader('Access-Control-Max-Age', '86400');
+    }
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);

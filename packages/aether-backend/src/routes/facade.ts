@@ -169,6 +169,11 @@ export async function readDiskSession(
   _params: RouteParams,
   ctx: FacadeRouteContext,
 ): Promise<void> {
+  // The raw ?path= value is confined INSIDE the facade, which owns omp's
+  // session roots (confineSessionPath): every rejection — outside a root,
+  // wrong extension, missing, not a regular file, symlink escape — answers
+  // the same fixed 'session not found' with no fs error text and no path
+  // echo, so this route is not a filesystem oracle. Empty stays a 400.
   const url = new URL(req.url ?? '', 'http://localhost');
   const path = url.searchParams.get('path') ?? '';
   if (!path) return badRequest(res, 'session path required');

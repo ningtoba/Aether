@@ -56,17 +56,89 @@ describe('AetherServer', () => {
   });
 
   describe('CORS', () => {
-    it('should default to allow all origins', () => {
-      // The default is ['*'] which produces '*' in responses
-      // Access the private corsOrigins via casting
-      const origins = (server as any).corsOrigins;
-      expect(origins).toEqual(['*']);
+    it('should default to same-origin only (empty allow-list)', () => {
+      // No configured origins → the server must never emit an
+      // Access-Control-Allow-Origin header (see the fetch tests below).
+      // Internal peek: private field, no runtime accessor exists.
+      const { corsOrigins } = server as unknown as { corsOrigins: string[] };
+      expect(corsOrigins).toEqual([]);
     });
 
-    it('should allow setting custom origins', () => {
+    it('should allow setting custom origins and mirror them to the WebSocket allow-list', () => {
       server.setCorsOrigins(['http://localhost:3000']);
-      const origins = (server as any).corsOrigins;
-      expect(origins).toEqual(['http://localhost:3000']);
+      // Internal peek: private fields, no runtime accessors exist.
+      const { corsOrigins } = server as unknown as { corsOrigins: string[] };
+      const { allowedOrigins } = server.ws as unknown as { allowedOrigins: string[] };
+      expect(corsOrigins).toEqual(['http://localhost:3000']);
+      // websocket.ts upgrades are gated by the same list (existing hook).
+      expect(allowedOrigins).toEqual(['http://localhost:3000']);
+    });
+
+    it('emits NO Access-Control-Allow-Origin for a foreign Origin preflight by default', async () => {
+      await server.start();
+      const port = server.getPort()!;
+      const res = await fetch(`http://127.0.0.1:${port}/api/agents`, {
+        method: 'OPTIONS',
+        headers: { Origin: 'https://evil.example', 'Access-Control-Request-Method': 'POST' },
+      });
+      expect(res.status).toBe(204);
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+      expect(res.headers.get('access-control-allow-methods')).toBeNull();
+    });
+
+    it('emits NO Access-Control-Allow-Origin for a foreign Origin on normal requests', async () => {
+      await server.start();
+      const port = server.getPort()!;
+      const res = await fetch(`http://127.0.0.1:${port}/health`, {
+        headers: { Origin: 'https://evil.example' },
+      });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('echoes a configured Origin with Vary: Origin; non-matching origins get nothing', async () => {
+      const gui = new AetherServer({
+        port: 0,
+        host: '127.0.0.1',
+        corsOrigins: ['https://gui.example'],
+      });
+      try {
+        await gui.start();
+        const port = gui.getPort()!;
+        const hit = await fetch(`http://127.0.0.1:${port}/health`, {
+          headers: { Origin: 'https://gui.example' },
+        });
+        expect(hit.status).toBe(200);
+        expect(hit.headers.get('access-control-allow-origin')).toBe('https://gui.example');
+        expect(hit.headers.get('vary')).toContain('Origin');
+
+        const miss = await fetch(`http://127.0.0.1:${port}/health`, {
+          headers: { Origin: 'https://evil.example' },
+        });
+        expect(miss.status).toBe(200);
+        expect(miss.headers.get('access-control-allow-origin')).toBeNull();
+        expect(miss.headers.get('access-control-allow-methods')).toBeNull();
+      } finally {
+        await gui.stop();
+      }
+    });
+
+    it('denies the literal null origin even when configured', async () => {
+      server.setCorsOrigins(['null']);
+      await server.start();
+      const port = server.getPort()!;
+      const res = await fetch(`http://127.0.0.1:${port}/health`, { headers: { Origin: 'null' } });
+      expect(res.status).toBe(200);
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    });
+
+    it('serves requests without an Origin header unchanged (curl / server-to-server)', async () => {
+      await server.start();
+      const port = server.getPort()!;
+      const res = await fetch(`http://127.0.0.1:${port}/health`);
+      expect(res.status).toBe(200);
+      expect(await res.json()).toBeTypeOf('object');
+      expect(res.headers.get('access-control-allow-origin')).toBeNull();
     });
   });
 

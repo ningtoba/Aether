@@ -223,7 +223,8 @@ describe('CORS integration', () => {
     await server.stop();
   });
 
-  it('responds to OPTIONS preflight with correct CORS headers', async () => {
+  it('responds to OPTIONS preflight with correct CORS headers for a configured origin', async () => {
+    server.setCorsOrigins(['http://example.com']);
     await server.start();
     const port = server.getPort()!;
     const res = await fetch(`http://127.0.0.1:${port}/api/agents`, {
@@ -234,7 +235,8 @@ describe('CORS integration', () => {
       },
     });
     expect(res.status).toBe(204);
-    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    expect(res.headers.get('access-control-allow-origin')).toBe('http://example.com');
+    expect(res.headers.get('vary')).toContain('Origin');
     expect(res.headers.get('access-control-allow-methods')).toBe('GET, POST, PUT, DELETE, OPTIONS');
     expect(res.headers.get('access-control-allow-headers')).toBe(
       'Content-Type, Authorization, X-Requested-With',
@@ -242,11 +244,14 @@ describe('CORS integration', () => {
     expect(res.headers.get('access-control-max-age')).toBe('86400');
   });
 
-  it('sets CORS headers on normal GET requests', async () => {
+  it('emits NO CORS headers by default (same-origin-only allow-list)', async () => {
     await server.start();
     const port = server.getPort()!;
-    const res = await fetch(`http://127.0.0.1:${port}/health`);
-    expect(res.headers.get('access-control-allow-origin')).toBe('*');
+    const res = await fetch(`http://127.0.0.1:${port}/health`, {
+      headers: { Origin: 'http://example.com' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
   });
 });
 describe('request body size limits', () => {

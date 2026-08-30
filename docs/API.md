@@ -290,12 +290,13 @@ sources), with full bodies — a superset of `GET /api/skills`.
 
 - `GET /api/omp/sessions` → persisted omp sessions on disk across projects
   (id, path, cwd, display name, modified).
-- `GET /api/omp/sessions/read?path=<url-encoded jsonl path>` → a parsed
-  transcript (`{ messages: [{ role, text, timestamp }] }`).
+- `GET /api/omp/sessions/read?path=<url-encoded jsonl path>` → a parsed transcript:
+  `{ ok: true, transcript: { id, path, name, messages: [{ role, text, timestamp }] } }`.
+  The path is confined server-side: only regular `.jsonl` files resolving inside
+  omp's session roots are readable; anything else returns a fixed
+  `{ ok: false, error: 'session not found' }` 404 with no filesystem detail.
 
 ---
-
-## Agents & Executions
 
 ## Agents & Executions
 

@@ -16,8 +16,15 @@ services:
       # (realtime websocket); the host reaches the GUI at:
       #   http://localhost:3081   (GUI + API)
       #   ws://localhost:3082     (realtime engine events)
-      - "3081:3001"
-      - "3082:3002"
+      # Security: the "127.0.0.1:" prefix binds the ports to the loopback
+      # interface ONLY. With no AETHER_API_KEY the API can drive the agent's
+      # bash/edit tools, so publishing on all host interfaces would let any
+      # LAN host run commands as this user. To deliberately expose the GUI
+      # on the LAN: drop the "127.0.0.1:" prefix below AND set AETHER_API_KEY
+      # (and AETHER_CORS_ORIGINS if a browser page on another origin must
+      # call the API).
+      - "127.0.0.1:3081:3001"
+      - "127.0.0.1:3082:3002"
     environment:
       - NODE_ENV=production
       # Point omp's home at the host home (mounted below) so ~/.omp — the

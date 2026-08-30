@@ -78,25 +78,27 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 
 ## Security
 
-- API key auth with constant-time digest comparison; RBAC (hierarchical roles + glob resources) enforced on `/api/agents|providers|executions|sessions|loops`.
+- API key auth (`Authorization: Bearer` / `X-API-Key`) with constant-time digest comparison (`crypto.timingSafeEqual`); RBAC (hierarchical roles + glob resources) enforced on `/api/agents|providers|executions|sessions|loops`. Auth is opt-in via `AETHER_API_KEY`; the server logs a loud warning at startup when it runs unauthenticated on a non-loopback bind.
+- CORS is **same-origin-only by default** (no `Access-Control-Allow-Origin` header is ever emitted unless the request `Origin` exactly matches an entry in `AETHER_CORS_ORIGINS`); the same list gates legacy WebSocket upgrade origins. This closes drive-by cross-site requests against the agent-driving API.
+- `GET /api/omp/sessions/read` confines every read to regular `.jsonl` files whose realpath resolves inside omp's session roots; all other paths return a fixed 404 with no filesystem detail.
 - Static file serving rejects path traversal/absolute escapes; only GET/HEAD.
 - Engine routes return 501 (not 500) when the engine is unavailable.
 
 ## Testing & verification
 
-- **582 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
+- **630 vitest tests** (`npm test`) across the six packages — run under Node, never importing the Bun-only omp SDK.
 - `npm run build` = `tsc -b --force` (whole monorepo); `npm run lint` and `npm run format:check` gate CI.
 - CI: lint/format/madge, type-check, tests, then a Docker image build (`package.yml`).
 
 ## Operation
 
-- `docker compose up -d` → GUI at `http://localhost:3081`, realtime `ws://localhost:3082` (host ports remapped away from the common local 3001).
-- Env: `PORT` (default 3001), `REALTIME_PORT` (3002), `HOST` (`0.0.0.0`), `MAX_BODY_SIZE`, `AETHER_API_KEY`.
+- `docker compose up -d` → GUI at `http://localhost:3081`, realtime `ws://localhost:3082`. Both host ports are published on `127.0.0.1` only (drop the prefix to opt into LAN exposure — then also set `AETHER_API_KEY` + `AETHER_CORS_ORIGINS`).
+- Env: `PORT` (default 3001), `REALTIME_PORT` (3002), `HOST` (`0.0.0.0`), `MAX_BODY_SIZE`, `AETHER_API_KEY`, `AETHER_CORS_ORIGINS` (comma-separated exact origins; unset = same-origin-only).
 - Model catalog: `~/.omp/agent/models.yml` + omp provider catalog; the GUI reads it live.
 
 ## Roadmap
 
-- Persist loop definitions and session transcripts to disk.
+- Persist engine session transcripts into omp's real session store (loop definitions already persist across restarts).
 - Per-round skill transition argument templating.
 - GUI-driven provider CRUD into the engine registry.
 - RBAC-scoped GUI access beyond admin.
