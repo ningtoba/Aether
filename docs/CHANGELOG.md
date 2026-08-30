@@ -6,32 +6,35 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
-## v0.3.9 — provider rows you can actually read; honest verify (2026-08-30)
+## v0.3.9 — provider rows you can actually read (2026-08-30)
 
-GUI-enhancement pass (design scout + vision-verified screenshots of the deployed
-build), plus a live-behavior audit of the verify path.
+GUI-enhancement pass (design scout + vision-verified screenshots of the
+deployed build).
 
-- **Verify is honest end-to-end.** `POST /api/omp/providers/:id/verify` now
-  distinguishes *credentials fail* (`reachable:false` + reason, e.g. HTTP 401)
-  from *cannot tell* (server unreachable / no model endpoint →
-  `reachable:true, verified:false`): a working provider with a bad key is never
-  reported as healthy. Reachability checks are deduplicated and cached 15 s, and
-  a verify against a never-configured provider no longer passes on ambient
-  env-var credentials. The Providers row surfaces the pill in the **Auth**
-  column (it describes the credential, not an action) with the reason on hover.
 - **The provider table stopped clipping.** Action labels were being cut
   mid-word at the card edge (`chan…`, `remo…`) with no scroll affordance —
   verified from screenshots. Labels are now short, complete words (`key`,
   `revoke`, `verify`, `delete`, `models`), pills are compact
-  (`configured` / `via config` / `models.yml` / `keyless`), the action cluster
-  keeps its natural width inside the scrollable table, and a search box +
-  jump-to-provider select front the 70-row catalog.
+  (`configured` / `via config` / `models.yml` / `keyless`), and the action
+  cluster keeps its natural width inside the scrollable table so buttons
+  can never shrink-clip again. A search box + jump-to-provider select
+  front the 70-row catalog.
+- **The reachability result moved to the Auth column.** The `reachable` /
+  `unreachable` pill produced by `POST /:id/verify` describes the
+  provider's endpoint/credential, not an action — sitting in the action
+  cluster it clipped mid-word the moment you verified. It now stacks under
+  the auth pills with the probe's reason code (`http-401`, `timeout`,
+  `network`, `no-base-url`) on hover.
 - **Dashboard health copy is true**: `providers: 2 configured · 67 in catalog`
   replaces `2 of 67 configured`, which implied the other 65 were half-configured
   when 67 is simply the catalog size.
-- Live verification: key rotate → `configured` stays, verify → `reachable`;
-  filtered and unfiltered table screenshots re-inspected after each change.
-  611 tests green.
+- Probe semantics are unchanged from v0.3.8 and remain as documented in
+  [API.md](API.md): one 4-second request to `<baseUrl>/models`, key from
+  `AuthStorage.peekApiKey`, reason-coded failures, model lists never
+  returned.
+- Live verification: key rotate → `configured` stays, verify → green
+  `reachable` pill in the Auth column; filtered and unfiltered table
+  screenshots re-inspected after each change. 611 tests green.
 
 ## v0.3.8 — provider control plane: real auth truth, key provisioning, custom providers (2026-08-30)
 
