@@ -107,6 +107,14 @@ export class EngineSession {
   private count = 0;
   /** Last assistant text seen (updated on message_end) for loop summaries. */
   lastAssistantText = '';
+  /** True while the current turn has produced any assistant text. */
+  private turnHadOutput = false;
+  /** True if the current turn surfaced an explicit engine error event. */
+  private turnErrored = false;
+  /** A turn is in flight (gate for concurrent prompts). */
+  get busy(): boolean {
+    return this.status === 'running';
+  }
 
   constructor(opts: { id: string; cwd: string; onEvent: (ev: SessionTurnEvent) => void }) {
     this.id = opts.id;
@@ -122,9 +130,29 @@ export class EngineSession {
 
   async prompt(message: string): Promise<void> {
     const omp = this.#require();
+    if (this.status === 'running') {
+      this.onEvent({
+        kind: 'session_error',
+        message: 'Session is busy — the previous turn is still running',
+      });
+      return;
+    }
     this.status = 'running';
+    this.turnHadOutput = false;
+    this.turnErrored = false;
     try {
       await omp.prompt(message);
+      // A "clean" turn can still produce zero assistant output when the model
+      // is not actually served by the configured provider — omp resolves it
+      // without an error event. Never present that as a successful answer.
+      if (!this.turnHadOutput && !this.turnErrored) {
+        this.status = 'error';
+        this.onEvent({
+          kind: 'session_error',
+          message:
+            'Model returned no output — it may not be available on the configured server. Try a different model.',
+        });
+      }
     } finally {
       if (this.status === 'running') this.status = 'idle';
     }
@@ -301,6 +329,7 @@ export class EngineSession {
         // kind lives in `.type`, not `.block`.
         const kind = ame?.type === 'thinking_delta' ? 'thinking' : 'assistant';
         if (typeof delta === 'string') {
+          if (kind === 'assistant') this.turnHadOutput = true;
           this.onEvent({ kind: 'message_update', role: kind, delta, turn: 0 });
         }
         break;
@@ -351,6 +380,19 @@ export class EngineSession {
               .join('')
           : '';
         if (m?.role === 'assistant') {
+          const stopReason = (m?.stopReason as string) ?? '';
+          if (text) this.turnHadOutput = true;
+          if (!text && stopReason === 'error') {
+            // omp reports an absent/erroring model as an empty final message
+            // with stopReason "error" (no explicit error event). Surface it.
+            this.status = 'error';
+            this.turnErrored = true;
+            this.onEvent({
+              kind: 'session_error',
+              message:
+                'Model returned no output — the model may not be available on the configured server. Try a different model.',
+            });
+          }
           this.lastAssistantText = text;
           this.onEvent({
             kind: 'message_end',
@@ -367,6 +409,7 @@ export class EngineSession {
         this.onEvent({ kind: 'agent_end', isTerminal: e?.isTerminal !== false });
         break;
       case 'error':
+        this.turnErrored = true;
         this.status = 'error';
         this.onEvent({
           kind: 'session_error',

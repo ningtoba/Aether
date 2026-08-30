@@ -243,7 +243,7 @@ export function SessionsPage() {
                 {current ?? viewingDisk ?? 'No active session'}
               </span>
               <span className="muted" style={{ fontSize: 11 }}>
-                model · {viewingDisk ? 'persisted transcript' : model}
+                model · {viewingDisk ? 'persisted transcript' : activeModel || model}
               </span>
               <div className="spacer" />
               {current && (

@@ -159,6 +159,11 @@ export async function promptSession(
   if (typeof body.message !== 'string' || !body.message.trim()) {
     return badRequest(res, 'message required');
   }
+  if (session.busy) {
+    return jsonResponse(res, 409, {
+      error: `Session ${session.id} is busy — a turn is already running`,
+    });
+  }
   try {
     void session.prompt(body.message); // events stream over WS
     jsonResponse(res, 202, { accepted: true, sessionId: session.id });
