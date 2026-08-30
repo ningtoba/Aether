@@ -9,6 +9,7 @@ import {
   CopyButton,
   EmptyState,
   ErrorState,
+  Icon,
   PageHeader,
   SegmentedControl,
   Skeleton,
@@ -120,14 +121,18 @@ export function AgentsPage() {
         }
         actions={
           mode === 'omp' ? (
-            <input
-              className="input"
-              style={{ width: 260 }}
-              placeholder="Search name, description or path…"
-              aria-label="Search agents"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            <span className="search" style={{ width: 260 }}>
+              <span className="search-icon">
+                <Icon name="search" size={14} />
+              </span>
+              <input
+                className="input"
+                placeholder="Search name, description or path…"
+                aria-label="Search agents"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </span>
           ) : undefined
         }
       />

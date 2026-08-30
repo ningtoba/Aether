@@ -6,6 +6,56 @@ landing page. The project tags each iteration as a `v0.1.x` / `v0.2.x` release.
 
 ---
 
+## v0.3.7 — durable sessions + resume, executions surface cut, hardening pass (2026-08-30)
+
+Fifth audit iteration: three fresh-lens scouts (session-persistence feasibility,
+the never-audited service surface, GUI design + external references), every
+MAJOR source-verified before fixing, then three parallel implementers.
+
+- **Session transcripts are now durable.** Engine sessions run on disk-backed
+  `SessionManager.create(cwd)` journals under omp's session roots (lazy
+  materialization — never-prompted sessions write nothing), so restarts,
+  cap-evictions and disposes no longer destroy transcripts; the GUI's
+  persisted-session browser gained a one-click **Resume**: `POST /api/sessions`
+  accepts `resumePath`, confined server-side (realpath must resolve inside
+  omp's session roots; rejection is a fixed 404, never a path echo), restores
+  the conversation context via `SessionManager.open`, and forwards the SDK's
+  model-restore warning verbatim. Roadmap item closed. Live-verified on the
+  container: codeword → restart → resume → recall.
+- **`/api/executions` deleted.** The simulated timer-chain registry had zero
+  consumers (no page, no nav, dead API wrappers only); routes, RBAC branch,
+  DTOs, tests and docs removed. `/api/agents` stays (the GUI reads it) and is
+  now capped (500 → 503) with body/name validation mirroring the provider
+  registry.
+- **Hardening (audited defects):** `PUT /api/omp/settings` now validates the
+  path against omp's `SETTINGS_SCHEMA` before writing (arbitrary keys could be
+  planted into the user's live omp config); `SkillsService` got a 30 s TTL memo
+  (it re-read every `SKILL.md` body, whole tree, on every request and every
+  loop round); unexpected engine exceptions answer a fixed 500 after logging
+  server-side instead of echoing paths/SDK internals (actionable rejections —
+  engine-down, loop cwd guidance, unserved model — stay visible); wrong
+  methods on registered paths answer 405 with an `Allow` header; unknown API
+  paths return the uniform 404 shape; every request gets one `[http]`
+  access-log line; explicit `requestTimeout`/`headersTimeout`; `Vary: Origin`
+  on CORS denials.
+- **GUI (design iteration):** one-click Resume on the disk-session panel; two
+  MAJOR honesty/visual fixes (double trash glyph on destructive rows, the
+  loop inspector's unconditional pulsing “streaming live” pill — now conditional
+  with an honest `no run` state, and titled by loop name, not UUID); real
+  `ws://host:port` instead of the literal `ws://…:`; legacy provider counters
+  qualified; Sessions hero leads with the informative count; clamp-2
+  descriptions; badge tones carry meaning (provenance blue, health green,
+  “reachable” vs “live”); the designed `.search` component unified across all
+  seven list filters (was dead CSS); short 8-char session ids with copy;
+  constrained form measure (`.form-narrow`); new design tokens — `--fs-*`
+  type scale, `--border-hover`/`--border-active`, `--fill-neutral` — from
+  reference research (Vercel Geist roles, Primer alpha-derived neutral fills,
+  Linear's near-black canvas), cinema-dark preserved.
+- Tests: 548 → **562 across 32 files** (+7 persistence/resume discriminators
+  incl. a `inMemory`-banned sentinel and confinement-first negative proofs,
+  +405/validation/schema-gate suites; −11 simulated-surface tests with the
+  surface).
+
 ## v0.3.6 — loop-engine integrity, GUI deep-links, dead weight cut (2026-08-30)
 
 Fourth audit iteration: three fresh-lens scouts (frontend correctness, loop

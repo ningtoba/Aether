@@ -96,43 +96,6 @@ describe('AetherServer HTTP integration', () => {
     expect(getBody.agent.id).toBe(agentId);
   });
 
-  it('creates an execution flow (create, list, get by id)', async () => {
-    await server.start();
-    const port = server.getPort()!;
-    const base = `http://127.0.0.1:${port}`;
-
-    // Create an execution
-    const createRes = await fetch(`${base}/api/executions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        agentId: 'test-agent-id',
-        input: { message: 'run task' },
-      }),
-    });
-    expect(createRes.status).toBe(201);
-    const createBody: any = await createRes.json();
-    expect(createBody.execution).toHaveProperty('id');
-    expect(createBody.execution.status).toBe('pending');
-    expect(createBody.execution.agentId).toBe('test-agent-id');
-
-    const execId = createBody.execution.id;
-
-    // List executions
-    const listRes = await fetch(`${base}/api/executions`);
-    expect(listRes.status).toBe(200);
-    const listBody: any = await listRes.json();
-    expect(listBody.executions).toHaveLength(1);
-    expect(listBody.executions[0].id).toBe(execId);
-
-    // Get by id
-    const getRes = await fetch(`${base}/api/executions/${execId}`);
-    expect(getRes.status).toBe(200);
-    const getBody: any = await getRes.json();
-    expect(getBody.execution.id).toBe(execId);
-    expect(getBody.execution.status).toBe('running');
-  });
-
   it('returns 404 for unknown routes', async () => {
     await server.start();
     const port = server.getPort()!;
@@ -727,29 +690,6 @@ describe('AetherServer resilience', () => {
     await server.start();
     const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/agents/%zz`);
     expect(res.status).toBe(400);
-  });
-
-  it('does not resurrect a pending execution cancelled before it started', async () => {
-    await server.start();
-    const base = `http://127.0.0.1:${server.getPort()}`;
-
-    const create = await fetch(`${base}/api/executions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input: 'hi' }),
-    });
-    expect(create.status).toBe(201);
-    const exec = ((await create.json()) as any).execution;
-    expect(exec.status).toBe('pending');
-
-    const cancel = await fetch(`${base}/api/executions/${exec.id}/cancel`, { method: 'POST' });
-    expect(cancel.status).toBe(200);
-    expect(((await cancel.json()) as any).execution.status).toBe('cancelled');
-
-    // Let the deferred start (setImmediate) fire; it must not flip to running.
-    await new Promise((r) => setTimeout(r, 50));
-    const after = await fetch(`${base}/api/executions/${exec.id}`);
-    expect(((await after.json()) as any).execution.status).toBe('cancelled');
   });
 
   it('ignores a forged status and rejects non-object config / non-string name', async () => {

@@ -25,7 +25,13 @@
 
   /* ── Borders ──────────────────────────────────────────────────────── */
   --border: #252c39;
+  /* Progressive rims (Geist/Primer-style): rest → hover → pressed/active. */
+  --border-hover: rgba(255, 255, 255, 0.14);
+  --border-active: rgba(255, 255, 255, 0.22);
   --hairline: rgba(255, 255, 255, 0.07);
+  /* Tone-less chip/segment fill. Unlike --surface-2 it stays visible on
+   * --surface-2 hover rows; status-toned pills keep their own soft hues. */
+  --fill-neutral: rgba(166, 176, 192, 0.1);
 
   /* ── Text ─────────────────────────────────────────────────────────── */
   --text: #e9edf4;
@@ -55,6 +61,14 @@
   --font-ui:
     ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
   --font-mono: ui-monospace, 'JetBrains Mono', 'Fira Code', 'SF Mono', Menlo, Consolas, monospace;
+  /* Type scale. Mono machine strings pair one step BELOW the label size
+   * (label --fs-sm → its mono value --fs-xs). */
+  --fs-2xs: 11px;
+  --fs-xs: 12px;
+  --fs-sm: 13px;
+  --fs-md: 14px;
+  --fs-xl: 20px;
+  --fs-2xl: 28px;
 
   /* ── Spacing ──────────────────────────────────────────────────────── */
   --s-1: 4px;

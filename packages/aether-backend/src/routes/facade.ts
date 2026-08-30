@@ -103,6 +103,24 @@ export async function settingsSet(
   if (typeof body.path !== 'string' || !body.path) {
     return badRequest(res, 'settings.path required');
   }
+  // WRITE-side schema gate: the facade persists verbatim into the user's
+  // live ~/.omp/agent config, so arbitrary keys must never reach it. Only
+  // paths omp's own SETTINGS_SCHEMA declares are writable — same source the
+  // read surface uses (settingsGet), and unavailable schema degrades 501.
+  const schemaRes = await ctx.facade.settingsSchema();
+  if (!schemaRes.ok || !schemaRes.schema) {
+    return jsonResponse(res, 501, { error: schemaRes.error ?? 'settings unavailable' });
+  }
+  const def = schemaRes.schema.settings.find((s) => s.path === body.path);
+  if (!def) return badRequest(res, 'unknown settings path');
+  // Obvious primitive type mismatches are rejected up front using the
+  // schema entry's declared type; complex types (object/array/enum) pass
+  // through for the SDK to validate deeper.
+  if (def.type === 'string' || def.type === 'number' || def.type === 'boolean') {
+    if (body.value !== undefined && typeof body.value !== def.type) {
+      return badRequest(res, `settings.value must be ${def.type}`);
+    }
+  }
   const r = await ctx.facade.settingsSet(body.path, body.value);
   if (!r.ok) return fail(res, new Error(r.error ?? 'settings write failed'));
   jsonResponse(res, 200, { ok: true, path: body.path });

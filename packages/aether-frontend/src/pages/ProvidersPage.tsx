@@ -21,6 +21,7 @@ import {
   CopyButton,
   EmptyState,
   ErrorState,
+  Icon,
   PageHeader,
   Skeleton,
   StatusPill,
@@ -143,7 +144,7 @@ export function ProvidersPage() {
               checking engine…
             </StatusPill>
           ) : engineAvailable ? (
-            <StatusPill tone="ok" dot>
+            <StatusPill tone="info" dot>
               omp engine{status.version ? ` v${status.version}` : ''}
             </StatusPill>
           ) : (
@@ -262,10 +263,10 @@ export function ProvidersPage() {
               {verify.found && verify.modelCount > 0 && (
                 <span className="row" style={{ gap: 8, flexWrap: 'wrap' }}>
                   <StatusPill tone="ok" dot>
-                    live
+                    reachable
                   </StatusPill>
                   <span className="muted" style={{ fontSize: 12 }}>
-                    {verify.name} is live in the catalog with {verify.modelCount} model
+                    {verify.name} is reachable in the catalog with {verify.modelCount} model
                     {verify.modelCount === 1 ? '' : 's'}.
                   </span>
                 </span>
@@ -311,14 +312,18 @@ export function ProvidersPage() {
               </div>
             )}
             <div className="row" style={{ marginBottom: 10 }}>
-              <input
-                className="input"
-                style={{ flex: 1 }}
-                placeholder="Search providers…"
-                aria-label="Search providers"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-              />
+              <span className="search" style={{ flex: 1 }}>
+                <span className="search-icon">
+                  <Icon name="search" size={14} />
+                </span>
+                <input
+                  className="input"
+                  placeholder="Search providers…"
+                  aria-label="Search providers"
+                  value={query}
+                  onChange={(e) => setQuery(e.target.value)}
+                />
+              </span>
               <select
                 className="select"
                 aria-label="Jump to provider"

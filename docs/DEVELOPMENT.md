@@ -109,3 +109,22 @@ The Dockerfile is a two-stage build:
 | `packages/aether-core`         | Foundation: events, lifecycle, config, types, utils, telemetry, RBAC |
 | `packages/aether-backend`      | HTTP/WS server, engine, loops, skills, models, static GUI            |
 | `packages/aether-frontend`     | React + Vite web GUI                                                 |
+
+## Design system & references
+
+The GUI is cinema-dark: `packages/aether-frontend/src/tokens.css` is the single
+source of truth (4-step surface ramp from `#0b0e14` — near-black, never `#000`
+— alpha-soft status hues, one indigo accent, `--s-*` spacing, `--fs-*` type
+scale, motion), with a documented contrast contract (body text ≈15:1, floor
+`--text-faint` ≈5.3:1 — computed, not claimed). Rules: no emoji (inline stroke
+SVG icons), mono for machine strings, mono pairs one size step below the label
+it sits beside, colour conveys **health** while provenance badges are always
+blue, and status UI never lies (no unconditional “live”, no fabricated numbers).
+
+External reference research feeds the token set each design pass — Vercel
+Geist (named type roles, 10-step color roles: hover/active border separation),
+GitHub Primer (neutral fills alpha-derived from the text gray →
+`--fill-neutral`), Linear (near-black canvas confirmation). Imports are
+weighed, never copied: Geist's two-background minimalism and Linear's tighter
+row heights were rejected as fighting the console's depth rhythm and hit
+targets.

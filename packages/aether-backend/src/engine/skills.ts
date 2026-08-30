@@ -16,7 +16,13 @@ export interface SkillsServiceOptions {
   extraRoots?: string[];
   /** Project root for `.omp/skills` (default: process cwd). */
   projectRoot?: string;
+  /** How long list() results stay fresh (default 30s). Injectable for tests. */
+  ttlMs?: number;
 }
+
+/** Default memo TTL: skill files change rarely; a rescan per GUI poll was
+  pure filesystem churn. */
+const DEFAULT_SKILLS_TTL_MS = 30_000;
 
 interface RawSkill {
   name: string;
@@ -49,6 +55,8 @@ function parseFrontmatter(raw: string): { name?: string; description?: string; b
 
 export class SkillsService {
   private roots: string[];
+  private readonly ttlMs: number;
+  private cache: { at: number; records: SkillRecord[] } | null = null;
 
   constructor(opts: SkillsServiceOptions = {}) {
     const projectRoot = opts.projectRoot ?? process.cwd();
@@ -59,10 +67,27 @@ export class SkillsService {
       ...(opts.extraRoots ?? []),
     ];
     if (existsSync(userRoot)) this.roots.push(userRoot);
+    this.ttlMs = opts.ttlMs ?? DEFAULT_SKILLS_TTL_MS;
   }
 
-  /** List every discovered skill, deduped by name (first root wins). */
+  /** Drop the memo so the next list() rescans the filesystem. */
+  invalidate(): void {
+    this.cache = null;
+  }
+
+  /** List every discovered skill, deduped by name (first root wins).
+   *  Serves the memo while fresh (ttlMs); a miss rescans synchronously. */
   list(): SkillRecord[] {
+    const now = Date.now();
+    if (this.cache !== null && now - this.cache.at < this.ttlMs) {
+      return this.cache.records;
+    }
+    const records = this.#scan();
+    this.cache = { at: now, records };
+    return records;
+  }
+
+  #scan(): SkillRecord[] {
     const seen = new Map<string, RawSkill>();
     for (const root of this.roots) {
       if (!existsSync(root)) continue;

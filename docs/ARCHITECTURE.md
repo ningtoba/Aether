@@ -79,13 +79,13 @@ The former `aether-electron`, `aether-sdk`, and `aether-providers` packages are 
 - The realtime hub (`:3002`) is no longer an open second entry point: upgrades pass the origin gate first, then a credential gate — `Authorization: Bearer`, `X-API-Key`, `?apikey=`, or a **single-use 30 s ticket** from `POST /api/realtime-ticket` (what the GUI uses, keeping long-lived keys out of socket URLs). The hub binds `HOST` and logs its actual bound address.
 - `GET /api/omp/settings/values` redacts credential-flagged settings to presence markers when auth is enabled; writes still accept real values.
 - `GET /api/omp/sessions/read` confines every read to regular `.jsonl` files whose realpath resolves inside omp's session roots; all other paths return a fixed 404 with no filesystem detail. Workspace/working-directory validation likewise compares **realpaths**, so a symlink cannot escape configured roots.
-- Engine routes return 501 (not 500) when the engine is unavailable; simulated surfaces (in-memory provider/execution registries) self-describe (`simulated: true`, honest `status: "unknown"` health) and are capped at 500 records.
+- Engine routes return 501 (not 500) when the engine is unavailable; unexpected exceptions are logged server-side and answer a fixed 500 — only actionable rejections (engine unavailable, loop working-directory guidance, unserved model) reach the client verbatim. The simulated `/api/executions` surface was removed in v0.3.7; the legacy `agents`/`providers` in-memory registries are capped at 500 records (→ 503).
 - Static file serving rejects path traversal/absolute escapes; only GET/HEAD.
-- Process posture: `unhandledRejection` is logged and survived; `uncaughtException` exits 1 so the container restarts clean. The live session map is capped (`MAX_LIVE_SESSIONS`, default 64, idle-evict) and drained on shutdown; loop-owned sessions are disposed on every terminal path.
+- Process posture: `unhandledRejection` is logged and survived; `uncaughtException` exits 1 so the container restarts clean. The live session map is capped (`MAX_LIVE_SESSIONS`, default 64, idle-evict) and drained on shutdown; loop-owned sessions are disposed on every terminal path. Engine-session journals are durable in omp's session store (`SessionManager.create`), so eviction/restart detaches a session without destroying its transcript — `resumePath` reopens it.
 
 ## Testing & verification
 
-- **548 vitest tests** (`npm test`) across the three packages — run under Node, never importing the Bun-only omp SDK.
+- **562 vitest tests** (`npm test`) across the three packages — run under Node, never importing the Bun-only omp SDK.
 - `npm run build` = `tsc -b --force` (whole monorepo); `npm run lint` and `npm run format:check` gate CI.
 - CI: lint/format/madge, type-check, tests, then a Docker image build (`package.yml`).
 

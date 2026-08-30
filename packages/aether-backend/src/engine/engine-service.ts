@@ -12,6 +12,9 @@
  * the Bun-only native addon. All public methods that need the engine return a
  * strict `EngineUnavailableError` when running under Node.
  */
+import * as fs from 'node:fs';
+import { dirname, join, resolve, sep } from 'node:path';
+import { homedir } from 'node:os';
 import type { ModelRecord, ProviderModelGroup, SessionSummary, SessionTurnEvent } from './types.js';
 import type { SessionTranscriptEntry } from './types.js';
 
@@ -23,6 +26,28 @@ export class EngineUnavailableError extends Error {
   ) {
     super(message);
     this.name = 'EngineUnavailableError';
+  }
+}
+
+/** An error the engine raises ON PURPOSE with text the operator/GUI must
+ *  see (catalog verdicts like "model not found" / "not served by the
+ *  provider"). The route layer passes these messages through; anything else
+ *  reaching a route is unexpected and gets a fixed response instead. */
+export class EngineUserError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EngineUserError';
+  }
+}
+
+/** Thrown by EngineService.resumeSession when the requested session file
+ *  fails confinement or cannot be reopened. The message is FIXED by design:
+ *  the requested path is unvalidated network input and is never echoed
+ *  (no filesystem oracle). Routes map it to 404 'session not found'. */
+export class SessionResumeRejectedError extends Error {
+  constructor(message = 'session not found') {
+    super(message);
+    this.name = 'SessionResumeRejectedError';
   }
 }
 
@@ -129,6 +154,9 @@ interface OmpSessionLike {
   getEnabledToolNames?(): string[];
   /** Journaled messages (AgentMessage[]): stable chronological order. */
   messages?: unknown[];
+  /** omp's on-disk session file (AgentSession getter). Disk-backed sessions
+   *  materialize it lazily — undefined until the first assistant message. */
+  sessionFile?: string;
 }
 
 /** A live agent session handle exposed to the API layer. */
@@ -140,6 +168,9 @@ export class EngineSession {
    *  per summary, so the same session "changed" on every poll). */
   readonly createdAtMs = Date.now();
   private omp: OmpSessionLike | null = null;
+  /** omp session file captured at attach — keeps the identity readable
+   *  after dispose() clears the omp handle. See the live sessionFile getter. */
+  private attachedSessionFile?: string;
   private onEvent: (ev: SessionTurnEvent) => void;
   status: 'idle' | 'running' | 'error' | 'closed' = 'idle';
   private count = 0;
@@ -166,7 +197,17 @@ export class EngineSession {
   /** Attach the underlying omp session (called by EngineService after creation). */
   attach(omp: OmpSessionLike): void {
     this.omp = omp;
+    this.attachedSessionFile = omp.sessionFile;
     omp.subscribe((ev) => this.#onOmpEvent(ev));
+  }
+
+  /** Absolute path of omp's on-disk session file (undefined until omp
+   *  materializes it — disk-backed files appear lazily at the first
+   *  assistant message). Read through the LIVE omp handle so every summary
+   *  picks the path up the moment it exists; falls back to the value seen
+   *  at attach once the handle is gone (disposed session). */
+  get sessionFile(): string | undefined {
+    return this.omp?.sessionFile ?? this.attachedSessionFile;
   }
 
   /** Run one turn. Resolves with the turn's honest outcome instead of void:
@@ -637,7 +678,8 @@ export class EngineService {
       find(provider: string, id: string): OmpModelLike | undefined;
     };
     const model = registry.find(selector.provider, selector.modelId);
-    if (!model) throw new Error(`Model not found: ${selector.provider}/${selector.modelId}`);
+    if (!model)
+      throw new EngineUserError(`Model not found: ${selector.provider}/${selector.modelId}`);
     return model;
   }
 
@@ -679,9 +721,9 @@ export class EngineService {
         baseUrl,
         servedIds,
       });
-      if (problem) throw new Error(problem);
+      if (problem) throw new EngineUserError(problem);
     } catch (err) {
-      if (err instanceof Error && /is not served by the provider/.test(err.message)) throw err;
+      if (err instanceof EngineUserError) throw err;
       // Probe unreachable on this provider — let the turn surface the real error.
     }
   }
@@ -708,10 +750,14 @@ export class EngineService {
     });
     const { createAgentSession, SessionManager } = sdk;
     const created = await createAgentSession({
-      // Thread the session cwd into omp's SessionManager too — tools
-      // (bash/read/edit) take their working directory from
-      // sessionManager.getCwd(), so without it they run in the process cwd.
-      sessionManager: SessionManager.inMemory(opts.cwd),
+      // Disk-backed on purpose (was SessionManager.inMemory — those sessions
+      // vanished with the process). create(cwd) persists the journal under
+      // omp's session roots (the file itself materializes lazily at the
+      // first assistant message), so GUI sessions are durable and reopenable
+      // via resumeSession. The cwd is threaded in too — tools (bash/read/
+      // edit) take their working directory from sessionManager.getCwd(), so
+      // without it they run in the process cwd.
+      sessionManager: SessionManager.create(opts.cwd),
       authStorage: this.authStorage,
       modelRegistry: this.registry,
       cwd: opts.cwd,
@@ -725,6 +771,96 @@ export class EngineService {
     await this.#enforceSessionCap();
     this.sessions.set(id, session);
     return session;
+  }
+
+  /**
+   * Resume a persisted agent session from its on-disk journal (durable GUI
+   *  sessions). Structurally identical to createSession (served-model
+   *  preflight, cap enforcement, event wiring, live-map registration) — the
+   *  only difference is the SessionManager: the confined file is REOPENED
+   *  instead of a fresh one created.
+   *
+   *  The path is network input: it is CONFINED first (defaultSessionRoots +
+   *  confineSessionPath — the same single-source guard OmpFacade transcript
+   *  reads use) before anything, fs or SDK, ever touches it. Every rejection
+   *  (outside roots, wrong extension, missing, symlink escape, unopenable
+   *  journal) throws SessionResumeRejectedError with a fixed message — never
+   *  an echo of the requested path, never an fs error detail.
+   */
+  async resumeSession(opts: {
+    cwd: string;
+    model: { provider: string; modelId: string };
+    sessionFile: string;
+  }): Promise<{ session: EngineSession; warning?: string }> {
+    await this.start();
+    if (!this.registry || !this.authStorage) throw new EngineUnavailableError();
+    const sdk = await this.#importSdk();
+    // Confinement FIRST: the raw path never reaches fs, the SDK, or a log.
+    const confined = confineSessionPath(opts.sessionFile, defaultSessionRoots(sdk.SessionManager));
+    if (!confined.ok) throw new SessionResumeRejectedError();
+    const model = await this.resolveModel(opts.model);
+    // Same preflight as createSession — a resumed turn on an unserved catalog
+    // model would fail its first turn with a confusing "no output".
+    await this.#verifyModelServed(model);
+
+    const { createAgentSession, SessionManager } = sdk;
+    const open = (
+      SessionManager as unknown as { open?(filePath: string): Promise<unknown> } | undefined
+    )?.open;
+    if (typeof open !== 'function') {
+      throw new EngineUnavailableError(
+        'Agent engine cannot resume sessions: SessionManager.open is unavailable',
+      );
+    }
+    let sessionManager: unknown;
+    try {
+      // Only confined.path (realpath, proven inside a session root) reaches
+      // the SDK here.
+      sessionManager = await open.call(SessionManager, confined.path);
+    } catch (err) {
+      // A confined-but-unopenable journal is still "not a restorable
+      // session" to the caller. The real cause is logged server-side only —
+      // SDK/fs messages can carry absolute paths.
+      console.error(
+        `[EngineService] session open failed for a confined journal: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      throw new SessionResumeRejectedError();
+    }
+
+    const id = `ses_${this.nextSessionId++}`;
+    const session = new EngineSession({
+      id,
+      cwd: opts.cwd,
+      onEvent: (ev) => this.emit(session, ev),
+    });
+    const created = await createAgentSession({
+      // Same option shape as createSession — only the sessionManager differs
+      // (reopened journal vs fresh disk-backed one).
+      sessionManager,
+      authStorage: this.authStorage,
+      modelRegistry: this.registry,
+      cwd: opts.cwd,
+      model,
+      enableMCP: false,
+      enableLsp: false,
+    } as never);
+    const createdResult = created as {
+      session: OmpSessionLike;
+      modelFallbackMessage?: unknown;
+    };
+    session.attach(createdResult.session);
+    // The SDK reports a restored-model downgrade here (e.g. the journal's
+    // model is no longer in the catalog) — surface it verbatim so the GUI
+    // can tell the user which model the resumed session actually runs on.
+    const warning =
+      typeof createdResult.modelFallbackMessage === 'string' && createdResult.modelFallbackMessage
+        ? createdResult.modelFallbackMessage
+        : undefined;
+    // Cap enforcement runs immediately before the insert — exactly like
+    // createSession (freshest eviction decision, no wasted eviction).
+    await this.#enforceSessionCap();
+    this.sessions.set(id, session);
+    return { session, warning };
   }
 
   getSession(id: string): EngineSession | undefined {
@@ -817,6 +953,9 @@ export class EngineService {
       status: session.status,
       messageCount: session.messageCount,
       createdAt,
+      /** omp session file once materialized — the GUI echoes it back as
+       *  resumePath to reopen this session after a backend restart. */
+      sessionFile: session.sessionFile,
     };
   }
 
@@ -826,4 +965,82 @@ export class EngineService {
     if (!session) return null;
     return session.listTranscript();
   }
+}
+
+/**
+ * omp session roots session-file operations are confined to: the SDK's
+ * default project dir's parent (getDefaultSessionDir = join(sessionsRoot,
+ * <encoded-cwd>), one level deep — honours PI_CODING_AGENT_DIR/profiles),
+ * plus the standard `~/.omp/agent/sessions` fallback (same convention
+ * listAgents uses for `~/.omp/agent/agents`; listAllSessions scans
+ * `<agentDir>/sessions/<dir>/<file>.jsonl`, so every listed session lives
+ * inside).
+ *
+ * SINGLE source of truth: OmpFacade.readDiskSession (transcript reads) and
+ * EngineService.resumeSession (journal open) both derive roots here. The SDK
+ * namespace is passed by the caller (facade and service keep their own lazy
+ * Bun-only import) and feature-detected defensively — SDK shape drift
+ * degrades to the standard fallback root instead of throwing.
+ */
+export function defaultSessionRoots(sessionManager?: unknown): string[] {
+  const roots: string[] = [];
+  const push = (p: string | undefined | null): void => {
+    if (p && !roots.includes(p)) roots.push(p);
+  };
+  try {
+    const manager = sessionManager as
+      | { getDefaultSessionDir?(cwd: string): string }
+      | null
+      | undefined;
+    if (typeof manager?.getDefaultSessionDir === 'function') {
+      push(dirname(manager.getDefaultSessionDir(process.cwd())));
+    }
+  } catch {
+    /* SDK shape drift → the standard fallback below still applies */
+  }
+  push(join(homedir(), '.omp', 'agent', 'sessions'));
+  return roots;
+}
+
+/**
+ * Confine a requested on-disk session path to omp's session roots.
+ *
+ * The GUI hands transcript reads (OmpFacade.readDiskSession) and session
+ * resumes (EngineService.resumeSession) a raw path value; without this the
+ * API is an arbitrary-file-read oracle whose error text echoed absolute
+ * paths. Accepts ONLY a regular `.jsonl` file whose realpath (symlinks
+ * resolved on BOTH sides) stays inside one of `roots`. Every failure returns
+ * the same `{ ok: false }` — never an fs message, never the path — so
+ * callers can map it to a fixed 404.
+ */
+export type ConfinedSessionPath = { ok: true; path: string } | { ok: false };
+
+export function confineSessionPath(
+  requested: string,
+  roots: readonly string[],
+): ConfinedSessionPath {
+  const isSessionName = (p: string): boolean => p.toLowerCase().endsWith('.jsonl');
+  if (!requested || !isSessionName(requested)) return { ok: false };
+  let real: string;
+  let stat: fs.Stats;
+  try {
+    real = fs.realpathSync(resolve(requested));
+    // A symlink inside the root must not resolve to a non-session file.
+    if (!isSessionName(real)) return { ok: false };
+    stat = fs.statSync(real);
+  } catch {
+    return { ok: false }; // missing / unsearchable dir → same fixed answer
+  }
+  if (!stat.isFile()) return { ok: false };
+  for (const root of roots) {
+    let rootReal: string;
+    try {
+      rootReal = fs.realpathSync(resolve(root));
+    } catch {
+      continue; // root not present → nothing to confine into there
+    }
+    const base = rootReal.endsWith(sep) ? rootReal : rootReal + sep;
+    if (real === rootReal || real.startsWith(base)) return { ok: true, path: real };
+  }
+  return { ok: false };
 }

@@ -1,5 +1,21 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { EngineService, EngineSession, describeUnservedModel } from './engine-service.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { Readable } from 'node:stream';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import {
+  EngineService,
+  EngineSession,
+  EngineUnavailableError,
+  SessionResumeRejectedError,
+  describeUnservedModel,
+} from './engine-service.js';
+import {
+  createSession as createSessionRoute,
+  startLoop as startLoopRoute,
+} from '../routes/engine.js';
+import type { EngineRouteContext } from '../routes/engine.js';
 import type { SessionTurnEvent } from './types.js';
 
 /**
@@ -165,8 +181,10 @@ describe('describeUnservedModel — served-model preflight decision', () => {
  * The Bun-only omp SDK is replaced with a minimal in-memory double (the
  * factory means the real package — whose native addon cannot load under plain
  * Node — is never imported). EngineService only touches ModelRegistry,
- * discoverAuthStorage, SessionManager.inMemory and createAgentSession, so the
- * full create/dispose/evict lifecycle can be driven here deterministically.
+ * discoverAuthStorage, SessionManager (create/open/getDefaultSessionDir) and
+ * createAgentSession, so the full create/resume/dispose/evict lifecycle can
+ * be driven here deterministically. The recorder fields back the durability
+ * seams below (disk-backed create, confined resume, identity/warning).
  */
 const sdk = vi.hoisted(() => ({
   /** Fake omp sessions in creation order (== EngineSession creation order). */
@@ -175,6 +193,19 @@ const sdk = vi.hoisted(() => ({
   promptImpl: null as null | (() => Promise<void>),
   /** Labels whose dispose() must throw (resilience probes). */
   failDispose: new Set<string>(),
+  /** createAgentSession option objects, recorded per call (persistence seam). */
+  createOpts: [] as Array<Record<string, unknown>>,
+  /** SessionManager.create() products handed out, in call order. */
+  createdManagers: [] as Array<{ tag: string; cwd: string }>,
+  /** Paths SessionManager.open() was called with (resume seam). */
+  openCalls: [] as string[],
+  /** Steers the mock's getDefaultSessionDir: defaultSessionRoots() then
+   *  derives the root as this value (no env mutation in tests). */
+  sessionsRoot: null as string | null,
+  /** When set, the fake omp session reports this as its sessionFile. */
+  ompSessionFile: undefined as string | undefined,
+  /** When set, createAgentSession returns this as modelFallbackMessage. */
+  fallbackMessage: null as string | null,
 }));
 
 vi.mock('@oh-my-pi/pi-coding-agent', () => ({
@@ -191,9 +222,27 @@ vi.mock('@oh-my-pi/pi-coding-agent', () => ({
     }
   },
   SessionManager: {
-    inMemory: (_cwd: string) => ({}),
+    // Durability contract: in-memory sessions vanish with the process (the
+    // pre-durability bug). Any call must fail the test loudly.
+    inMemory: (_cwd: string): never => {
+      throw new Error('SessionManager.inMemory is banned — sessions must be disk-backed');
+    },
+    create: (cwd: string) => {
+      const manager = { tag: 'create', cwd };
+      sdk.createdManagers.push(manager);
+      return manager;
+    },
+    open: async (path: string) => {
+      sdk.openCalls.push(path);
+      return { tag: 'open', path };
+    },
+    // The real SDK returns join(sessionsRoot, <encoded-cwd>); mirror just
+    // enough for defaultSessionRoots() to derive root === sdk.sessionsRoot.
+    getDefaultSessionDir: (_cwd: string) =>
+      `${sdk.sessionsRoot ?? '/tmp/aether-test-sessions'}/enc-cwd`,
   },
-  createAgentSession: async () => {
+  createAgentSession: async (opts: Record<string, unknown>) => {
+    sdk.createOpts.push(opts);
     const label = `omp_${sdk.created.length}`;
     const omp = {
       label,
@@ -213,9 +262,13 @@ vi.mock('@oh-my-pi/pi-coding-agent', () => ({
         if (sdk.failDispose.has(label)) throw new Error(`dispose failed: ${label}`);
         omp.disposed = true;
       },
+      ...(sdk.ompSessionFile !== undefined ? { sessionFile: sdk.ompSessionFile } : {}),
     };
     sdk.created.push(omp);
-    return { session: omp };
+    return {
+      session: omp,
+      ...(sdk.fallbackMessage ? { modelFallbackMessage: sdk.fallbackMessage } : {}),
+    };
   },
 }));
 
@@ -485,5 +538,243 @@ describe('EngineSession — prompt outcome contract', () => {
     const second = session.prompt('b');
     resolveNext();
     await expect(second).resolves.toBe('ok');
+  });
+});
+
+/* ─── Durable sessions: disk-backed create + confined resume ───────────── */
+
+/**
+ * The contract that makes GUI agent sessions survive a backend restart:
+ *  - fresh sessions get SessionManager.create(cwd) (disk-backed; the banned
+ *    inMemory factory THROWS in this mock, so any regression fails loudly),
+ *  - resumeSession confines the network-supplied path with the SAME roots +
+ *    guard transcript reads use, BEFORE any fs/SDK touch,
+ *  - the session identity (sessionFile) rides on every summary and the SDK's
+ *    modelFallbackMessage surfaces verbatim as an honest warning,
+ *  - POST /api/sessions maps rejections to a fixed 404 (no path echo) and
+ *    unexpected engine faults to a fixed 500 (no raw message echo), while
+ *    LoopManager's actionable guidance stays visible.
+ */
+describe('EngineService — durable sessions (disk-backed create, confined resume)', () => {
+  let base = '';
+  let sessionsRoot = '';
+
+  beforeEach(() => {
+    sdk.created.length = 0;
+    sdk.promptImpl = null;
+    sdk.failDispose.clear();
+    sdk.createOpts.length = 0;
+    sdk.createdManagers.length = 0;
+    sdk.openCalls.length = 0;
+    sdk.ompSessionFile = undefined;
+    sdk.fallbackMessage = null;
+    base = realpathSync(mkdtempSync(join(tmpdir(), 'aether-persist-')));
+    sessionsRoot = join(base, 'sessions');
+    mkdirSync(sessionsRoot);
+    // The mock's getDefaultSessionDir returns sessionsRoot/enc-cwd →
+    // defaultSessionRoots() derives exactly [sessionsRoot, homedir fallback].
+    sdk.sessionsRoot = sessionsRoot;
+  });
+
+  afterEach(() => {
+    sdk.sessionsRoot = null;
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  /** Drive the REAL POST /api/sessions handler with a JSON body. */
+  async function postCreateSession(
+    body: unknown,
+    engine?: unknown,
+  ): Promise<{ status: number; json: Record<string, unknown> }> {
+    const req = Readable.from([Buffer.from(JSON.stringify(body))]) as unknown as IncomingMessage;
+    let status = 0;
+    let text = '';
+    const res = {
+      writeHead: (code: number) => {
+        status = code;
+        return res;
+      },
+      end: (data?: unknown) => {
+        text = String(data ?? '');
+        return res;
+      },
+    } as unknown as ServerResponse;
+    const liveEngine = (engine ?? (await makeCappedEngine())) as EngineService; // test double seam
+    const ctx = {
+      engine: liveEngine,
+      workspaces: { resolveCwd: () => ({ path: '/tmp/proj' }) },
+      loops: {},
+      skills: {},
+    } as unknown as EngineRouteContext;
+    await createSessionRoute(req, res, {}, ctx);
+    return { status, json: JSON.parse(text) as Record<string, unknown> };
+  }
+
+  it('T1: createSession passes SessionManager.create(cwd) — inMemory is banned', async () => {
+    const engine = await makeCappedEngine();
+    const session = await engine.createSession({ cwd: '/tmp/proj', model: MODEL });
+    // Discriminator: the old code called SessionManager.inMemory — this mock
+    // throws there, so createSession would reject before these asserts.
+    expect(sdk.createdManagers).toEqual([{ tag: 'create', cwd: '/tmp/proj' }]);
+    expect(sdk.createOpts).toHaveLength(1);
+    expect(sdk.createOpts[0].sessionManager).toBe(sdk.createdManagers[0]);
+    // Identity rides: undefined until omp lazily materializes the file, then
+    // EVERY summary re-reads it from the live omp session.
+    expect(engine.toSummary(session).sessionFile).toBeUndefined();
+    const journal = join(sessionsRoot, 'x.jsonl');
+    // Mock seam: the fake omp session is a plain extensible literal.
+    const createdOmp = sdk.created[0] as { sessionFile?: string };
+    createdOmp.sessionFile = journal;
+    expect(engine.toSummary(session).sessionFile).toBe(journal);
+  });
+
+  it('T2: resume rejects a path outside every root — fixed message, open() never called', async () => {
+    // Existing, regular, .jsonl: ONLY the root check can reject this path.
+    const evil = join(base, 'evil.jsonl');
+    writeFileSync(evil, '{"type":"session"}\n');
+    const engine = await makeCappedEngine();
+    let caught: unknown;
+    try {
+      await engine.resumeSession({ cwd: '/tmp/proj', model: MODEL, sessionFile: evil });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(SessionResumeRejectedError);
+    if (!(caught instanceof SessionResumeRejectedError))
+      throw new Error('unreachable: wrong error type');
+    expect(caught.message).toBe('session not found'); // instanceof-narrowed — checked access
+    expect(caught.message).not.toContain(base); // no path echo / fs oracle
+    // Discriminator: confinement runs FIRST — the SDK factories are untouched.
+    expect(sdk.openCalls).toEqual([]);
+    expect(sdk.createOpts).toEqual([]);
+  });
+
+  it('T2b: a symlink inside the root escaping outside is rejected identically', async () => {
+    const secret = join(base, 'outside-secret.jsonl');
+    writeFileSync(secret, '{"type":"session"}\n');
+    const link = join(sessionsRoot, 'sneaky.jsonl');
+    symlinkSync(secret, link);
+    const engine = await makeCappedEngine();
+    await expect(
+      engine.resumeSession({ cwd: '/tmp/proj', model: MODEL, sessionFile: link }),
+    ).rejects.toBeInstanceOf(SessionResumeRejectedError);
+    expect(sdk.openCalls).toEqual([]);
+  });
+
+  it('T2c: POST resumePath outside roots → 404 fixed body; wrong type → 400', async () => {
+    const evil = join(base, 'evil.jsonl');
+    writeFileSync(evil, '{"type":"session"}\n');
+    const r = await postCreateSession({ model: MODEL, resumePath: evil });
+    expect(r.status).toBe(404);
+    expect(r.json).toEqual({ error: 'session not found' }); // no path echo
+    expect(sdk.openCalls).toEqual([]);
+    const t = await postCreateSession({ model: MODEL, resumePath: 42 });
+    expect(t.status).toBe(400);
+  });
+
+  it('T3: resume threads sessionFile into the summary and returns the fallback as warning', async () => {
+    const file = join(sessionsRoot, 'x.jsonl');
+    writeFileSync(file, '{"type":"session","id":"sess-9"}\n');
+    const realFile = realpathSync(file);
+    sdk.ompSessionFile = realFile;
+    sdk.fallbackMessage = 'Could not restore model z. Using y';
+    const engine = await makeCappedEngine();
+    const resumed = await engine.resumeSession({
+      cwd: '/tmp/proj',
+      model: MODEL,
+      sessionFile: file,
+    });
+    // Only the CONFINED realpath is ever handed to the SDK…
+    expect(sdk.openCalls).toEqual([realFile]);
+    // …and the reopen product flows into the same createAgentSession options
+    // shape createSession uses.
+    expect(sdk.createOpts[0].sessionManager).toEqual({ tag: 'open', path: realFile });
+    expect(sdk.createOpts[0]).toMatchObject({
+      cwd: '/tmp/proj',
+      enableMCP: false,
+      enableLsp: false,
+    });
+    expect(resumed.warning).toBe('Could not restore model z. Using y');
+    expect(engine.toSummary(resumed.session).sessionFile).toBe(realFile);
+    expect(engine.getSession(resumed.session.id)).toBe(resumed.session); // registered live
+  });
+
+  it('T3b: POST /api/sessions with resumePath → 201 { session.sessionFile, warning }', async () => {
+    const file = join(sessionsRoot, 'x.jsonl');
+    writeFileSync(file, '{"type":"session","id":"sess-9"}\n');
+    const realFile = realpathSync(file);
+    sdk.ompSessionFile = realFile;
+    sdk.fallbackMessage = 'Could not restore model z. Using y';
+    const r = await postCreateSession({ cwd: '/tmp/proj', model: MODEL, resumePath: file });
+    expect(r.status).toBe(201);
+    const sessionBody = r.json.session as Record<string, unknown>; // parsed-JSON test boundary
+    expect(sessionBody.sessionFile).toBe(realFile);
+    expect(r.json.warning).toBe('Could not restore model z. Using y');
+  });
+
+  it('route error policy: unexpected faults silenced, actionable guidance stays visible', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      // Unexpected engine fault: raw message (fs paths, SDK internals) must
+      // NOT reach the client — fixed server-policy message instead.
+      const leaky = {
+        createSession: async () => {
+          throw new Error('ENOENT: open /home/user/.omp/agent/private.jsonl failed');
+        },
+      } as unknown as EngineService;
+      const r = await postCreateSession({ model: MODEL }, leaky);
+      expect(r.status).toBe(500);
+      expect(r.json).toEqual({ error: 'Internal server error' });
+      expect(JSON.stringify(r.json)).not.toContain('private.jsonl');
+
+      // Loop lifecycle guidance (LoopManager's own validation text) stays
+      // verbatim — the GUI prompt to pick a directory depends on it.
+      let status = 0;
+      let text = '';
+      const res = {
+        writeHead: (code: number) => {
+          status = code;
+          return res;
+        },
+        end: (data?: unknown) => {
+          text = String(data ?? '');
+          return res;
+        },
+      } as unknown as ServerResponse;
+      const loopMsg =
+        'Loop l1 has no absolute working directory — open it in the GUI, pick a directory, and save before starting';
+      const ctx = {
+        engine: leaky,
+        workspaces: { resolveCwd: () => ({ path: '/tmp/proj' }) },
+        loops: {
+          start: async () => {
+            throw new Error(loopMsg);
+          },
+        },
+        skills: {},
+      } as unknown as EngineRouteContext;
+      await startLoopRoute({} as IncomingMessage, res, { id: 'l1' }, ctx);
+      expect(status).toBe(500);
+      const loopBody = JSON.parse(text) as { error: string }; // captured-response test boundary
+      expect(loopBody.error).toBe(loopMsg);
+
+      // EngineUnavailableError passthrough (501 + its message) is unchanged.
+      const ctx501 = {
+        ...ctx,
+        loops: {
+          start: async () => {
+            throw new EngineUnavailableError();
+          },
+        },
+      } as unknown as EngineRouteContext;
+      status = 0;
+      text = '';
+      await startLoopRoute({} as IncomingMessage, res, { id: 'l1' }, ctx501);
+      expect(status).toBe(501);
+      const unavailBody = JSON.parse(text) as { error: string }; // captured-response test boundary
+      expect(unavailBody.error).toContain('unavailable');
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 });

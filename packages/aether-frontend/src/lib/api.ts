@@ -146,6 +146,8 @@ export interface SessionSummary {
   status: string;
   messageCount: number;
   createdAt: string;
+  /** On-disk transcript path when the engine resolves one (resume target). */
+  sessionFile?: string;
   stats?: {
     messages: number;
     toolCalls: number;
@@ -164,10 +166,16 @@ export interface SessionSummary {
 
 export const listSessions = () => request<{ sessions: SessionSummary[] }>('/api/sessions');
 
-export const createSession = (model: { provider: string; modelId: string }, cwd?: string) =>
-  request<{ session: SessionSummary }>('/api/sessions', {
+export const createSession = (
+  model: { provider: string; modelId: string },
+  cwd?: string,
+  resumePath?: string,
+) =>
+  request<{ session: SessionSummary; warning?: string }>('/api/sessions', {
     method: 'POST',
-    body: JSON.stringify({ model, cwd }),
+    // resumePath rides only when set: an explicit undefined would widen the
+    // backend body contract beyond { model, cwd } for plain creates.
+    body: JSON.stringify({ model, cwd, ...(resumePath ? { resumePath } : {}) }),
   });
 
 export const getSession = (id: string) =>
@@ -284,7 +292,7 @@ export interface SkillRecord {
 
 export const listSkills = () => request<{ skills: SkillRecord[] }>('/api/skills');
 
-/* ── Legacy control-plane (agents / providers / executions / memory) ──── */
+/* ── Legacy control-plane (agents / providers) ──────────────────────── */
 
 export interface AgentRecord {
   id: string;
@@ -296,13 +304,6 @@ export interface AgentRecord {
 }
 
 export const listAgents = () => request<{ agents: AgentRecord[] }>('/api/agents');
-export const createAgent = (name: string, config?: Record<string, unknown>) =>
-  request<{ agent: AgentRecord }>('/api/agents', {
-    method: 'POST',
-    body: JSON.stringify({ name, config }),
-  });
-export const deleteAgent = (id: string) =>
-  request<{ ok: boolean }>(`/api/agents/${id}`, { method: 'DELETE' });
 
 export interface ProviderRecord {
   id: string;
@@ -321,22 +322,6 @@ export const addProvider = (data: Record<string, unknown>) =>
   });
 export const removeProvider = (id: string) =>
   request<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' });
-
-export interface ExecutionRecord {
-  id: string;
-  status: string;
-  agentId?: string;
-  createdAt: string;
-}
-
-export const listExecutions = () => request<{ executions: ExecutionRecord[] }>('/api/executions');
-export const startExecution = (data: Record<string, unknown>) =>
-  request<{ execution: ExecutionRecord }>('/api/executions', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
-export const cancelExecution = (id: string) =>
-  request<{ execution: ExecutionRecord }>(`/api/executions/${id}/cancel`, { method: 'POST' });
 
 /* ── Omp facade (settings / providers / agents / skills / disk sessions) ── */
 

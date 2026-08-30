@@ -12,7 +12,6 @@ import { badRequest, jsonResponse, serverError, DEFAULT_MAX_BODY_SIZE } from './
 import { getHealthStatus } from './routes/health.js';
 import * as agentRoutes from './routes/agents.js';
 import * as providerRoutes from './routes/providers.js';
-import * as executionRoutes from './routes/executions.js';
 import { RBACGuard, type RoleId } from '@aether/core';
 import * as workspaceRoutes from './routes/workspaces.js';
 import { WorkspacesService } from './engine/index.js';
@@ -257,9 +256,6 @@ export class AetherServer {
     if (pathname.startsWith('/api/providers')) {
       return { resource: 'providers:config', action: method === 'GET' ? 'read' : 'write' };
     }
-    if (pathname.startsWith('/api/executions')) {
-      return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'execute' };
-    }
     if (pathname.startsWith('/api/sessions')) {
       return { resource: 'agents:*', action: method === 'GET' ? 'read' : 'execute' };
     }
@@ -335,11 +331,6 @@ export class AetherServer {
     this.router.get('/api/providers/:id/health', providerRoutes.checkProviderHealth);
     this.router.delete('/api/providers/:id', providerRoutes.removeProvider);
 
-    // Executions
-    this.router.get('/api/executions', executionRoutes.listExecutions);
-    this.router.post('/api/executions', executionRoutes.startExecution);
-    this.router.get('/api/executions/:id', executionRoutes.getExecution);
-    this.router.post('/api/executions/:id/cancel', executionRoutes.cancelExecution);
     // Workspaces (working-directory browser; engine-independent)
     const wsp = this.workspaces;
     this.router.get('/api/workspaces', (_req, res) =>
@@ -458,6 +449,10 @@ export class AetherServer {
         'Content-Type, Authorization, X-Requested-With',
       );
       res.setHeader('Access-Control-Max-Age', '86400');
+    } else if (origin !== undefined) {
+      // DENY must vary too: a shared cache must never reuse a denied (no
+      // ACAO) response for an Origin that WOULD be allowed, or vice versa.
+      res.setHeader('Vary', 'Origin');
     }
 
     if (req.method === 'OPTIONS') {
@@ -470,10 +465,20 @@ export class AetherServer {
 
   /** Main request handler */
   private async handleRequest(req: IncomingMessage, res: ServerResponse): Promise<void> {
-    if (this.handleCors(req, res)) return;
-
     const url = req.url ?? '/';
     const method = req.method ?? 'GET';
+
+    // One access-log line per REQUEST, emitted on response 'finish' (fires
+    // once after the final chunk flushed — never per upload/stream chunk).
+    // Pathname only, no query string (queries can carry tokens).
+    const startedAt = process.hrtime.bigint();
+    const pathname = url.split('?')[0];
+    res.on('finish', () => {
+      const ms = Number(process.hrtime.bigint() - startedAt) / 1e6;
+      console.log(`[http] ${method} ${pathname} ${res.statusCode} ${ms.toFixed(1)}ms`);
+    });
+
+    if (this.handleCors(req, res)) return;
 
     // Carry the server's configured limit through to body parsing so no
     // Content-Length (e.g. chunked transfer-encoding) is bounded too.
@@ -497,7 +502,7 @@ export class AetherServer {
       // routePermission is TOTAL on /api/* (D1) — no `perm &&` short-circuit:
       // a registered or unknown API path always resolves to a concrete
       // permission, so RBAC can never be skipped by a table gap.
-      const perm = this.routePermission(method, url.split('?')[0]);
+      const perm = this.routePermission(method, pathname);
       if (this.rbac && !this.rbac.isAllowed([role], perm.resource, perm.action)) {
         return jsonResponse(res, 403, { error: 'Forbidden' });
       }
@@ -530,11 +535,15 @@ export class AetherServer {
       // Non-API GET → serve the web GUI (SPA fallback handles client routes).
       this.staticServer.serve(req, res);
     } else {
-      jsonResponse(res, 404, {
-        error: 'Not found',
-        path: url,
-        method,
-      });
+      // The path IS registered, just not for this method → 405 + Allow.
+      // Unknown paths keep the uniform 404 — no path/method echo, the body
+      // must never reflect attacker-controlled input.
+      const allowedMethods = this.router.methodsFor(url);
+      if (allowedMethods.length > 0) {
+        res.setHeader('Allow', allowedMethods.join(', '));
+        return jsonResponse(res, 405, { error: 'Method not allowed' });
+      }
+      jsonResponse(res, 404, { error: 'Not found' });
     }
   }
 
@@ -557,6 +566,14 @@ export class AetherServer {
           res.end('Internal Server Error');
         });
       });
+
+      // Bound slow-loris / half-open clients: a full request (headers+body)
+      // gets 30s, headers alone 10s. Node requires requestTimeout >=
+      // headersTimeout (it silently clamps headersTimeout down otherwise).
+      // Upgraded WebSocket connections are exempt (Node drops request
+      // tracking after the 101), so this never kills the realtime stream.
+      this.server.requestTimeout = 30_000;
+      this.server.headersTimeout = 10_000;
 
       // Attach WebSocket upgrade handling (with API-key auth when enabled)
       this.wsManager.attach(this.server, (req) => this.authenticateWebSocket(req));

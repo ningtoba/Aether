@@ -588,19 +588,18 @@ export function SettingsPage() {
 
       <div className="stack">
         <Card>
-          <div className="row" style={{ gap: 'var(--s-2)' }}>
-            <span className="muted" aria-hidden="true" style={{ display: 'inline-flex' }}>
-              <Icon name="search" />
+          <span className="search">
+            <span className="search-icon">
+              <Icon name="search" size={14} />
             </span>
             <input
               className="input"
-              style={{ flex: 1 }}
               aria-label="Search settings by path, label, or description"
               placeholder="Search settings by path, label, or description…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-          </div>
+          </span>
         </Card>
 
         {schema && schema.tabs.length > 0 && !queryLower && (

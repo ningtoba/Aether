@@ -6,6 +6,10 @@ import type { RouteParams } from '../router.js';
 import * as store from '../store.js';
 import { jsonResponse, parseBody, notFound, badRequest, payloadTooLarge } from '../utils.js';
 
+/** Cap on the in-memory agent registry (no eviction exists): POSTs past the
+ * cap answer 503 and never mutate the store. */
+const MAX_AGENTS = 500;
+
 export async function listAgents(req: IncomingMessage, res: ServerResponse): Promise<void> {
   jsonResponse(res, 200, { agents: store.listAgents() });
 }
@@ -15,19 +19,31 @@ export async function createAgent(
   res: ServerResponse,
   _params: RouteParams,
 ): Promise<void> {
-  const parsed = await parseBody<{ name?: string; config?: Record<string, unknown> }>(req);
+  const parsed = await parseBody<{ name?: unknown; config?: Record<string, unknown> }>(req);
   if (!parsed.ok) {
     if (parsed.reason === 'too_large') return payloadTooLarge(res);
     return badRequest(res, 'Agent name is required');
   }
   const body = parsed.value;
-  if (!body.name) {
+  // parseBody accepts any JSON value (null, arrays, scalars); dereferencing a
+  // non-object body would throw and surface as a 500 instead of a 400.
+  if (body == null || typeof body !== 'object' || Array.isArray(body)) {
+    return badRequest(res, 'Agent name is required');
+  }
+  // Mirror updateAgent's type discipline: name must be a real, non-empty,
+  // bounded string BEFORE anything reaches the store.
+  if (typeof body.name !== 'string' || !body.name || body.name.length > 200) {
     return badRequest(res, 'Agent name is required');
   }
   const config =
     body.config && typeof body.config === 'object' && !Array.isArray(body.config)
       ? (body.config as Record<string, unknown>)
       : undefined;
+  // Bounded growth: nothing above this line mutates the store, so a rejected
+  // over-cap POST leaves the registry untouched.
+  if (store.listAgents().length >= MAX_AGENTS) {
+    return jsonResponse(res, 503, { error: `agent registry full (${MAX_AGENTS})` });
+  }
   const agent = store.createAgent({
     name: body.name,
     config,

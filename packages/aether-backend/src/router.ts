@@ -69,4 +69,19 @@ export class Router {
     }
     return null;
   }
+
+  /** Registered methods for every route whose pattern matches this path,
+   *  ignoring the request method. A non-empty result with `match()` failing
+   *  for the request method means the path exists but not for that method —
+   *  the 405/Allow signal. Registration order is preserved, deduped. */
+  methodsFor(url: string): string[] {
+    const pathname = url.split('?')[0];
+    const methods: string[] = [];
+    for (const route of this.routes) {
+      if (route.pattern.test(pathname) && !methods.includes(route.method)) {
+        methods.push(route.method);
+      }
+    }
+    return methods;
+  }
 }

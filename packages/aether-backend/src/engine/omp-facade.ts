@@ -24,11 +24,11 @@
  * Bun; under Node every method resolves to `unavailable`.
  */
 import * as fs from 'node:fs';
-import { join, dirname, resolve, sep } from 'node:path';
+import { join, sep } from 'node:path';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 
-import { isBunRuntime } from './engine-service.js';
+import { confineSessionPath, defaultSessionRoots, isBunRuntime } from './engine-service.js';
 
 /* ─── Wire DTOs (stable GUI contracts) ───────────────────────────────── */
 export interface FacadeCapability {
@@ -682,29 +682,6 @@ export class OmpFacade {
     };
   }
 
-  /** omp session roots the LIST paths enumerate from: the SDK's default
-   *  project dir's parent (getDefaultSessionDir = join(sessionsRoot,
-   *  <encoded-cwd>), one level deep — honours PI_CODING_AGENT_DIR/profiles),
-   *  plus the standard `~/.omp/agent/sessions` fallback (same convention
-   *  listAgents uses for `~/.omp/agent/agents`; listAllSessions scans
-   *  `<agentDir>/sessions/<dir>/<file>.jsonl`, so every listed session lives inside). */
-  #sessionRoots(): string[] {
-    const roots: string[] = [];
-    const push = (p: string | undefined | null): void => {
-      if (p && !roots.includes(p)) roots.push(p);
-    };
-    try {
-      const manager = this.sdk?.SessionManager;
-      if (typeof manager?.getDefaultSessionDir === 'function') {
-        push(dirname(manager.getDefaultSessionDir(process.cwd())));
-      }
-    } catch {
-      /* SDK shape drift → the standard fallback below still applies */
-    }
-    push(join(homedir(), '.omp', 'agent', 'sessions'));
-    return roots;
-  }
-
   /** Read a persisted session's transcript by file path. The path arrives
    *  from the GUI as a raw query value, so it is CONFINED to the omp session
    *  roots first (see confineSessionPath). Every rejection — outside, wrong
@@ -715,7 +692,9 @@ export class OmpFacade {
     path: string,
   ): Promise<{ ok: boolean; transcript?: SessionTranscriptDto; error?: string }> {
     if (!(await this.ensure())) return { ok: false, error: 'engine unavailable' };
-    const confined = confineSessionPath(path, this.#sessionRoots());
+    // Roots + guard are the SINGLE source in engine-service.ts (shared with
+    // EngineService.resumeSession) — a path outside them is a fixed 404.
+    const confined = confineSessionPath(path, defaultSessionRoots(this.sdk?.SessionManager));
     if (!confined.ok) return { ok: false, error: 'session not found' };
     try {
       const raw = fs.readFileSync(confined.path, 'utf8');
@@ -760,47 +739,13 @@ export class OmpFacade {
   }
 }
 
-/**
- * Confine a requested on-disk session path to omp's session roots.
- *
- * The GUI hands readDiskSession a raw `?path=` value; without this the API is
- * an arbitrary-file-read oracle whose error text echoed absolute paths.
- * Accepts ONLY a regular `.jsonl` file whose realpath (symlinks resolved on
- * BOTH sides) stays inside one of `roots`. Every failure returns the same
- * `{ ok: false }` — never an fs message, never the path — so callers can map
- * it to a fixed 404.
- */
-export type ConfinedSessionPath = { ok: true; path: string } | { ok: false };
-
-export function confineSessionPath(
-  requested: string,
-  roots: readonly string[],
-): ConfinedSessionPath {
-  const isSessionName = (p: string): boolean => p.toLowerCase().endsWith('.jsonl');
-  if (!requested || !isSessionName(requested)) return { ok: false };
-  let real: string;
-  let stat: fs.Stats;
-  try {
-    real = fs.realpathSync(resolve(requested));
-    // A symlink inside the root must not resolve to a non-session file.
-    if (!isSessionName(real)) return { ok: false };
-    stat = fs.statSync(real);
-  } catch {
-    return { ok: false }; // missing / unsearchable dir → same fixed answer
-  }
-  if (!stat.isFile()) return { ok: false };
-  for (const root of roots) {
-    let rootReal: string;
-    try {
-      rootReal = fs.realpathSync(resolve(root));
-    } catch {
-      continue; // root not present → nothing to confine into there
-    }
-    const base = rootReal.endsWith(sep) ? rootReal : rootReal + sep;
-    if (real === rootReal || real.startsWith(base)) return { ok: true, path: real };
-  }
-  return { ok: false };
-}
+/** confineSessionPath + ConfinedSessionPath now live in engine-service.ts:
+ *  EngineService.resumeSession confines resume paths with the SAME guard,
+ *  and engine-service.ts must not import this module (omp-facade already
+ *  depends on it — definitions here would form a cycle). Re-exported so
+ *  existing consumers keep importing them from here. */
+export { confineSessionPath } from './engine-service.js';
+export type { ConfinedSessionPath } from './engine-service.js';
 
 function extractText(obj: Record<string, unknown>): string {
   if (typeof obj?.content === 'string') return obj.content;

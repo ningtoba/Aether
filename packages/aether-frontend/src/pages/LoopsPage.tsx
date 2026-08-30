@@ -216,7 +216,11 @@ export function LoopsPage({
       if (!sid) {
         setInspectItems((it) => [
           ...it,
-          { id: `meta-${Date.now()}`, kind: 'meta', text: '(no run started yet — press Start)' },
+          {
+            id: `meta-${Date.now()}`,
+            kind: 'meta',
+            text: '(no run started yet — start it from the loop card)',
+          },
         ]);
         return;
       }
@@ -396,29 +400,18 @@ export function LoopsPage({
             </button>
           }
         >
-          <div style={{ position: 'relative', marginBottom: 'var(--s-2)' }}>
-            <span
-              style={{
-                position: 'absolute',
-                left: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--text-faint)',
-                display: 'inline-flex',
-                pointerEvents: 'none',
-              }}
-            >
-              <Icon name="search" size={13} />
+          <span className="search" style={{ display: 'block', marginBottom: 'var(--s-2)' }}>
+            <span className="search-icon">
+              <Icon name="search" size={14} />
             </span>
             <input
               className="input"
-              style={{ paddingLeft: 28 }}
               placeholder="Search loops…"
               aria-label="Search saved loops"
               value={loopQuery}
               onChange={(e) => setLoopQuery(e.target.value)}
             />
-          </div>
+          </span>
           <div className="stack">
             {filteredLoops.map((loop) => (
               <div key={loop.id} className="row" style={{ alignItems: 'center' }}>
@@ -464,9 +457,7 @@ export function LoopsPage({
                     onConfirm={() => del(loop.id)}
                     title={`Delete “${loop.name}”`}
                     ariaLabel={`Delete loop ${loop.name}`}
-                  >
-                    <Icon name="trash" size={13} />
-                  </ConfirmButton>
+                  />
                 </div>
               </div>
             ))}
@@ -494,6 +485,8 @@ export function LoopsPage({
 
         {/* Editor + runners */}
         <div className="stack">
+          {/* Define/edit form: measure-capped via .form-narrow; run cards stay wide. */}
+          <div className="stack form-narrow">
           {/* Identity */}
           <Card
             title={editingId ? 'Edit loop · Identity' : 'Define loop · Identity'}
@@ -694,6 +687,8 @@ export function LoopsPage({
               Loop model: [round N] → [{form.transition?.kind ?? 'none'}] → [round N+1] …
             </div>
           </Card>
+
+          </div>
 
           <div>
             <div
@@ -896,8 +891,11 @@ export function LoopsPage({
               stats={inspectStats}
               header={
                 <>
-                  <span style={{ fontWeight: 600 }}>
-                    Loop: <span className="mono">{inspect.loopId}</span>
+                  <span style={{ fontWeight: 600 }} title={inspect.loopId}>
+                    Loop:{' '}
+                    {loops.find((l) => l.id === inspect.loopId)?.name ?? (
+                      <span className="mono">{inspect.loopId.slice(0, 8)}</span>
+                    )}
                   </span>
                   {inspect.sessionId && (
                     <>
@@ -905,9 +903,13 @@ export function LoopsPage({
                       <CopyButton text={inspect.sessionId} title="Copy session id" />
                     </>
                   )}
-                  <StatusPill tone="running" dot>
-                    streaming live
-                  </StatusPill>
+                  {inspect.sessionId ? (
+                    <StatusPill tone="running" dot>
+                      streaming live
+                    </StatusPill>
+                  ) : (
+                    <StatusPill tone="idle">no run</StatusPill>
+                  )}
                   <div className="spacer" />
                   <button
                     ref={closeInspectRef}

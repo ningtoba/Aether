@@ -36,6 +36,11 @@ export interface SessionSummary {
   status: SessionStatus;
   messageCount: number;
   createdAt: string;
+  /** Absolute path of the omp session journal once materialized (disk-backed
+   *  sessions; the file appears at the first assistant message). The GUI
+   *  echoes it back as POST /api/sessions resumePath to reopen this exact
+   *  session after a backend restart. */
+  sessionFile?: string;
   lastActivityAt?: string;
   /** Session totals for the GUI status line (messages/tokens/context). */
   stats?: {

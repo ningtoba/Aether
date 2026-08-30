@@ -9,6 +9,7 @@ import {
   CopyButton,
   EmptyState,
   ErrorState,
+  Icon,
   PageHeader,
   Skeleton,
   StatusPill,
@@ -63,14 +64,18 @@ export function ModelsPage() {
         }
         actions={
           <>
-            <input
-              className="input"
-              style={{ width: 220 }}
-              placeholder="Search model id, name or URL…"
-              aria-label="Search models"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-            />
+            <span className="search" style={{ width: 220 }}>
+              <span className="search-icon">
+                <Icon name="search" size={14} />
+              </span>
+              <input
+                className="input"
+                placeholder="Search model id, name or URL…"
+                aria-label="Search models"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+            </span>
             <select
               className="select"
               aria-label="Filter by provider"

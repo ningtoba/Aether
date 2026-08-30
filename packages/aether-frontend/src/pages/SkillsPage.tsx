@@ -322,19 +322,18 @@ export function SkillsPage() {
             }
           >
             <div className="stack">
-              <div className="row" style={{ gap: 'var(--s-2)' }}>
-                <span className="muted" aria-hidden="true" style={{ display: 'inline-flex' }}>
-                  <Icon name="search" />
+              <span className="search">
+                <span className="search-icon">
+                  <Icon name="search" size={14} />
                 </span>
                 <input
                   className="input"
-                  style={{ flex: 1 }}
                   aria-label="Search skills by name or description"
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search by name or description…"
                 />
-              </div>
+              </span>
 
               {filtered.length === 0 ? (
                 <EmptyState
@@ -397,7 +396,7 @@ export function SkillsPage() {
                             <StatusPill tone={sourceTone(s.source)}>{s.source}</StatusPill>
                             <span className="spacer" />
                           </span>
-                          <span className="muted" style={{ fontSize: 12 }}>
+                          <span className="muted clamp-2" style={{ fontSize: 12 }}>
                             {s.description}
                           </span>
                         </button>

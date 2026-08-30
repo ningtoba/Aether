@@ -58,6 +58,9 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
   const [wsState, setWsState] = useState<'connecting' | 'open' | 'closed'>('connecting');
   const [viewingDisk, setViewingDisk] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Informational channel (e.g. a resume `warning` on the 201): same corner
+  // card as the error toast but info tone — never role="alert", never red.
+  const [notice, setNotice] = useState<string | null>(null);
   const [activeStats, setActiveStats] = useState<ChatStats | null>(null);
   const [activeModel, setActiveModel] = useState<string>('');
   const [creating, setCreating] = useState(false);
@@ -170,6 +173,36 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
       setViewingDisk(null);
       itemsReqRef.current++; // discard any in-flight transcript of the old view
       setItems([]);
+      refresh();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  // Resume a persisted omp session: same open path as a plain create, with
+  // the disk row's own cwd and the model currently picked in this panel.
+  // A `warning` on the 201 is informational (engine resumed with a caveat),
+  // so it goes to the notice channel, not the error one.
+  const resumeDiskSession = async (info: DiskSessionInfo) => {
+    if (creating || !model) return;
+    const slash = model.indexOf('/');
+    const provider = model.slice(0, slash);
+    const modelId = model.slice(slash + 1);
+    setCreating(true);
+    try {
+      const { session, warning } = await createSession(
+        { provider, modelId },
+        info.cwd,
+        info.path,
+      );
+      setCurrent(session.id);
+      loadActive(session.id);
+      setViewingDisk(null);
+      itemsReqRef.current++; // discard any in-flight transcript of the old view
+      setItems([]);
+      if (warning) setNotice(warning);
       refresh();
     } catch (e) {
       setError((e as Error).message);
@@ -334,7 +367,7 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
                       fontSize: 12,
                     }}
                   >
-                    {s.id}
+                    {s.id.slice(0, 8)}
                   </span>
                   <span className="muted" style={{ fontSize: 11 }}>
                     {fmtRelative(s.createdAt)}
@@ -372,65 +405,74 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
           >
             Persisted (omp on disk)
           </div>
-          <div style={{ position: 'relative', marginBottom: 'var(--s-2)' }}>
-            <span
-              style={{
-                position: 'absolute',
-                left: 8,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--text-faint)',
-                display: 'inline-flex',
-                pointerEvents: 'none',
-              }}
-            >
-              <Icon name="search" size={13} />
+          <span className="search" style={{ marginBottom: 'var(--s-2)' }}>
+            <span className="search-icon">
+              <Icon name="search" size={14} />
             </span>
             <input
               className="input"
-              style={{ paddingLeft: 28 }}
               placeholder="Search persisted…"
               aria-label="Search persisted sessions"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
-          </div>
+          </span>
           <div className="stack">
             {filteredDisk.map((s) => (
-              <button
-                key={s.path}
-                className="selectable-row"
-                style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}
-                aria-pressed={viewingDisk === s.path}
-                onClick={() => openDiskSession(s)}
-                title={s.path}
-              >
-                <span
+              <div key={s.path} className="row" style={{ gap: 'var(--s-2)' }}>
+                <button
+                  className="selectable-row"
                   style={{
-                    maxWidth: '100%',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontWeight: 600,
-                    fontSize: 12.5,
+                    flex: 1,
+                    minWidth: 0,
+                    flexDirection: 'column',
+                    alignItems: 'flex-start',
+                    gap: 2,
                   }}
+                  aria-pressed={viewingDisk === s.path}
+                  onClick={() => openDiskSession(s)}
+                  title={s.path}
                 >
-                  {s.displayName || s.name || s.id}
-                </span>
-                <span
-                  className="muted mono"
-                  style={{
-                    maxWidth: '100%',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    fontSize: 11,
-                  }}
+                  <span
+                    style={{
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontWeight: 600,
+                      fontSize: 12.5,
+                    }}
+                  >
+                    {s.displayName || s.name || s.id}
+                  </span>
+                  <span
+                    className="muted mono"
+                    style={{
+                      maxWidth: '100%',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      fontSize: 11,
+                    }}
+                  >
+                    {s.cwd}
+                    {s.modified ? ` · ${fmtRelative(s.modified)}` : ''}
+                  </span>
+                </button>
+                <button
+                  className="btn sm"
+                  onClick={() => void resumeDiskSession(s)}
+                  disabled={creating || !model}
+                  title={
+                    model
+                      ? `Resume as a new live session (${model})`
+                      : 'Select a model first — resume needs one'
+                  }
+                  aria-label={`Resume persisted session ${s.displayName || s.name || s.id}`}
                 >
-                  {s.cwd}
-                  {s.modified ? ` · ${fmtRelative(s.modified)}` : ''}
-                </span>
-              </button>
+                  <Icon name="play" size={13} /> Resume
+                </button>
+              </div>
             ))}
             {filteredDisk.length === 0 &&
               (diskSessions.length === 0 ? (
@@ -531,6 +573,24 @@ export function SessionsPage({ initialSessionId }: { initialSessionId?: string }
         >
           <span className="muted">{error}</span>
           <button className="btn" style={{ marginLeft: 8 }} onClick={() => setError(null)}>
+            dismiss
+          </button>
+        </div>
+      )}
+      {notice && (
+        <div
+          className="card"
+          role="status"
+          style={{
+            position: 'fixed',
+            right: 16,
+            bottom: error ? 84 : 16,
+            zIndex: 10,
+            borderColor: 'var(--info)',
+          }}
+        >
+          <span className="muted">{notice}</span>
+          <button className="btn" style={{ marginLeft: 8 }} onClick={() => setNotice(null)}>
             dismiss
           </button>
         </div>

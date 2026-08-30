@@ -206,13 +206,16 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
               label="Sessions"
               icon="sessions"
               tone="info"
-              value={loading.sessions ? <Skeleton rows={1} /> : agg.sessions}
+              /* The persisted count is the informative total; live count moves
+               * to the hint. While disk data is absent (null) the live number
+               * stands alone — never a fabricated total. */
+              value={loading.sessions ? <Skeleton rows={1} /> : (agg.diskSessions ?? agg.sessions)}
               hint={
                 loading.sessions
                   ? 'loading…'
                   : agg.diskSessions === null
                     ? 'live sessions'
-                    : `live · ${agg.diskSessions} persisted on disk`
+                    : `live right now: ${agg.sessions} live`
               }
             />
           </button>
@@ -275,8 +278,10 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
               <Skeleton rows={2} />
             ) : (
               <div className="stack">
-                <div className="status-line">
-                  <span className="muted">runtime {facade?.runtime}</span>
+                <div className="row">
+                  <span className="muted mono" style={{ fontSize: 12 }}>
+                    runtime {facade?.runtime}
+                  </span>
                 </div>
                 {facade?.capabilities && facade.capabilities.length > 0 && (
                   <div className="row" style={{ flexWrap: 'wrap' }}>
@@ -328,8 +333,11 @@ export function DashboardPage({ onNavigate }: { onNavigate: (p: PageId) => void 
               )}
               <div className="row">
                 <span className="muted" style={{ fontSize: 12 }}>
-                  realtime ws://…:{health.realtime?.port} · providers{' '}
-                  {health.providers?.configured} configured / {health.providers?.healthy} healthy
+                  {health.realtime?.port
+                    ? `realtime ws://${location.hostname}:${health.realtime.port}`
+                    : 'realtime endpoint unknown'}{' '}
+                  · legacy registry: {health.providers?.configured} configured /{' '}
+                  {health.providers?.healthy} healthy
                 </span>
               </div>
             </div>

@@ -13,7 +13,7 @@ The backend exposes a JSON REST API (`/api/*`) and a realtime WebSocket stream. 
 - [Sessions](#sessions)
 - [Loops](#loops)
 - [Skills](#skills)
-- [Agents & Executions](#agents--executions)
+- [Agents](#agents)
 - [Providers](#providers)
 - [Realtime WebSocket](#realtime-websocket)
 - [Authentication & RBAC](#authentication--rbac)
@@ -139,7 +139,7 @@ Each summary includes a `stats` field (message/token totals + context usage) for
 
 ### `POST /api/sessions`
 
-Create a session. Body: `{ "model": { "provider": "…", "modelId": "…" }, "cwd"?: "…" }` → `201 { session }`.
+Create a session. Body: `{ "model": { "provider": "…", "modelId": "…" }, "cwd"?: "…", "resumePath"?: "…" }` → `201 { session, warning? }`. `session.sessionFile` is the durable omp journal path (present once the first assistant message materializes the file). `resumePath` — a `path` from `GET /api/omp/sessions` — restores that transcript's context into the new live session; a path outside omp's session roots, or one that cannot be opened, answers `404 { "error": "session not found" }` with no filesystem detail. `warning` is set on resume when the journal's model could not be restored.
 
 ### `GET /api/sessions/:id`
 
@@ -292,7 +292,9 @@ sources), with full bodies — a superset of `GET /api/skills`.
 ### Persisted sessions
 
 - `GET /api/omp/sessions` → persisted omp sessions on disk across projects
-  (id, path, cwd, display name, modified).
+  (id, path, cwd, display name, modified). Engine GUI sessions appear here once
+  their journal materializes — and each row's `path` is exactly what
+  `POST /api/sessions`' `resumePath` takes.
 - `GET /api/omp/sessions/read?path=<url-encoded jsonl path>` → a parsed transcript:
   `{ ok: true, transcript: { id, path, name, messages: [{ role, text, timestamp }] } }`.
   The path is confined server-side: only regular `.jsonl` files resolving inside
@@ -301,17 +303,14 @@ sources), with full bodies — a superset of `GET /api/skills`.
 
 ---
 
-## Agents & Executions
+## Agents
 
 ### `GET|POST /api/agents`, `GET|PUT|DELETE /api/agents/:id`
 
-Agent-registry CRUD (records + config). Body for create: `{ "name": "…", "config"?: {…} }`.
+Agent-registry CRUD (records + config). Body for create: `{ "name": "…", "config"?: {…} }`
+(name must be a non-empty string ≤ 200 chars; the in-memory registry is capped at 500 records → 503).
 
-### `GET|POST /api/executions`, `GET /api/executions/:id`, `POST /api/executions/:id/cancel`
-
-Execution-run tracking (in-memory, capped at 500 records → 503). These records
-are a **simulation** (no engine wiring yet): every response carries
-`"simulated": true` and status transitions are timer-driven.
+Wrong-method requests to a registered path answer `405` with an `Allow` header; unknown API paths answer the uniform `404 { "error": "Not found" }`.
 
 ---
 

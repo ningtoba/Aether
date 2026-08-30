@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AetherServer } from './server.js';
+import type { EngineWiring } from './server.js';
+import { LoopManager } from './engine/loop-manager.js';
+import { WorkspacesService } from './engine/workspaces.js';
+import type { EngineService, SkillsService, OmpFacade } from './engine/index.js';
+import * as store from './store.js';
 
 describe('AetherServer', () => {
   let server: AetherServer;
@@ -170,14 +175,6 @@ describe('AetherServer', () => {
       expect(router.match('DELETE', '/api/providers/test')).not.toBeNull();
     });
 
-    it('should register all execution routes', () => {
-      const router = (server as any).router;
-      expect(router.match('GET', '/api/executions')).not.toBeNull();
-      expect(router.match('POST', '/api/executions')).not.toBeNull();
-      expect(router.match('GET', '/api/executions/test-id')).not.toBeNull();
-      expect(router.match('POST', '/api/executions/test-id/cancel')).not.toBeNull();
-    });
-
     it('should return 404 for unknown routes', async () => {
       const router = (server as any).router;
       expect(router.match('GET', '/api/nonexistent')).toBeNull();
@@ -262,7 +259,7 @@ describe('RBAC route table totality (D1)', () => {
     for (const p of ['/api/omp/sessions', '/api/omp/sessions/read']) {
       expect(permissionFor('GET', p)).toEqual({ resource: 'sessions:*', action: 'read' });
     }
-    // The pre-existing six mappings stay byte-identical:
+    // The pre-existing mappings stay byte-identical:
     expect(permissionFor('GET', '/api/agents')).toEqual({ resource: 'agents:*', action: 'read' });
     expect(permissionFor('POST', '/api/agents')).toEqual({ resource: 'agents:*', action: 'write' });
     expect(permissionFor('GET', '/api/providers')).toEqual({
@@ -272,14 +269,6 @@ describe('RBAC route table totality (D1)', () => {
     expect(permissionFor('POST', '/api/providers')).toEqual({
       resource: 'providers:config',
       action: 'write',
-    });
-    expect(permissionFor('GET', '/api/executions')).toEqual({
-      resource: 'agents:*',
-      action: 'read',
-    });
-    expect(permissionFor('POST', '/api/executions/e1/cancel')).toEqual({
-      resource: 'agents:*',
-      action: 'execute',
     });
     expect(permissionFor('GET', '/api/sessions')).toEqual({ resource: 'agents:*', action: 'read' });
     expect(permissionFor('POST', '/api/sessions/s1/prompt')).toEqual({
@@ -325,5 +314,282 @@ describe('RBAC route table totality (D1)', () => {
       resource: 'system:*',
       action: 'write',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 405 Method Not Allowed (path exists, method does not) + uniform 404 shape
+// ---------------------------------------------------------------------------
+describe('method mismatch (405) and not-found (404) shape', () => {
+  let server: AetherServer;
+  beforeEach(() => {
+    server = new AetherServer({ port: 0, host: '127.0.0.1' });
+  });
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  it('answers 405 with an Allow header listing the registered methods', async () => {
+    await server.start();
+    // /api/agents is registered GET+POST only — DELETE must 405, never 404.
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/agents`, {
+      method: 'DELETE',
+    });
+    expect(res.status).toBe(405);
+    const methods = (res.headers.get('allow') ?? '')
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean);
+    expect(methods).toContain('GET');
+    expect(methods).toContain('POST');
+    expect(methods).not.toContain('DELETE');
+    const body = (await res.json()) as { error: string };
+    expect(body.error).toBe('Method not allowed');
+  });
+
+  it('param routes 405 too: POST /api/agents/:id is not registered', async () => {
+    await server.start();
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/agents/x1`, {
+      method: 'POST',
+    });
+    expect(res.status).toBe(405);
+    expect(res.headers.get('allow')).toContain('PUT');
+  });
+
+  it('unknown path keeps the uniform 404 body with no path/method echo', async () => {
+    await server.start();
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/api/nope?q=1`);
+    expect(res.status).toBe(404);
+    // Strict shape pin: pre-fix the body reflected `path` and `method` back.
+    expect(await res.json()).toEqual({ error: 'Not found' });
+  });
+
+  it('sets bounded request/headers timeouts on the HTTP server', async () => {
+    await server.start();
+    // Internal peek: the http.Server is a private field, no runtime accessor
+    // exists (same convention as the `corsOrigins` peek in the CORS block).
+    const view = server as unknown as {
+      server: { requestTimeout: number; headersTimeout: number };
+    };
+    expect(view.server.requestTimeout).toBe(30_000);
+    expect(view.server.headersTimeout).toBe(10_000);
+    // Node clamps headersTimeout above requestTimeout — the pair must hold.
+    expect(view.server.requestTimeout).toBeGreaterThanOrEqual(view.server.headersTimeout);
+  });
+
+  it('adds Vary: Origin to DENIED cross-origin responses too', async () => {
+    await server.start();
+    const res = await fetch(`http://127.0.0.1:${server.getPort()}/health`, {
+      headers: { Origin: 'https://evil.example' },
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('access-control-allow-origin')).toBeNull();
+    // Cache-poisoning guard: the deny decision varies by Origin, so caches
+    // must not reuse this ACAO-less response for an allowed Origin.
+    expect(res.headers.get('vary')).toContain('Origin');
+  });
+
+  it('logs one [http] access line per request: method, pathname, status, ms', async () => {
+    await server.start();
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...args: unknown[]) => {
+      logs.push(args.map(String).join(' '));
+    });
+    try {
+      await fetch(`http://127.0.0.1:${server.getPort()}/health?token=secret123`);
+      // Real delay by necessity: the server's 'finish' event fires on Node's
+      // real socket-flush path — fake timers cannot drive the http layer.
+      await new Promise((r) => setTimeout(r, 20));
+    } finally {
+      spy.mockRestore();
+    }
+    const line = logs.find((l) => l.includes('[http]'));
+    expect(line).toBeDefined();
+    expect(line).toContain('GET /health ');
+    expect(line).toContain(' 200 ');
+    expect(line).toContain('ms');
+    // The query string (possible credential) must never be logged.
+    expect(line).not.toContain('token');
+    expect(line).not.toContain('secret123');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/agents hardening: body shape, name validation, registry cap
+// ---------------------------------------------------------------------------
+describe('POST /api/agents validation', () => {
+  let server: AetherServer;
+  beforeEach(() => {
+    server = new AetherServer({ port: 0, host: '127.0.0.1' });
+  });
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  async function postAgent(body: string): Promise<Response> {
+    return fetch(`http://127.0.0.1:${server.getPort()}/api/agents`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body,
+    });
+  }
+
+  it('rejects non-object JSON bodies with 400 (was a 500 path)', async () => {
+    await server.start();
+    for (const body of ['null', '[1,2]', '"just-a-string"', '42']) {
+      const res = await postAgent(body);
+      expect(res.status, body).toBe(400);
+    }
+  });
+
+  it('rejects non-string, empty and oversized names with 400', async () => {
+    await server.start();
+    for (const body of ['{"name":{"nested":true}}', '{"name":42}', '{"name":""}']) {
+      const res = await postAgent(body);
+      expect(res.status, body).toBe(400);
+    }
+    const long = await postAgent(JSON.stringify({ name: 'x'.repeat(201) }));
+    expect(long.status).toBe(400);
+    const err = (await long.json()) as { error: string };
+    expect(err.error).toBe('Agent name is required');
+  });
+
+  it('caps the registry at 500: overflow answers 503 without mutating', async () => {
+    await server.start();
+    // Seed close to the cap in-process (same module the route reads).
+    const seeded: store.AgentId[] = [];
+    for (let i = store.listAgents().length; i < 499; i++) {
+      seeded.push(store.createAgent({ name: `seed-${i}` }).id);
+    }
+    try {
+      const ok = await postAgent(JSON.stringify({ name: 'fills-to-cap' }));
+      expect(ok.status).toBe(201);
+      const overflow = await postAgent(JSON.stringify({ name: 'one-too-many' }));
+      expect(overflow.status).toBe(503);
+      const err = (await overflow.json()) as { error: string };
+      expect(err.error).toMatch(/registry full \(500\)/);
+      // The rejected POST left the registry untouched at exactly the cap.
+      expect(store.listAgents()).toHaveLength(500);
+    } finally {
+      for (const id of seeded) store.deleteAgent(id);
+      for (const a of store.listAgents()) store.deleteAgent(a.id);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PUT /api/omp/settings schema gate (closes arbitrary-key writes into the
+// user's live ~/.omp/agent config). Facade is a structural test double,
+// same seam style as routes/facade.test.ts.
+// ---------------------------------------------------------------------------
+describe('PUT /api/omp/settings schema gate', () => {
+  const unusedEngine = {
+    async createSession() {
+      throw new Error('not used by these routes');
+    },
+  } as unknown as EngineService; // structural test double
+
+  const unusedSkills = { get: async () => null } as unknown as SkillsService; // test seam
+
+  let setCalls: Array<{ path: string; value: unknown }> = [];
+  let schemaOk = true;
+
+  /** Schema double: one def per primitive type + a complex-typed one. */
+  function facadeStub(): OmpFacade {
+    return {
+      async settingsSchema() {
+        if (!schemaOk) {
+          return { ok: false as const, error: 'settings schema unavailable in this omp version' };
+        }
+        return {
+          ok: true as const,
+          schema: {
+            tabs: [{ id: 'ui', label: 'UI' }],
+            groups: {},
+            settings: [
+              { path: 'ui.theme', type: 'string' },
+              { path: 'tools.bash.timeoutSecs', type: 'number' },
+              { path: 'experimental.foo', type: 'boolean' },
+              { path: 'agents.modelRoles', type: 'object' },
+            ],
+          },
+        };
+      },
+      async settingsSet(path: string, value: unknown) {
+        setCalls.push({ path, value });
+        return { ok: true as const };
+      },
+    } as unknown as OmpFacade; // structural test double
+  }
+
+  let server: AetherServer;
+  beforeEach(async () => {
+    setCalls = [];
+    schemaOk = true;
+    const wiring: EngineWiring = {
+      engine: unusedEngine,
+      loops: new LoopManager(unusedEngine, unusedSkills),
+      skills: unusedSkills,
+      facade: facadeStub(),
+    };
+    server = new AetherServer({
+      port: 0,
+      host: '127.0.0.1',
+      engine: wiring,
+      workspaces: new WorkspacesService(),
+    });
+    await server.start();
+  });
+  afterEach(async () => {
+    await server.stop();
+  });
+
+  async function putSettings(body: unknown): Promise<Response> {
+    return fetch(`http://127.0.0.1:${server.getPort()}/api/omp/settings`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('rejects a path absent from the SDK schema with 400 and NEVER writes', async () => {
+    // Discriminator: pre-fix any key landed verbatim in ~/.omp/agent config.
+    const res = await putSettings({ path: 'arbitrary.attacker.key', value: 'x' });
+    expect(res.status).toBe(400);
+    const err = (await res.json()) as { error: string };
+    expect(err.error).toBe('unknown settings path');
+    expect(setCalls).toEqual([]);
+  });
+
+  it('rejects obvious primitive type mismatches against the schema type', async () => {
+    const num = await putSettings({ path: 'tools.bash.timeoutSecs', value: 'soon' });
+    expect(num.status).toBe(400);
+    const err = (await num.json()) as { error: string };
+    expect(err.error).toBe('settings.value must be number');
+    const bool = await putSettings({ path: 'experimental.foo', value: 'yes' });
+    expect(bool.status).toBe(400);
+    expect(setCalls).toEqual([]);
+  });
+
+  it('forwards schema-known paths with matching (or complex) values to the facade', async () => {
+    const ok = await putSettings({ path: 'ui.theme', value: 'dark' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true, path: 'ui.theme' });
+    // Complex types stay the SDK's deeper concern.
+    const complex = await putSettings({ path: 'agents.modelRoles', value: { any: true } });
+    expect(complex.status).toBe(200);
+    expect(setCalls).toEqual([
+      { path: 'ui.theme', value: 'dark' },
+      { path: 'agents.modelRoles', value: { any: true } },
+    ]);
+  });
+
+  it('degrades to 501 when the schema is unavailable (SDK down) — never a blind write', async () => {
+    schemaOk = false;
+    const res = await putSettings({ path: 'ui.theme', value: 'dark' });
+    expect(res.status).toBe(501);
+    const err = (await res.json()) as { error: string };
+    expect(err.error).toMatch(/unavailable/i);
+    expect(setCalls).toEqual([]);
   });
 });
